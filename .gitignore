@@ -9,3 +9,4 @@ build/
 assets/audio/*.wav
 assets/audio/*.mp3
 models/
+assets/audio/*.wav
