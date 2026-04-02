@@ -13,9 +13,13 @@ from dotenv import load_dotenv
 # Paths
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT   = Path(__file__).parent.resolve()
-ASSETS_DIR     = PROJECT_ROOT / "assets"
+PROJECT_ROOT    = Path(__file__).parent.resolve()
+ASSETS_DIR      = PROJECT_ROOT / "assets"
 AUDIO_CACHE_DIR = ASSETS_DIR / "audio"
+MODELS_DIR      = ASSETS_DIR / "models"
+
+# Default Vosk model path — override with VOSK_MODEL_PATH in .env if needed.
+VOSK_MODEL_PATH_DEFAULT = MODELS_DIR / "vosk-model-small-en-us-0.15"
 
 # ---------------------------------------------------------------------------
 # Load .env
@@ -166,7 +170,7 @@ WAKE_WORD_INFERENCE_RATE  = 16     # process every Nth audio chunk
 # Speech — transcription (Vosk)
 # ---------------------------------------------------------------------------
 
-VOSK_MODEL_PATH  = _optional("VOSK_MODEL_PATH")
+VOSK_MODEL_PATH  = Path(_optional("VOSK_MODEL_PATH") or VOSK_MODEL_PATH_DEFAULT)
 VOSK_LOG_LEVEL   = -1   # -1 suppresses Vosk's verbose C-level logging
 
 # ---------------------------------------------------------------------------
@@ -176,6 +180,16 @@ VOSK_LOG_LEVEL   = -1   # -1 suppresses Vosk's verbose C-level logging
 ELEVENLABS_MODEL_ID   = "eleven_turbo_v2"   # lowest-latency streaming model
 ELEVENLABS_STABILITY  = 0.45
 ELEVENLABS_SIMILARITY = 0.80
+
+# ---------------------------------------------------------------------------
+# Command parser
+# ---------------------------------------------------------------------------
+
+# Minimum difflib SequenceMatcher ratio (0–1) for a fuzzy phrase match to be
+# accepted. 0.72 catches one-word transcription errors ("louder" → "loudr")
+# while rejecting accidental matches between short unrelated phrases.
+# Lower = more permissive; raise toward 0.85 if you get false positives.
+COMMAND_FUZZY_THRESHOLD = 0.72
 
 # ---------------------------------------------------------------------------
 # State machine
