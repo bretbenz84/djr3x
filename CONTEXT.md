@@ -1,0 +1,56 @@
+# DJ-R3X Controller Project
+
+## Hardware
+- Raspberry Pi 4 (username: bbenziger, project path: /home/bbenziger/djr3x)
+- Pololu Maestro Mini — servo control via serial
+- Arduino Nanos — LED control via serial commands
+- Custom mouth PCB — lights up with speech audio level
+- USB microphone (bringing from work tomorrow)
+- Speakers connected via 3.5mm jack through stereo amp
+- Two audio sources mixed via passive resistor mixer (speech + music)
+
+## Environment
+- OS: Debian GNU/Linux 13 (Trixie)
+- Kernel: 6.12.75 aarch64
+- Python: 3.13.5
+- Virtual environment: /home/bbenziger/djr3x/venv
+- Audio system: PipeWire 1.4.2
+- API keys in .env (excluded from git)
+- Dependencies in requirements.txt
+
+## Architecture Decisions
+- Vosk for local speech transcription (fast, no API call)
+- Exact phrase matching for local commands (no API needed)
+- ChatGPT 4o-mini API fallback for unmatched/open ended input
+- Streaming ChatGPT → ElevenLabs to reduce latency
+- ElevenLabs basic voice clone based on Star Tours Rex audio
+- Mouth LED brightness driven by speech audio level in software
+- Pi controls all servos via serial to Maestro (no onboard scripts)
+- Nanos act as dumb executors, Pi sends serial LED commands
+- Two audio channels mixed passively — speech and music separate
+
+## State Machine
+- IDLE: slow breathing LED pulse, listening for wake word
+- ACTIVE: full interactivity, LLM responses, reactive movement
+- SHUTDOWN: triggered by voice command or physical button
+
+## Servo Behaviors
+- Background thread: random arm/hand movements continuously
+- Speech thread: head/visor movement overlaid during speech
+- Emotion states bias servo position ranges:
+  - Excitement: head up, faster movement, higher visor
+  - Sad: head down, slower movement, lower visor
+  - Neutral: centered ranges
+
+## Audio Pipeline
+- Wake word detected (already trained with OpenWakeWord)
+- Short audio captured
+- Vosk transcribes locally
+- Command parser checks against predefined command list
+- If matched: execute locally, play cached response audio
+- If no match: stream to ChatGPT → ElevenLabs → speakers
+- Mouth PCB brightness driven by speech audio buffer level
+
+## LED System
+- Arduino Nanos receive simple serial commands from Pi
+- Pi decides all logic, Nano
