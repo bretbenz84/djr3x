@@ -87,3 +87,18 @@ try/finally around the chunk loop — guarantees end_speech() is called even if 
 Cache only on clean exit — the _write_wav_cache call is after the finally block, so a mid-stream error leaves no partial .wav file that would be replayed on the next call.
 
 wait_for_speech(timeout=30.0) in the finally — speak() blocks until audio drains from the player queue, not just until the last HTTP chunk arrives. A very long response at slow network could have significant audio still buffered when the last byte comes down.
+
+
+A few decisions worth calling out:
+
+Generator + finally for history — the finally block runs when the generator is fully consumed or when it's closed/GC'd mid-stream (e.g. stop_speech interrupts ElevenLabs). Either way the partial response gets recorded. The user message is pre-appended before the API call; on any error it's rolled back with pop() so history stays coherent.
+
+Error rollback symmetry — every exception path pops the user message before re-raising. But finally still runs after the except block, so if accumulated has content from a partial stream before the error, that partial assistant reply gets recorded too. This is intentional — partial context is better than no context.
+
+max_tokens=120 — enforces the "2-3 sentences max" rule at the API level so the system prompt instruction doesn't have to fight model drift. At ~5 tokens/word, 120 tokens is roughly 3 punchy Rex sentences.
+
+temperature=1.05 — slightly above 1.0 gives the character variance and personality without going fully off the rails. Rex should feel unpredictable but coherent.
+
+History trim rounds to even — excess += excess % 2 ensures we never slice history at an odd index, which would leave a lone assistant message at the front with no corresponding user message. The OpenAI API would accept it but it would confuse the model's turn-taking.
+
+[_SYSTEM_MESSAGE] + self._history — the system prompt is prepended fresh on every call and never stored in _history. This means clear_history() truly resets context without risking the system prompt being included twice.
