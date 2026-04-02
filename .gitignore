@@ -3,3 +3,9 @@ venv/
 __pycache__/
 *.pyc
 .DS_Store
+*.egg-info/
+dist/
+build/
+assets/audio/*.wav
+assets/audio/*.mp3
+models/
