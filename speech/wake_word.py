@@ -62,6 +62,12 @@ class WakeWordDetector:
         self._stop_event = threading.Event()
         self._suppress = threading.Event()   # set → skip callbacks (Rex is speaking)
         self._last_detection: float = 0.0   # monotonic timestamp of last trigger
+        # Pause/resume: _pause_event tells the audio thread to close the stream;
+        # _idle_event is set by the audio thread once the stream is closed so
+        # pause() can block until the mic is actually free.
+        self._pause_event = threading.Event()
+        self._idle_event = threading.Event()
+        self._idle_event.set()   # starts idle (stream not yet open)
 
     # ------------------------------------------------------------------
     # Setup
@@ -147,12 +153,37 @@ class WakeWordDetector:
     def stop(self) -> None:
         """Signal the detection thread to exit and wait for it to finish."""
         self._stop_event.set()
+        self._pause_event.clear()   # unblock the thread if it's waiting on pause
         if self._thread is not None:
             self._thread.join(timeout=3.0)
             if self._thread.is_alive():
                 log.warning("WakeWordDetector thread did not stop cleanly within 3 s")
             self._thread = None
         log.info("Wake word detection stopped.")
+
+    def pause(self) -> None:
+        """Close the mic stream without stopping the detector thread.
+
+        Blocks until the audio thread confirms the stream is closed (at most
+        one 80 ms read chunk).  Safe to call from any thread.
+        """
+        if self._thread is None or not self._thread.is_alive():
+            return
+        self._idle_event.clear()
+        self._pause_event.set()
+        self._idle_event.wait(timeout=1.0)
+        log.debug("Wake word detection paused (mic released)")
+
+    def resume(self) -> None:
+        """Reopen the mic stream and resume detection.
+
+        The audio thread reopens the InputStream on its next loop iteration.
+        Safe to call from any thread.
+        """
+        if self._thread is None or not self._thread.is_alive():
+            return
+        self._pause_event.clear()
+        log.debug("Wake word detection resumed")
 
     # ------------------------------------------------------------------
     # Echo suppression
@@ -176,56 +207,73 @@ class WakeWordDetector:
     # ------------------------------------------------------------------
 
     def _run(self) -> None:
-        """Background thread: capture mic → predict → callback."""
-        try:
-            with sd.InputStream(
-                samplerate=config.AUDIO_SAMPLE_RATE,
-                channels=config.AUDIO_CHANNELS,
-                dtype="int16",
-                device=config.AUDIO_INPUT_DEVICE,
-                blocksize=config.WAKE_WORD_CHUNK_SIZE,
-            ) as stream:
-                log.debug("Wake word audio stream open (chunk=%d samples, %.0f ms)",
-                          config.WAKE_WORD_CHUNK_SIZE,
-                          config.WAKE_WORD_CHUNK_SIZE / config.AUDIO_SAMPLE_RATE * 1000)
+        """Background thread: capture mic → predict → callback.
 
-                while not self._stop_event.is_set():
-                    frames, overflowed = stream.read(config.WAKE_WORD_CHUNK_SIZE)
-                    if overflowed:
-                        log.debug("Wake word stream: buffer overflow")
+        The outer loop lets pause()/resume() close and reopen the InputStream
+        without killing this thread — the mic is released while the transcriber
+        holds it and reclaimed once transcription is done.
+        """
+        while not self._stop_event.is_set():
+            # Paused: stream is (or should be) closed — signal idle and wait.
+            if self._pause_event.is_set():
+                self._idle_event.set()
+                time.sleep(0.02)
+                continue
 
-                    # flatten to 1-D mono int16 (OpenWakeWord requirement)
-                    audio = frames[:, 0]
+            try:
+                self._idle_event.clear()
+                with sd.InputStream(
+                    samplerate=config.AUDIO_SAMPLE_RATE,
+                    channels=config.AUDIO_CHANNELS,
+                    dtype="int16",
+                    device=config.AUDIO_INPUT_DEVICE,
+                    blocksize=config.WAKE_WORD_CHUNK_SIZE,
+                ) as stream:
+                    log.debug("Wake word audio stream open (chunk=%d samples, %.0f ms)",
+                              config.WAKE_WORD_CHUNK_SIZE,
+                              config.WAKE_WORD_CHUNK_SIZE / config.AUDIO_SAMPLE_RATE * 1000)
 
-                    scores: dict[str, float] = self._model.predict(audio)
+                    while not self._stop_event.is_set() and not self._pause_event.is_set():
+                        frames, overflowed = stream.read(config.WAKE_WORD_CHUNK_SIZE)
+                        if overflowed:
+                            log.debug("Wake word stream: buffer overflow")
 
-                    now = time.monotonic()
+                        # flatten to 1-D mono int16 (OpenWakeWord requirement)
+                        audio = frames[:, 0]
 
-                    # cooldown guard
-                    if now - self._last_detection < config.WAKE_WORD_COOLDOWN:
-                        continue
+                        scores: dict[str, float] = self._model.predict(audio)
 
-                    # echo suppression guard
-                    if self._suppress.is_set():
-                        continue
+                        now = time.monotonic()
 
-                    # check all loaded models; fire on first threshold cross
-                    for model_name, score in scores.items():
-                        if score >= config.WAKE_WORD_THRESHOLD:
-                            log.info(
-                                "Wake word detected: %r  score=%.3f  (threshold=%.2f)",
-                                model_name, score, config.WAKE_WORD_THRESHOLD,
-                            )
-                            self._last_detection = now
-                            try:
-                                self._callback(model_name)
-                            except Exception:
-                                log.exception(
-                                    "Exception in wake word callback for %r", model_name
+                        # cooldown guard
+                        if now - self._last_detection < config.WAKE_WORD_COOLDOWN:
+                            continue
+
+                        # echo suppression guard
+                        if self._suppress.is_set():
+                            continue
+
+                        # check all loaded models; fire on first threshold cross
+                        for model_name, score in scores.items():
+                            if score >= config.WAKE_WORD_THRESHOLD:
+                                log.info(
+                                    "Wake word detected: %r  score=%.3f  (threshold=%.2f)",
+                                    model_name, score, config.WAKE_WORD_THRESHOLD,
                                 )
-                            break   # one callback per chunk maximum
+                                self._last_detection = now
+                                try:
+                                    self._callback(model_name)
+                                except Exception:
+                                    log.exception(
+                                        "Exception in wake word callback for %r", model_name
+                                    )
+                                break   # one callback per chunk maximum
 
-        except sd.PortAudioError:
-            log.exception("Wake word: microphone error — detection thread exiting")
-        except Exception:
-            log.exception("Wake word: unexpected error in detection thread")
+            except sd.PortAudioError:
+                log.exception("Wake word: microphone error — detection thread exiting")
+                break
+            except Exception:
+                log.exception("Wake word: unexpected error in detection thread")
+                break
+            finally:
+                self._idle_event.set()   # stream is closed; pause() may unblock

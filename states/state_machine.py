@@ -282,11 +282,16 @@ class StateMachine:
             self._leds.set_head_effect(config.LED_CMD_LISTENING)
 
             # --- Transcribe (blocks until silence or MAX_RECORD_SECONDS) ---
+            # Pause wake word first: both share the same mic device and
+            # opening two InputStreams on it yields PortAudio error -9985.
+            self._wake_word.pause()
             try:
                 text = self._transcriber.transcribe()
             except Exception:
                 log.exception("Transcription error — skipping utterance")
                 continue
+            finally:
+                self._wake_word.resume()
 
             if not text:
                 log.debug("Empty transcription — waiting again")
