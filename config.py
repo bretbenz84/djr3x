@@ -162,9 +162,22 @@ MOUTH_LED_GAIN      = 3.0    # multiplier applied to normalised RMS before
 # Speech — wake word (OpenWakeWord)
 # ---------------------------------------------------------------------------
 
-WAKE_WORD_MODEL_PATH      = _optional("WAKE_WORD_MODEL_PATH")
-WAKE_WORD_THRESHOLD       = 0.6    # detection confidence threshold (0–1)
-WAKE_WORD_INFERENCE_RATE  = 16     # process every Nth audio chunk
+# Paths to the two .onnx wake word model files.  Override in .env if needed.
+# Put custom-trained models in assets/models/ and point these at them.
+WAKE_WORD_MODEL_1 = Path(
+    _optional("WAKE_WORD_MODEL_1",
+              str(MODELS_DIR / "hey_rex.onnx"))
+)
+WAKE_WORD_MODEL_2 = Path(
+    _optional("WAKE_WORD_MODEL_2",
+              str(MODELS_DIR / "hey_r3x.onnx"))
+)
+
+WAKE_WORD_THRESHOLD = 0.6    # minimum score (0–1) to count as a detection
+WAKE_WORD_COOLDOWN  = 2.0    # seconds to ignore further detections after one fires
+
+# OpenWakeWord requires exactly 1280 samples (80 ms at 16 kHz) per predict() call.
+WAKE_WORD_CHUNK_SIZE = 1280
 
 # ---------------------------------------------------------------------------
 # Speech — transcription (Vosk)
