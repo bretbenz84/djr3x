@@ -46,8 +46,8 @@ import config
 # ---------------------------------------------------------------------------
 
 # ElevenLabs is asked to produce PCM at this rate (see synthesizer.py).
-# Must be a rate supported by the output device; 22050 is universally safe.
-SPEECH_SAMPLE_RATE: int = 22050
+# ReSpeaker Lite USB device only supports 16000 Hz.
+SPEECH_SAMPLE_RATE: int = config.SPEECH_SAMPLE_RATE
 
 # Chunk size (frames) fed from a cached file into the speech queue at once.
 # Larger = fewer queue operations; smaller = more responsive stop().
@@ -221,7 +221,8 @@ class AudioPlayer:
             return
         try:
             result = subprocess.run(
-                ["ffmpeg", "-loglevel", "error", "-i", str(path), "-f", "wav", "pipe:1"],
+                ["ffmpeg", "-loglevel", "error", "-i", str(path),
+                 "-ar", str(config.SPEECH_SAMPLE_RATE), "-f", "wav", "pipe:1"],
                 capture_output=True,
                 check=True,
             )
@@ -245,7 +246,7 @@ class AudioPlayer:
     @property
     def rms(self) -> float:
         """Smoothed, gain-scaled RMS of the speech output. Range 0.0–255.0.
-        Updated on every audio callback (~23 ms at 22050 Hz / 1024 frames).
+        Updated on every audio callback (~64 ms at 16000 Hz / 1024 frames).
         Returns 0.0 when nothing is playing."""
         return self._rms
 
@@ -402,7 +403,8 @@ def _load_audio_file(
         import subprocess
         import io
         result = subprocess.run(
-            ["ffmpeg", "-loglevel", "error", "-i", str(path), "-f", "wav", "pipe:1"],
+            ["ffmpeg", "-loglevel", "error", "-i", str(path),
+             "-ar", str(config.SPEECH_SAMPLE_RATE), "-f", "wav", "pipe:1"],
             capture_output=True,
             check=True,
         )

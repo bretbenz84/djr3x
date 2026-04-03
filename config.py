@@ -135,7 +135,8 @@ SERVO_SAD_SPEED            = 8
 # Audio — recording / wake word
 # ---------------------------------------------------------------------------
 
-AUDIO_SAMPLE_RATE  = 16000   # Hz — required by OpenWakeWord; also used for mic capture
+AUDIO_SAMPLE_RATE   = 16000   # Hz — required by OpenWakeWord; also used for mic capture
+SPEECH_SAMPLE_RATE  = int(_optional("SPEECH_SAMPLE_RATE", "16000"))  # Hz — TTS output; ReSpeaker Lite only supports 16000
 AUDIO_CHANNELS     = 1       # mono mic input
 AUDIO_CHUNK_SIZE   = 1024    # frames per buffer read
 AUDIO_FORMAT       = 8       # pyaudio.paInt16 == 8 (avoids importing pyaudio here)

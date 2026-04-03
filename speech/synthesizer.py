@@ -15,7 +15,7 @@ Two entry points:
     Not cached (full text isn't known in advance).
     Blocks until playback finishes.
 
-Cache format: raw PCM int16 mono 22050 Hz wrapped in a .wav container,
+Cache format: raw PCM int16 mono 16000 Hz wrapped in a .wav container,
 stored in config.AUDIO_CACHE_DIR, keyed by SHA-256 of the text string.
 Cache hits skip the API call entirely and play through player.play_file().
 """
@@ -75,7 +75,7 @@ class Synthesizer:
                 voice_id=config.ELEVENLABS_VOICE_ID,
                 text=text,
                 model_id=config.ELEVENLABS_MODEL_ID,
-                output_format="pcm_22050",
+                output_format="pcm_16000",
                 voice_settings=self._voice_settings,
                 optimize_streaming_latency=4,   # maximum latency reduction
             )
@@ -97,7 +97,7 @@ class Synthesizer:
                 voice_id=config.ELEVENLABS_VOICE_ID,
                 text=text_iter,
                 model_id=config.ELEVENLABS_MODEL_ID,
-                output_format="pcm_22050",
+                output_format="pcm_16000",
                 voice_settings=self._voice_settings,
             )
             self._pipe_to_player(chunks, cache_path=None)
