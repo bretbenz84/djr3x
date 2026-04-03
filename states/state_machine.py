@@ -52,6 +52,7 @@ from commands.parser import parse
 from hardware.leds import LEDController
 from hardware.servos import ServoController
 from llm.chatgpt import ChatGPTClient
+from sequences.animations import AnimationPlayer
 from speech.synthesizer import Synthesizer
 from speech.transcriber import Transcriber
 from speech.wake_word import WakeWordDetector
@@ -105,6 +106,9 @@ class StateMachine:
         # Music library — scanned once at startup
         self._music_tracks: list[Path] = _scan_music()
         self._music_index: int = 0
+
+        # Animation player — shares hardware refs with the rest of the machine
+        self._animations = AnimationPlayer(self._servos, self._leds)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -168,6 +172,37 @@ class StateMachine:
         self._shutdown_event.set()
         self._wake_event.set()   # unblock _run_idle() if it's waiting
 
+    def play_startup_animation(self) -> None:
+        """Play the startup (boot) animation and block until it completes.
+
+        Must be called *before* start() so the servo idle thread is not
+        running yet — startup moves all channels including arms.
+        """
+        log.info("Playing startup animation …")
+        self._animations.play_startup()
+        self._animations.wait(timeout=10.0)
+        log.info("Startup animation complete.")
+
+    def hardware_status(self) -> dict[str, bool | int]:
+        """Return a snapshot of detected hardware and model availability.
+
+        Intended for the startup banner in main.py. Safe to call before
+        start() — no models or threads need to be running.
+        """
+        wake_models = sum(
+            p.exists()
+            for p in (config.WAKE_WORD_MODEL_1, config.WAKE_WORD_MODEL_2)
+        )
+        return {
+            "servos":       self._servos is not None,
+            "chest_leds":   self._leds._chest is not None,
+            "head_leds":    self._leds._head is not None,
+            "transcriber":  self._transcriber.is_available(),
+            "wake_word":    self._wake_word.is_available(),
+            "wake_models":  wake_models,       # int: 0, 1, or 2
+            "music_tracks": len(self._music_tracks),
+        }
+
     # ------------------------------------------------------------------
     # State — IDLE
     # ------------------------------------------------------------------
@@ -217,7 +252,7 @@ class StateMachine:
 
         last_interaction = time.monotonic()
 
-        while self._state == State.ACTIVE:
+        while self._state == State.ACTIVE and not self._shutdown_event.is_set():
             # --- Idle timeout ---
             elapsed = time.monotonic() - last_interaction
             if elapsed >= config.ACTIVE_IDLE_TIMEOUT:
@@ -272,19 +307,23 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def _run_shutdown(self) -> None:
-        """Fade out, home hardware, then halt the OS."""
+        """Play shutdown animation, home hardware, then halt the OS."""
         log.info("→ SHUTDOWN")
 
-        # LEDs off
+        # Stop servo idle thread before the animation so arm channels are free.
+        if self._servos is not None:
+            self._servos.stop()
+
+        # Theatrical power-down sequence (blocking — 2.2 s).
+        self._animations.play_shutdown()
+
+        # Final safe state: all servos home, all LEDs off.
+        if self._servos is not None:
+            self._servos.home()
         self._leds.set_chest_effect(config.LED_CMD_OFF)
         self._leds.set_head_effect(config.LED_CMD_OFF)
 
-        # Servos to neutral home
-        if self._servos is not None:
-            self._servos.stop()    # stop idle-motion thread
-            self._servos.home()
-
-        # Halt — requires passwordless sudo (add to /etc/sudoers on the Pi)
+        # Halt — requires passwordless sudo (add to /etc/sudoers on the Pi).
         log.info("StateMachine: halting OS — sudo shutdown -h now")
         os.system("sudo shutdown -h now")
 
