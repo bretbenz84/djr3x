@@ -198,6 +198,34 @@ class AudioPlayer:
             self._music_thread.join(timeout=2.0)
             self._music_thread = None
 
+    def play_chime(self) -> None:
+        """Play the startup chime through the music output path (no mouth-LED
+        RMS tracking).  Uses ffmpeg to decode the MP3 to raw PCM in memory.
+        No-ops silently if the file is missing or ffmpeg is unavailable."""
+        import subprocess
+        import io
+        path = Path(config.STARTUP_CHIME_PATH)
+        if not path.exists():
+            return
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-i", str(path), "-f", "wav", "pipe:1"],
+                capture_output=True,
+                check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return
+        data, sr = sf.read(io.BytesIO(result.stdout), dtype="float32", always_2d=False)
+        self.stop_music()
+        self._music_stop.clear()
+        self._music_thread = threading.Thread(
+            target=self._music_worker_array,
+            args=(data, sr),
+            daemon=True,
+            name="djr3x-chime",
+        )
+        self._music_thread.start()
+
     # ------------------------------------------------------------------
     # RMS — read by leds.py
     # ------------------------------------------------------------------
@@ -285,6 +313,13 @@ class AudioPlayer:
     # Internal — music worker thread
     # ------------------------------------------------------------------
 
+    def _music_worker_array(self, data: np.ndarray, sr: int) -> None:
+        """Background thread: play a pre-loaded float32 array once as music."""
+        if data.ndim == 1:
+            data = data[:, np.newaxis]
+        data = data.astype(np.float32)
+        self._music_worker_play(data, sr, loop=False)
+
     def _music_worker(self, path: Path, loop: bool) -> None:
         """Background thread: opens an explicit OutputStream for music so it
         is fully independent from both the speech stream and sd.play()."""
@@ -294,6 +329,10 @@ class AudioPlayer:
         if data.ndim == 1:
             data = data[:, np.newaxis]
         data = data.astype(np.float32)
+        self._music_worker_play(data, sr, loop=loop)
+
+    def _music_worker_play(self, data: np.ndarray, sr: int, loop: bool) -> None:
+        """Shared playback loop used by both _music_worker and _music_worker_array."""
         channels = data.shape[1]
 
         while not self._music_stop.is_set():
@@ -348,13 +387,14 @@ def _load_audio_file(
     suffix = path.suffix.lower()
 
     if suffix == ".mp3":
-        from pydub import AudioSegment
+        import subprocess
         import io
-        seg = AudioSegment.from_mp3(str(path))
-        buf = io.BytesIO()
-        seg.export(buf, format="wav")
-        buf.seek(0)
-        data, sr = sf.read(buf, dtype="float32", always_2d=False)
+        result = subprocess.run(
+            ["ffmpeg", "-loglevel", "error", "-i", str(path), "-f", "wav", "pipe:1"],
+            capture_output=True,
+            check=True,
+        )
+        data, sr = sf.read(io.BytesIO(result.stdout), dtype="float32", always_2d=False)
     else:
         data, sr = sf.read(str(path), dtype="float32", always_2d=False)
 

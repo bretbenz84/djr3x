@@ -1,0 +1,59 @@
+2026-04-02 18:44:55  INFO      __main__  DJ-R3X controller starting up …
+2026-04-02 18:44:55  INFO      hardware.servos  Opening Maestro serial port /dev/ttyUSB0 @ 9600 baud
+2026-04-02 18:44:55  WARNING   states.state_machine  Could not initialise servo controller (SerialException: [Errno 2] could not open port /dev/ttyUSB0: [Errno 2] No such file or directory: '/dev/ttyUSB0') — continuing without it
+2026-04-02 18:44:55  WARNING   hardware.leds  LEDs: could not open chest Nano on /dev/ttyUSB1 — [Errno 2] could not open port /dev/ttyUSB1: [Errno 2] No such file or directory: '/dev/ttyUSB1'  (hardware missing?)
+2026-04-02 18:44:55  WARNING   hardware.leds  LEDs: could not open head Nano on /dev/ttyUSB2 — [Errno 2] could not open port /dev/ttyUSB2: [Errno 2] No such file or directory: '/dev/ttyUSB2'  (hardware missing?)
+2026-04-02 18:44:55  INFO      states.state_machine  Playing startup animation …
+2026-04-02 18:44:58  INFO      states.state_machine  Startup animation complete.
+2026-04-02 18:44:58  INFO      states.state_machine  StateMachine: warming up subsystems …
+2026-04-02 18:44:58  INFO      speech.transcriber  Loading Vosk model from /home/bbenziger/djr3x/assets/models/vosk-model-small-en-us-0.15 …
+2026-04-02 18:44:59  INFO      speech.transcriber  Vosk model ready.
+2026-04-02 18:44:59  INFO      speech.wake_word  Loading 2 wake word model(s): ['Dee-Jay_Rex.onnx', 'Hey_DJ_Rex.onnx']
+2026-04-02 18:44:59  ERROR     __main__  Fatal unhandled exception — Rex has crashed
+Traceback (most recent call last):
+  File "/home/bbenziger/djr3x/main.py", line 153, in <module>
+    main()
+    ~~~~^^
+  File "/home/bbenziger/djr3x/main.py", line 145, in main
+    sm.start()
+    ~~~~~~~~^^
+  File "/home/bbenziger/djr3x/states/state_machine.py", line 130, in start
+    self._wake_word.warmup()
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/bbenziger/djr3x/speech/wake_word.py", line 114, in warmup
+    self._model = OWWModel(
+                  ~~~~~~~~^
+        wakeword_model_paths=[str(p) for p in paths],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        inference_framework="onnx",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/bbenziger/djr3x/venv/lib/python3.13/site-packages/openwakeword/model.py", line 139, in __init__
+    self.preprocessor = AudioFeatures(**kwargs)
+                        ~~~~~~~~~~~~~^^^^^^^^^^
+TypeError: AudioFeatures.__init__() got an unexpected keyword argument 'inference_framework'
+2026-04-02 18:47:37  INFO      __main__  DJ-R3X controller starting up …
+2026-04-02 18:47:37  INFO      hardware.servos  Opening Maestro serial port /dev/ttyUSB0 @ 9600 baud
+2026-04-02 18:47:37  WARNING   states.state_machine  Could not initialise servo controller (SerialException: [Errno 2] could not open port /dev/ttyUSB0: [Errno 2] No such file or directory: '/dev/ttyUSB0') — continuing without it
+2026-04-02 18:47:37  WARNING   hardware.leds  LEDs: could not open chest Nano on /dev/ttyUSB1 — [Errno 2] could not open port /dev/ttyUSB1: [Errno 2] No such file or directory: '/dev/ttyUSB1'  (hardware missing?)
+2026-04-02 18:47:37  WARNING   hardware.leds  LEDs: could not open head Nano on /dev/ttyUSB2 — [Errno 2] could not open port /dev/ttyUSB2: [Errno 2] No such file or directory: '/dev/ttyUSB2'  (hardware missing?)
+2026-04-02 18:47:37  INFO      states.state_machine  Playing startup animation …
+2026-04-02 18:47:40  INFO      states.state_machine  Startup animation complete.
+2026-04-02 18:47:40  INFO      states.state_machine  StateMachine: warming up subsystems …
+2026-04-02 18:47:40  INFO      speech.transcriber  Loading Vosk model from /home/bbenziger/djr3x/assets/models/vosk-model-small-en-us-0.15 …
+2026-04-02 18:47:41  INFO      speech.transcriber  Vosk model ready.
+2026-04-02 18:47:41  INFO      speech.wake_word  Loading 2 wake word model(s): ['Dee-Jay_Rex.onnx', 'Hey_DJ_Rex.onnx']
+2026-04-02 18:47:43  INFO      speech.wake_word  Wake word models loaded: ['Dee-Jay_Rex', 'Hey_DJ_Rex']
+2026-04-02 18:47:43  INFO      speech.wake_word  Wake word detection started (threshold=0.60, cooldown=2.0 s)
+2026-04-02 18:47:43  INFO      states.state_machine  StateMachine: all subsystems ready.
+2026-04-02 18:47:43  INFO      states.state_machine  StateMachine: entering main loop (state=idle)
+2026-04-02 18:47:43  INFO      states.state_machine  → IDLE
+2026-04-02 18:47:43  DEBUG     llm.chatgpt  Conversation history cleared
+2026-04-02 18:47:43  DEBUG     speech.wake_word  Wake word audio stream open (chunk=1280 samples, 80 ms)
+2026-04-02 18:47:51  INFO      __main__  Signal SIGINT received — requesting shutdown
+2026-04-02 18:47:51  INFO      states.state_machine  StateMachine: shutdown requested externally
+2026-04-02 18:47:51  INFO      states.state_machine  Transition: idle → shutdown
+2026-04-02 18:47:51  INFO      states.state_machine  → SHUTDOWN
+2026-04-02 18:47:53  INFO      states.state_machine  StateMachine: halting OS — sudo shutdown -h now
+2026-04-02 18:47:53  INFO      states.state_machine  StateMachine: shutting down subsystems

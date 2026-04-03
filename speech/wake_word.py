@@ -113,7 +113,6 @@ class WakeWordDetector:
         )
         self._model = OWWModel(
             wakeword_model_paths=[str(p) for p in paths],
-            inference_framework="onnx",
         )
         loaded = list(self._model.models.keys())
         log.info("Wake word models loaded: %s", loaded)

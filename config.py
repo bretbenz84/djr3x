@@ -13,10 +13,11 @@ from dotenv import load_dotenv
 # Paths
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT    = Path(__file__).parent.resolve()
-ASSETS_DIR      = PROJECT_ROOT / "assets"
-AUDIO_CACHE_DIR = ASSETS_DIR / "audio"
-MODELS_DIR      = ASSETS_DIR / "models"
+PROJECT_ROOT       = Path(__file__).parent.resolve()
+ASSETS_DIR         = PROJECT_ROOT / "assets"
+AUDIO_CACHE_DIR    = ASSETS_DIR / "audio"
+MODELS_DIR         = ASSETS_DIR / "models"
+STARTUP_CHIME_PATH = ASSETS_DIR / "audio" / "startup_chime.mp3"
 
 # Default Vosk model path — override with VOSK_MODEL_PATH in .env if needed.
 VOSK_MODEL_PATH_DEFAULT = MODELS_DIR / "vosk-model-small-en-us-0.15"
