@@ -163,6 +163,7 @@ class StateMachine:
         log.info("StateMachine: warming up subsystems …")
 
         self._transcriber.warmup()   # no-op for Whisper; kept for interface consistency
+        self._transcriber.calibrate_noise_floor()
 
         if self._wake_word.is_available():
             self._wake_word.warmup()

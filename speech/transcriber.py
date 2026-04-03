@@ -55,6 +55,8 @@ class Transcriber:
 
     def __init__(self) -> None:
         self._client = OpenAI(api_key=config.OPENAI_API_KEY)
+        # Speech detection threshold — may be overridden by calibrate_noise_floor().
+        self._speech_threshold: int = config.TRANSCRIBE_SPEECH_THRESHOLD
 
     # ------------------------------------------------------------------
     # Setup
@@ -72,6 +74,46 @@ class Transcriber:
         warmup() uniformly across all subsystems without special-casing
         the transcriber.
         """
+
+    def calibrate_noise_floor(self, duration: float = 0.5) -> None:
+        """Record a short burst of ambient silence and set the speech detection
+        threshold to 3× the measured RMS noise floor.
+
+        Call once at startup (after the mic device is known to be free) so the
+        threshold adapts to the actual room noise rather than relying on the
+        fixed config default.  Safe to call again if the environment changes.
+
+        Raises sounddevice.PortAudioError if the mic cannot be opened.
+        """
+        n_frames = round(duration * config.AUDIO_SAMPLE_RATE)
+        log.info(
+            "Calibrating noise floor (%.1f s on device %s) …",
+            duration, config.AUDIO_INPUT_DEVICE,
+        )
+        try:
+            raw, _ = sd.rec(
+                n_frames,
+                samplerate=config.AUDIO_SAMPLE_RATE,
+                channels=config.AUDIO_INPUT_CHANNELS,
+                dtype="int16",
+                device=config.AUDIO_INPUT_DEVICE,
+                blocking=True,
+            )
+        except sd.PortAudioError:
+            log.warning(
+                "Noise floor calibration failed — keeping threshold at %d",
+                self._speech_threshold,
+            )
+            return
+
+        mono = raw[:, 0].astype(np.float32)
+        noise_rms = float(np.sqrt(np.mean(mono ** 2)))
+        new_threshold = max(int(noise_rms * 3), 50)   # floor of 50 to avoid pathological quiet rooms
+        log.info(
+            "Noise floor: RMS=%.0f → speech threshold set to %d (was %d)",
+            noise_rms, new_threshold, self._speech_threshold,
+        )
+        self._speech_threshold = new_threshold
 
     # ------------------------------------------------------------------
     # Transcription
@@ -123,7 +165,7 @@ class Transcriber:
             "Transcriber: opening InputStream (device=%s, rate=%d Hz, "
             "chunk=%d frames, threshold=%d)",
             config.AUDIO_INPUT_DEVICE, config.AUDIO_SAMPLE_RATE,
-            config.AUDIO_CHUNK_SIZE, config.TRANSCRIBE_SPEECH_THRESHOLD,
+            config.AUDIO_CHUNK_SIZE, self._speech_threshold,
         )
 
         with sd.InputStream(
@@ -148,7 +190,7 @@ class Transcriber:
                     chunk_index, rms, speech_started, consecutive_speech, silence_chunks,
                 )
 
-                if rms >= config.TRANSCRIBE_SPEECH_THRESHOLD:
+                if rms >= self._speech_threshold:
                     if speech_first_chunk is None:
                         speech_first_chunk = chunk_index
                     consecutive_speech += 1

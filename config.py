@@ -202,7 +202,7 @@ WHISPER_MIN_WORDS = 2
 # Whisper-specific recording limits (tighter than the generic caps in the
 # "recording / wake word" section above — shorter recording = lower latency).
 WHISPER_MAX_RECORD_SECONDS = float(_optional("WHISPER_MAX_RECORD_SECONDS", "8.0"))
-WHISPER_SILENCE_DURATION   = float(_optional("WHISPER_SILENCE_DURATION",   "0.6"))
+WHISPER_SILENCE_DURATION   = float(_optional("WHISPER_SILENCE_DURATION",   "0.4"))
 
 # Substrings (lowercase) that identify known Whisper hallucination phrases.
 # Any result whose lowercased text contains one of these is silently dropped.
