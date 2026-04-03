@@ -212,6 +212,13 @@ COMMAND_FUZZY_THRESHOLD = 0.72
 
 ACTIVE_IDLE_TIMEOUT = 20.0   # seconds of silence before returning to IDLE
 
+# ---------------------------------------------------------------------------
+# Vision — webcam capture
+# ---------------------------------------------------------------------------
+
+CAMERA_DEVICE_INDEX  = int(_optional("CAMERA_DEVICE_INDEX", "0"))
+VISION_JPEG_QUALITY  = int(_optional("VISION_JPEG_QUALITY", "85"))
+
 # Set to True only on the production Pi so the "shutdown" voice command and
 # the physical shutdown button actually halt the OS.  Leave False during
 # development — Ctrl-C (and even the voice command) will exit Python cleanly

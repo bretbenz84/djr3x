@@ -19,7 +19,7 @@ History management:
 from __future__ import annotations
 
 import logging
-from typing import Iterator
+from typing import Iterator, Optional
 
 from openai import OpenAI, APIConnectionError, APIStatusError, RateLimitError
 
@@ -75,29 +75,56 @@ class ChatGPTClient:
     # Public interface
     # ------------------------------------------------------------------
 
-    def chat_stream(self, user_text: str) -> Iterator[str]:
+    def chat_stream(
+        self, user_text: str, image: Optional[str] = None
+    ) -> Iterator[str]:
         """Stream a response to user_text as a token generator.
+
+        Args:
+            user_text: The transcribed user utterance.
+            image:     Optional base64-encoded JPEG (from camera.capture_frame()).
+                       When provided the message is sent as a multipart
+                       content block and gpt-4o is used instead of gpt-4o-mini
+                       so the vision capability is available.
 
         Appends the user message to history immediately. Accumulates the
         full assistant reply and appends it to history once the generator
         is exhausted (or closed/GC'd). Trims history to MAX_HISTORY_TURNS
         after each completed exchange.
-
-        Usage:
-            tokens = client.chat_stream("play something funky")
-            synthesizer.speak_stream(tokens)
         """
         user_text = user_text.strip()
         if not user_text:
             return
 
+        # Build the user message — plain text or multipart with image.
+        if image:
+            user_message: dict = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image}",
+                            "detail": "low",   # low = ~65 tokens, sufficient for scene context
+                        },
+                    },
+                ],
+            }
+            model = "gpt-4o"   # gpt-4o-mini does not support vision
+        else:
+            user_message = {"role": "user", "content": user_text}
+            model = config.OPENAI_MODEL
+
+        # History stores text-only for the user turn so it stays compact and
+        # compatible with non-vision turns in the same session.
         self._history.append({"role": "user", "content": user_text})
 
         accumulated: list[str] = []
         try:
             stream = self._client.chat.completions.create(
-                model=config.OPENAI_MODEL,
-                messages=[_SYSTEM_MESSAGE] + self._history,
+                model=model,
+                messages=[_SYSTEM_MESSAGE] + self._history[:-1] + [user_message],
                 stream=True,
                 max_tokens=120,     # enforce short responses (~3 sentences)
                 temperature=1.05,   # just enough variance to feel alive

@@ -134,3 +134,9 @@ _suppress is a threading.Event — the audio thread reads it, the main thread se
 Callback wrapped in try/except — a crash in the callback must not kill the detection thread. The thread logs the exception and continues listening.
 
 for/break on scores — only one callback fires per 80 ms chunk even if both models score above threshold simultaneously. Prevents double-firing on a detection that's right on the boundary.
+
+
+ speech/transcriber.py - Vosk local transcription with silence detection
+ states/state_machine.py - full state machine with graceful hardware degradation
+ sequences/animations.py - startup, shutdown, emotion sequences
+ main.py - entry point, hardware banner, signal handling

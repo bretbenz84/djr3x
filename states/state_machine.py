@@ -56,6 +56,7 @@ from sequences.animations import AnimationPlayer
 from speech.synthesizer import Synthesizer
 from speech.transcriber import Transcriber
 from speech.wake_word import WakeWordDetector
+from vision.camera import Camera
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +98,10 @@ class StateMachine:
 
         # LLM
         self._llm = ChatGPTClient()
+
+        # Vision
+        self._camera = Camera()
+        self._last_frame: str | None = None   # captured at wake word, passed to LLM
 
         # State control
         self._state: State = State.IDLE
@@ -140,6 +145,10 @@ class StateMachine:
             self._servos.start()
 
         self._leds.start()
+
+        self._camera.warmup()
+        self._camera.start()
+
         log.info("StateMachine: all subsystems ready.")
 
     def run(self) -> None:
@@ -165,6 +174,7 @@ class StateMachine:
             self._servos.close()
         self._leds.close()
         self._player.close()
+        self._camera.stop()
 
     def request_shutdown(self) -> None:
         """Thread-safe: schedule a transition to SHUTDOWN from any thread
@@ -214,6 +224,7 @@ class StateMachine:
             "wake_word":    self._wake_word.is_available(),
             "wake_models":  wake_models,       # int: 0, 1, or 2
             "music_tracks": len(self._music_tracks),
+            "camera":       self._camera.is_available(),
         }
 
     # ------------------------------------------------------------------
@@ -312,7 +323,7 @@ class StateMachine:
                 next_state = self._execute_command(cmd)
             else:
                 log.info("No command match — routing to LLM")
-                next_state = self._speak_llm(text)
+                next_state = self._speak_llm(text, image=self._last_frame)
 
             if next_state is not None:
                 self._transition_to(next_state)
@@ -372,6 +383,12 @@ class StateMachine:
     def _on_wake_word(self, model_name: str) -> None:
         if self._state == State.IDLE:
             log.info("Wake word detected (%s)", model_name)
+            # Capture a frame at the moment of wake — this is the scene
+            # context that will accompany the next LLM call.
+            self._last_frame = self._camera.capture_frame()
+            if self._last_frame:
+                log.debug("Camera: frame captured at wake word (%d bytes b64)",
+                          len(self._last_frame))
             self._wake_event.set()
         # Ignore detections in ACTIVE/SHUTDOWN (suppression should already
         # block the callback, but this is a belt-and-suspenders guard).
@@ -463,11 +480,11 @@ class StateMachine:
     # LLM fallback
     # ------------------------------------------------------------------
 
-    def _speak_llm(self, text: str) -> State | None:
-        """Stream text through ChatGPT → ElevenLabs. Returns None (no transition)."""
+    def _speak_llm(self, text: str, image: str | None = None) -> State | None:
+        """Stream text (and optional vision frame) through ChatGPT → ElevenLabs."""
         servo_stop = self._begin_speech(emotion="neutral")
         try:
-            tokens = self._llm.chat_stream(text)
+            tokens = self._llm.chat_stream(text, image=image)
             self._synthesizer.speak_stream(tokens)
         except Exception:
             log.exception("LLM/TTS error for: %.60s", text)
