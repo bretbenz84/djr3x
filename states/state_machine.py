@@ -102,6 +102,7 @@ class StateMachine:
         self._state: State = State.IDLE
         self._wake_event = threading.Event()    # set by wake word callback
         self._shutdown_event = threading.Event()
+        self._os_shutdown_requested: bool = False  # True only for voice/button shutdown
 
         # Music library — scanned once at startup
         self._music_tracks: list[Path] = _scan_music()
@@ -323,9 +324,17 @@ class StateMachine:
         self._leds.set_chest_effect(config.LED_CMD_OFF)
         self._leds.set_head_effect(config.LED_CMD_OFF)
 
-        # Halt — requires passwordless sudo (add to /etc/sudoers on the Pi).
-        log.info("StateMachine: halting OS — sudo shutdown -h now")
-        os.system("sudo shutdown -h now")
+        # Halt the OS only when explicitly requested (voice command / physical
+        # button) AND the production flag is enabled.  Ctrl-C (SIGINT) does
+        # NOT set _os_shutdown_requested, so development exits are safe.
+        if self._os_shutdown_requested and config.ENABLE_OS_SHUTDOWN:
+            log.info("StateMachine: halting OS — sudo shutdown -h now")
+            os.system("sudo shutdown -h now")
+        else:
+            if not self._os_shutdown_requested:
+                log.info("StateMachine: clean exit (signal/dev) — skipping OS shutdown")
+            else:
+                log.info("StateMachine: ENABLE_OS_SHUTDOWN=False — skipping OS shutdown")
 
     # ------------------------------------------------------------------
     # Transition
@@ -334,6 +343,7 @@ class StateMachine:
     def _transition_to(self, new_state: State) -> None:
         log.info("Transition: %s → %s", self._state.value, new_state.value)
         if new_state == State.SHUTDOWN:
+            self._os_shutdown_requested = True   # voice/button — OS halt eligible
             self._shutdown_event.set()
         self._state = new_state
 

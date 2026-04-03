@@ -212,6 +212,12 @@ COMMAND_FUZZY_THRESHOLD = 0.72
 
 ACTIVE_IDLE_TIMEOUT = 20.0   # seconds of silence before returning to IDLE
 
+# Set to True only on the production Pi so the "shutdown" voice command and
+# the physical shutdown button actually halt the OS.  Leave False during
+# development — Ctrl-C (and even the voice command) will exit Python cleanly
+# but will NOT run `sudo shutdown -h now`.
+ENABLE_OS_SHUTDOWN: bool = _optional("ENABLE_OS_SHUTDOWN", "").lower() in ("1", "true", "yes")
+
 # ---------------------------------------------------------------------------
 # LED serial command strings sent to Arduino Nanos
 # Nanos are dumb executors; all logic lives on the Pi.
