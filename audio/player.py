@@ -2,11 +2,15 @@
 audio/player.py — Audio playback for DJ-R3X.
 
 Two independent output streams:
-  - Speech stream: persistent callback-based OutputStream. Routes both
-    streaming TTS chunks and cached audio files. Computes real-time RMS
-    on every audio callback so leds.py can drive mouth brightness.
+  - Speech stream: on-demand callback-based OutputStream opened by a background
+    worker thread when audio data arrives. Closes (releases the device) as soon
+    as the end-of-stream marker is processed. Computes real-time RMS on every
+    audio callback so leds.py can drive mouth brightness.
   - Music stream: explicit OutputStream in a background thread. No RMS
     tracking. Supports loop and clean stop.
+
+The speech stream is never held open between utterances, so PipeWire / ALSA
+can grant the device to music and chime streams without conflict.
 
 Usage:
     player = AudioPlayer()
@@ -90,20 +94,18 @@ class AudioPlayer:
         self._speech_active = threading.Event()
         self._speech_active.set()        # starts "idle"
 
+        # --- speech worker thread (opens/closes stream on demand) ---
+        self._speech_stop = threading.Event()
+        self._speech_thread = threading.Thread(
+            target=self._speech_worker,
+            daemon=True,
+            name="djr3x-speech",
+        )
+        self._speech_thread.start()
+
         # --- music stream state ---
         self._music_thread: threading.Thread | None = None
         self._music_stop = threading.Event()
-
-        # --- open the persistent speech output stream ---
-        self._speech_stream = sd.OutputStream(
-            samplerate=SPEECH_SAMPLE_RATE,
-            channels=config.AUDIO_OUTPUT_CHANNELS,
-            dtype="int16",
-            device=config.AUDIO_OUTPUT_DEVICE,
-            blocksize=config.AUDIO_CHUNK_SIZE,
-            callback=self._speech_callback,
-        )
-        self._speech_stream.start()
 
     # ------------------------------------------------------------------
     # Speech — streaming TTS interface (called by synthesizer.py)
@@ -177,6 +179,10 @@ class AudioPlayer:
         self._rms = 0.0
         self._speech_active.set()   # unblock any wait_for_speech() caller
 
+        # put an EndMarker so the callback raises CallbackStop and closes
+        # the stream if one is currently open
+        self._speech_queue.put(_EndMarker(done=None))
+
     # ------------------------------------------------------------------
     # Music
     # ------------------------------------------------------------------
@@ -247,7 +253,7 @@ class AudioPlayer:
     def rms(self) -> float:
         """Smoothed, gain-scaled RMS of the speech output. Range 0.0–255.0.
         Updated on every audio callback (~64 ms at 16000 Hz / 1024 frames).
-        Returns 0.0 when nothing is playing."""
+        Returns 0.0 when no speech stream is open."""
         return self._rms
 
     # ------------------------------------------------------------------
@@ -258,8 +264,50 @@ class AudioPlayer:
         """Stop all playback and release PortAudio resources."""
         self.stop_speech()
         self.stop_music()
-        self._speech_stream.stop()
-        self._speech_stream.close()
+        self._speech_stop.set()
+        self._speech_thread.join(timeout=2.0)
+
+    # ------------------------------------------------------------------
+    # Internal — speech worker thread
+    # ------------------------------------------------------------------
+
+    def _speech_worker(self) -> None:
+        """Background thread: waits for audio data, then opens an OutputStream
+        for exactly the duration of one speech segment and closes it afterward.
+        The device is fully released between segments."""
+        while not self._speech_stop.is_set():
+            # Block until the first item arrives (poll so we can check stop flag).
+            try:
+                item = self._speech_queue.get(timeout=0.05)
+            except queue.Empty:
+                continue
+
+            if isinstance(item, _EndMarker):
+                # EndMarker before any audio (e.g. stop_speech() or end_speech()
+                # called before any chunks were queued).
+                self._speech_active.set()
+                if item.done is not None:
+                    item.done.set()
+                continue
+
+            # First audio chunk — prime the buffer, then open the stream.
+            self._speech_buf = item
+            self._speech_buf_pos = 0
+
+            finished = threading.Event()
+            with sd.OutputStream(
+                samplerate=SPEECH_SAMPLE_RATE,
+                channels=config.AUDIO_OUTPUT_CHANNELS,
+                dtype="int16",
+                device=config.AUDIO_OUTPUT_DEVICE,
+                blocksize=config.AUDIO_CHUNK_SIZE,
+                callback=self._speech_callback,
+                finished_callback=finished.set,
+            ):
+                finished.wait()
+
+            # Stream is fully closed — zero out RMS so LEDs go dark.
+            self._rms = 0.0
 
     # ------------------------------------------------------------------
     # Internal — speech callback (sounddevice audio thread)
@@ -275,6 +323,7 @@ class AudioPlayer:
         # Build mono scratch buffer; broadcast to all output channels at the end.
         mono = np.zeros(frames, dtype=np.int16)
         filled = 0
+        stop_stream = False
 
         while filled < frames:
             # refill internal chunk buffer from queue when exhausted
@@ -282,7 +331,7 @@ class AudioPlayer:
                 try:
                     item = self._speech_queue.get_nowait()
                 except queue.Empty:
-                    break   # nothing queued — output silence below
+                    break   # nothing queued yet — output silence this block
 
                 if isinstance(item, _EndMarker):
                     self._speech_buf = None
@@ -290,6 +339,7 @@ class AudioPlayer:
                     self._speech_active.set()
                     if item.done is not None:
                         item.done.set()
+                    stop_stream = True
                     break
                 # item is an np.ndarray of int16 samples
                 self._speech_buf = item
@@ -324,6 +374,9 @@ class AudioPlayer:
         alpha = config.MOUTH_LED_SMOOTHING
         self._rms = alpha * brightness + (1.0 - alpha) * self._rms
 
+        if stop_stream:
+            raise sd.CallbackStop()
+
     # ------------------------------------------------------------------
     # Internal — music worker thread
     # ------------------------------------------------------------------
@@ -337,7 +390,7 @@ class AudioPlayer:
 
     def _music_worker(self, path: Path, loop: bool) -> None:
         """Background thread: opens an explicit OutputStream for music so it
-        is fully independent from both the speech stream and sd.play()."""
+        is fully independent from the speech stream and sd.play()."""
         data, sr = _load_audio_file(path, target_sr=None)   # keep native rate
 
         # normalise to float32, ensure 2-D (frames × channels)
