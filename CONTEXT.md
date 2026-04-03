@@ -55,6 +55,12 @@
 - Arduino Nanos receive simple serial commands from Pi
 - Pi decides all logic, Nano
 
+## Vision
+- OpenCV captures 640x480 frame at wake word detection moment
+- Frame sent as base64 JPEG to gpt-4o (auto-upgrades from gpt-4o-mini when image present)
+- Vision only on LLM fallthrough — local commands never send images
+- detail:low keeps vision cost ~65 tokens per interaction
+
 ## VIBE CODING DECISIONS MADE BY CLAUDE
 Here's what the file covers and why each decision was made:
 Env loading
@@ -140,3 +146,6 @@ for/break on scores — only one callback fires per 80 ms chunk even if both mod
  states/state_machine.py - full state machine with graceful hardware degradation
  sequences/animations.py - startup, shutdown, emotion sequences
  main.py - entry point, hardware banner, signal handling
+
+
+ 
