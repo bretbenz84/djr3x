@@ -184,4 +184,34 @@ class Transcriber:
             return ""
 
         log.debug("Whisper result: %r", text)
-        return text
+        return _filter_hallucination(text)
+
+
+# ---------------------------------------------------------------------------
+# Hallucination filter
+# ---------------------------------------------------------------------------
+
+def _filter_hallucination(text: str) -> str:
+    """Return text unchanged if it looks like real speech, otherwise "".
+
+    Drops results that are:
+      - empty / whitespace only
+      - shorter than WHISPER_MIN_WORDS words
+      - contain a known Whisper hallucination substring
+    """
+    if not text:
+        return ""
+
+    lower = text.lower()
+
+    for phrase in config.WHISPER_HALLUCINATION_FILTER:
+        if phrase in lower:
+            log.info("Whisper hallucination filtered: %r (matched %r)", text, phrase)
+            return ""
+
+    words = text.split()
+    if len(words) < config.WHISPER_MIN_WORDS:
+        log.info("Whisper result too short (%d word(s)), filtered: %r", len(words), text)
+        return ""
+
+    return text

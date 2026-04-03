@@ -188,6 +188,27 @@ WAKE_WORD_CHUNK_SIZE = 1280
 # and makes the first API call ~200 ms faster.  Set to "" to auto-detect.
 WHISPER_LANGUAGE = _optional("WHISPER_LANGUAGE", "en")
 
+# Minimum number of words in a Whisper result to be treated as real speech.
+# Results shorter than this are discarded as likely hallucinations.
+WHISPER_MIN_WORDS = 3
+
+# Substrings (lowercase) that identify known Whisper hallucination phrases.
+# Any result whose lowercased text contains one of these is silently dropped.
+WHISPER_HALLUCINATION_FILTER: list[str] = [
+    "pissedconsumer",
+    "please see review",
+    "cc by",
+    "subscribe",
+    "like and subscribe",
+    "work of fiction",
+    "living or dead",
+    "purely coincidental",
+    "thank you for watching",
+    "thanks for watching",
+    "financial advice",
+    "not investment advice",
+]
+
 # ---------------------------------------------------------------------------
 # Speech — synthesis (ElevenLabs)
 # ---------------------------------------------------------------------------
