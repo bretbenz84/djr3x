@@ -91,7 +91,7 @@ class Transcriber:
             duration, config.AUDIO_INPUT_DEVICE,
         )
         try:
-            raw, _ = sd.rec(
+            raw = sd.rec(
                 n_frames,
                 samplerate=config.AUDIO_SAMPLE_RATE,
                 channels=config.AUDIO_INPUT_CHANNELS,
