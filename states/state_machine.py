@@ -293,6 +293,15 @@ class StateMachine:
         if self._servos is not None:
             self._servos.set_emotion("neutral")
 
+        # Play wake word acknowledgement chime.
+        wake_ack = config.ASSETS_DIR / "audio" / "Hi There.mp3"
+        if wake_ack.exists():
+            servo_stop = self._begin_speech()
+            try:
+                self._player.play_file(wake_ack)
+            finally:
+                self._end_speech(servo_stop)
+
         # False = first listen since wake word; True = follow-up after a response.
         after_response = False
 
