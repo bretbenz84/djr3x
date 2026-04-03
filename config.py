@@ -207,6 +207,9 @@ WHISPER_HALLUCINATION_FILTER: list[str] = [
     "thanks for watching",
     "financial advice",
     "not investment advice",
+    "derivative work",
+    "touhou project",
+    "no relation to the original",
 ]
 
 # ---------------------------------------------------------------------------
