@@ -143,8 +143,8 @@ AUDIO_CHANNELS     = 1       # mono mic input
 AUDIO_CHUNK_SIZE   = 1024    # frames per buffer read
 AUDIO_FORMAT       = 8       # pyaudio.paInt16 == 8 (avoids importing pyaudio here)
 
-MIC_DEVICE_INDEX     = _optional_int("MIC_DEVICE_INDEX")     # None → system default
-SPEAKER_DEVICE_INDEX = _optional_int("SPEAKER_DEVICE_INDEX") # None → system default
+AUDIO_INPUT_DEVICE  = _optional_int("AUDIO_INPUT_DEVICE")   # None → system default
+AUDIO_OUTPUT_DEVICE = _optional_int("AUDIO_OUTPUT_DEVICE")  # None → system default
 
 # Silence-gated recording: stop capturing when RMS drops below threshold
 # for SILENCE_DURATION consecutive seconds (or MAX_RECORD_SECONDS elapses)

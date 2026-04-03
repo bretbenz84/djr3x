@@ -182,7 +182,7 @@ class WakeWordDetector:
                 samplerate=config.AUDIO_SAMPLE_RATE,
                 channels=config.AUDIO_CHANNELS,
                 dtype="int16",
-                device=config.MIC_DEVICE_INDEX,
+                device=config.AUDIO_INPUT_DEVICE,
                 blocksize=config.WAKE_WORD_CHUNK_SIZE,
             ) as stream:
                 log.debug("Wake word audio stream open (chunk=%d samples, %.0f ms)",

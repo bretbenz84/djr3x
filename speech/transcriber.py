@@ -125,7 +125,7 @@ class Transcriber:
             samplerate=config.AUDIO_SAMPLE_RATE,
             channels=config.AUDIO_CHANNELS,
             dtype="int16",
-            device=config.MIC_DEVICE_INDEX,
+            device=config.AUDIO_INPUT_DEVICE,
             blocksize=config.AUDIO_CHUNK_SIZE,
         ) as stream:
             for _ in range(_MAX_CHUNKS):

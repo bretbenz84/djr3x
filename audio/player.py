@@ -99,7 +99,7 @@ class AudioPlayer:
             samplerate=SPEECH_SAMPLE_RATE,
             channels=1,
             dtype="int16",
-            device=config.SPEAKER_DEVICE_INDEX,
+            device=config.AUDIO_OUTPUT_DEVICE,
             blocksize=config.AUDIO_CHUNK_SIZE,
             callback=self._speech_callback,
         )
@@ -368,7 +368,7 @@ class AudioPlayer:
                 samplerate=sr,
                 channels=channels,
                 dtype="float32",
-                device=config.SPEAKER_DEVICE_INDEX,
+                device=config.AUDIO_OUTPUT_DEVICE,
                 callback=_callback,
                 finished_callback=finished.set,
             ):
