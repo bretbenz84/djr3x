@@ -8,7 +8,7 @@ Start order
   3. Startup banner printed showing which hardware was detected.
   4. SIGINT / SIGTERM handlers registered → sm.request_shutdown().
   5. Startup animation played (blocking, ~2.7 s) before idle thread starts.
-  6. sm.start() — loads Vosk + wake word models, starts background threads.
+  6. sm.start() — loads wake word models, starts background threads.
   7. Startup chime played (blocking) through music output path.
   8. sm.run() — blocks until SHUTDOWN state plays out and OS halts.
 
@@ -96,7 +96,7 @@ def _print_banner(status: dict) -> None:
         f"  Head LEDs  (Nano)  {_hw(status['head_leds'])}   {config.NANO_HEAD_PORT}",
         thin,
         f"  Wake word          {_hw(status['wake_word'])}   {wake_detail}",
-        f"  Transcriber        {_hw(status['transcriber'])}   Vosk",
+        f"  Transcriber        {_hw(status['transcriber'])}   Whisper",
         f"  Music library      {'READY    ' if music else 'EMPTY    '}   {music_detail}",
         thin,
         f"  HEY HEY HEY!  Rex is {'online' if any([status['servos'], status['chest_leds'], status['head_leds']]) else 'online (no hardware)'}.",

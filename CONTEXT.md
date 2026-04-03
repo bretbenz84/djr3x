@@ -19,7 +19,7 @@
 - Dependencies in requirements.txt
 
 ## Architecture Decisions
-- Vosk for local speech transcription (fast, no API call)
+- OpenAI Whisper for speech transcription
 - Exact phrase matching for local commands (no API needed)
 - ChatGPT 4o-mini API fallback for unmatched/open ended input
 - Streaming ChatGPT → ElevenLabs to reduce latency

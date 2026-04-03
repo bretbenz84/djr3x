@@ -19,9 +19,6 @@ AUDIO_CACHE_DIR    = ASSETS_DIR / "audio"
 MODELS_DIR         = ASSETS_DIR / "models"
 STARTUP_CHIME_PATH = ASSETS_DIR / "audio" / "startup_chime.mp3"
 
-# Default Vosk model path — override with VOSK_MODEL_PATH in .env if needed.
-VOSK_MODEL_PATH_DEFAULT = MODELS_DIR / "vosk-model-small-en-us-0.15"
-
 # ---------------------------------------------------------------------------
 # Load .env
 # ---------------------------------------------------------------------------
@@ -138,7 +135,7 @@ SERVO_SAD_SPEED            = 8
 # Audio — recording / wake word
 # ---------------------------------------------------------------------------
 
-AUDIO_SAMPLE_RATE  = 16000   # Hz — required by both Vosk and OpenWakeWord
+AUDIO_SAMPLE_RATE  = 16000   # Hz — required by OpenWakeWord; also used for mic capture
 AUDIO_CHANNELS     = 1       # mono mic input
 AUDIO_CHUNK_SIZE   = 1024    # frames per buffer read
 AUDIO_FORMAT       = 8       # pyaudio.paInt16 == 8 (avoids importing pyaudio here)
@@ -182,11 +179,12 @@ WAKE_WORD_COOLDOWN  = 2.0    # seconds to ignore further detections after one fi
 WAKE_WORD_CHUNK_SIZE = 1280
 
 # ---------------------------------------------------------------------------
-# Speech — transcription (Vosk)
+# Speech — transcription (OpenAI Whisper)
 # ---------------------------------------------------------------------------
 
-VOSK_MODEL_PATH  = Path(_optional("VOSK_MODEL_PATH") or VOSK_MODEL_PATH_DEFAULT)
-VOSK_LOG_LEVEL   = -1   # -1 suppresses Vosk's verbose C-level logging
+# BCP-47 language hint passed to whisper-1.  "en" skips language detection
+# and makes the first API call ~200 ms faster.  Set to "" to auto-detect.
+WHISPER_LANGUAGE = _optional("WHISPER_LANGUAGE", "en")
 
 # ---------------------------------------------------------------------------
 # Speech — synthesis (ElevenLabs)

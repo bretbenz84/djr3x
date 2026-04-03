@@ -1,14 +1,13 @@
 """
-speech/transcriber.py — One-shot mic capture and local transcription via Vosk.
+speech/transcriber.py — One-shot mic capture and cloud transcription via OpenAI Whisper.
 
 Typical call sequence at startup:
     t = Transcriber()
-    if not t.is_available():
-        sys.exit("Vosk model missing — see assets/models/")
-    t.warmup()            # loads model into RAM once, ~1–2 s
+    t.warmup()       # no-op — kept for interface compatibility
+    text = t.transcribe()
 
 Then per utterance (after wake word fires):
-    text = t.transcribe() # record → silence-gate → Vosk → str
+    text = t.transcribe()   # record → silence-gate → Whisper API → str
     if text:
         ...
 
@@ -18,17 +17,19 @@ Recording stops when the microphone RMS falls below SILENCE_THRESHOLD for
 SILENCE_DURATION consecutive seconds, OR when MAX_RECORD_SECONDS elapses.
 The silence clock only starts after the first speech chunk is detected so
 that an initial quiet moment before the user speaks doesn't cut off early.
+If no speech is detected at all (entire recording is below threshold), the
+buffer is discarded and an empty string is returned without an API call.
 """
 
 from __future__ import annotations
 
-import json
+import io
 import logging
-from pathlib import Path
+import wave
 
 import numpy as np
 import sounddevice as sd
-import vosk
+from openai import OpenAI
 
 import config
 
@@ -46,51 +47,30 @@ _MAX_CHUNKS: int = round(
 
 
 class Transcriber:
-    """Local speech-to-text using Vosk.
+    """Cloud speech-to-text using OpenAI Whisper.
 
     Not thread-safe: only one transcribe() call may run at a time.
     """
 
     def __init__(self) -> None:
-        self._model: vosk.Model | None = None
+        self._client = OpenAI(api_key=config.OPENAI_API_KEY)
 
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
 
     def is_available(self) -> bool:
-        """Return True if the Vosk model directory exists on disk.
-
-        Does NOT attempt to load the model. Safe to call at any time.
-        """
-        return Path(config.VOSK_MODEL_PATH).is_dir()
+        """Always True — Whisper is accessed via the OpenAI API; no local
+        model files are required."""
+        return True
 
     def warmup(self) -> None:
-        """Load the Vosk model into RAM. Call once at startup.
+        """No-op — Whisper requires no local model loading.
 
-        Loading takes 1–2 seconds on a Pi 4. After this returns, the first
-        transcribe() call will not pay a cold-load penalty.
-
-        Raises FileNotFoundError if the model directory is absent.
-        Raises RuntimeError if called more than once (safe to guard against
-        accidental double-init).
+        Kept so the startup sequence in StateMachine.start() can call
+        warmup() uniformly across all subsystems without special-casing
+        the transcriber.
         """
-        if self._model is not None:
-            log.warning("Transcriber.warmup() called more than once — ignoring")
-            return
-
-        model_path = Path(config.VOSK_MODEL_PATH)
-        if not model_path.is_dir():
-            raise FileNotFoundError(
-                f"Vosk model not found at '{model_path}'.\n"
-                "Download a model from https://alphacephei.com/vosk/models\n"
-                f"and unzip it to '{model_path}'."
-            )
-
-        vosk.SetLogLevel(config.VOSK_LOG_LEVEL)
-        log.info("Loading Vosk model from %s …", model_path)
-        self._model = vosk.Model(str(model_path))
-        log.info("Vosk model ready.")
 
     # ------------------------------------------------------------------
     # Transcription
@@ -99,23 +79,15 @@ class Transcriber:
     def transcribe(self) -> str:
         """Capture one utterance from the microphone and return its text.
 
-        Opens the mic, reads chunks, feeds them to Vosk, and stops when
-        silence is detected or the hard time cap is reached. Returns the
-        final Vosk transcription as a stripped string (may be empty if
-        Vosk heard nothing recognisable).
+        Opens the mic, reads chunks using the same silence-gating logic as
+        the former Vosk implementation, then encodes the buffer as a WAV
+        and sends it to the Whisper API. Returns the transcription as a
+        stripped string (empty string if no speech was detected or the API
+        call fails).
 
-        Raises RuntimeError if warmup() has not been called.
         Raises sounddevice.PortAudioError if the mic cannot be opened.
         """
-        if self._model is None:
-            raise RuntimeError(
-                "Transcriber not warmed up — call warmup() before transcribe()."
-            )
-
-        recognizer = vosk.KaldiRecognizer(self._model, config.AUDIO_SAMPLE_RATE)
-        recognizer.SetWords(False)          # no word-level timing, faster
-        recognizer.SetMaxAlternatives(0)    # single best hypothesis only
-
+        frames_list: list[np.ndarray] = []
         silence_chunks: int = 0
         speech_started: bool = False
 
@@ -145,7 +117,7 @@ class Transcriber:
                 elif speech_started:
                     silence_chunks += 1
 
-                recognizer.AcceptWaveform(samples.tobytes())
+                frames_list.append(samples)
 
                 if speech_started and silence_chunks >= _SILENCE_CHUNKS_NEEDED:
                     log.debug(
@@ -155,9 +127,35 @@ class Transcriber:
                     )
                     break
             else:
-                log.debug("Transcriber: hit MAX_RECORD_SECONDS cap (%.1f s)", config.MAX_RECORD_SECONDS)
+                log.debug(
+                    "Transcriber: hit MAX_RECORD_SECONDS cap (%.1f s)",
+                    config.MAX_RECORD_SECONDS,
+                )
 
-        result = json.loads(recognizer.FinalResult())
-        text = result.get("text", "").strip()
-        log.debug("Vosk result: %r", text)
+        # Nothing above the silence threshold — skip the API call entirely.
+        if not speech_started:
+            return ""
+
+        # Encode the captured buffer as a WAV in memory and send to Whisper.
+        pcm = np.concatenate(frames_list)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(config.AUDIO_CHANNELS)
+            wf.setsampwidth(2)   # int16 = 2 bytes per sample
+            wf.setframerate(config.AUDIO_SAMPLE_RATE)
+            wf.writeframes(pcm.tobytes())
+        buf.seek(0)
+
+        try:
+            result = self._client.audio.transcriptions.create(
+                model="whisper-1",
+                file=("audio.wav", buf.read()),
+                language=config.WHISPER_LANGUAGE,
+            )
+            text = result.text.strip()
+        except Exception:
+            log.exception("Whisper transcription API error")
+            return ""
+
+        log.debug("Whisper result: %r", text)
         return text

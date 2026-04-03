@@ -33,7 +33,7 @@ Graceful hardware degradation
 Usage
 -----
     sm = StateMachine()
-    sm.start()   # warmup — loads Vosk and wake word models
+    sm.start()   # warmup — loads wake word models, starts background threads
     sm.run()     # blocks until SHUTDOWN; calls close() in a finally block
 """
 
@@ -124,13 +124,7 @@ class StateMachine:
         """Warmup all subsystems. Call once before run()."""
         log.info("StateMachine: warming up subsystems …")
 
-        if self._transcriber.is_available():
-            self._transcriber.warmup()
-        else:
-            log.warning(
-                "Vosk model not found at %s — transcription disabled",
-                config.VOSK_MODEL_PATH,
-            )
+        self._transcriber.warmup()   # no-op for Whisper; kept for interface consistency
 
         if self._wake_word.is_available():
             self._wake_word.warmup()
@@ -285,7 +279,7 @@ class StateMachine:
                 break
 
             if not self._transcriber.is_available():
-                # No Vosk model: nothing to transcribe — just wait for timeout.
+                # Transcriber unavailable — just wait for timeout.
                 time.sleep(1.0)
                 continue
 
