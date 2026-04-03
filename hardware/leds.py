@@ -1,15 +1,244 @@
 """
 hardware/leds.py — Arduino Nano LED control for DJ-R3X.
 
-Responsibilities:
-- Open serial connection(s) to one or more Arduino Nanos at configured
-  port(s)/baud rate
-- Send simple ASCII or binary serial command strings; Nanos are dumb
-  executors — all logic lives here on the Pi
-- Commands include: set pattern (idle pulse, active, rainbow, etc.),
-  set brightness (0–255), set color (R,G,B), trigger one-shot animations
-- Drive the custom mouth PCB brightness in real time from the audio RMS
-  level provided by the AudioPlayer during speech playback
-- Support named LED zones if multiple Nanos control different body regions
-- Provide a safe off/idle state method called on shutdown
+Two Arduino Nanos:
+  Chest Nano (NANO_CHEST_PORT) — chest LED ring/strip effects
+  Head Nano  (NANO_HEAD_PORT)  — mouth NeoPixel grid + eye LEDs
+
+All commands are newline-terminated ASCII strings.  The Nanos are dumb
+executors; all logic lives here on the Pi.
+
+Thread model
+------------
+  Main / state-machine thread
+    Calls set_chest_effect(), set_head_effect(), set_eye_color(),
+    start_mouth(), stop_mouth(), start(), stop().
+
+  Mouth brightness thread (_mouth_thread)
+    Reads player.rms at ~30 Hz and sends BRIGHT:<n> to the head Nano only
+    while speech is active.  Created by start_mouth(), torn down by
+    stop_mouth() / stop().
+
+Usage
+-----
+    from audio.player import AudioPlayer
+    from hardware.leds import LEDController
+
+    player = AudioPlayer()
+    leds   = LEDController(player)
+    leds.start()
+
+    leds.set_chest_effect("IDLE")
+    leds.set_head_effect("ACTIVE")
+    leds.set_eye_color(0, 180, 255)
+
+    leds.start_mouth()   # begins RMS → brightness loop
+    ...                  # speech plays
+    leds.stop_mouth()
+
+    leds.stop()
+    player.close()
 """
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+
+import serial
+
+import config
+
+log = logging.getLogger(__name__)
+
+# Mouth brightness polling interval (seconds).  ~30 Hz is smooth without
+# flooding the Nano's 9600-baud serial buffer.
+_MOUTH_POLL_INTERVAL: float = 1 / 30
+
+
+# ---------------------------------------------------------------------------
+# LEDController
+# ---------------------------------------------------------------------------
+
+class LEDController:
+    """Manages LED output on both Arduino Nanos.
+
+    Both serial connections are optional at construction time — if a port
+    cannot be opened (hardware missing during development) a warning is logged
+    and the corresponding Nano is simply skipped on every send.
+    """
+
+    def __init__(self, player) -> None:
+        """
+        Parameters
+        ----------
+        player : AudioPlayer
+            Live AudioPlayer instance.  Its `.rms` property drives the mouth
+            brightness thread.
+        """
+        self._player = player
+
+        self._chest: serial.Serial | None = _open_serial(
+            config.NANO_CHEST_PORT, config.LED_NANO_BAUD, label="chest"
+        )
+        self._head: serial.Serial | None = _open_serial(
+            config.NANO_HEAD_PORT, config.LED_NANO_BAUD, label="head"
+        )
+
+        # Mouth brightness thread state
+        self._mouth_stop  = threading.Event()
+        self._mouth_thread: threading.Thread | None = None
+
+        # Serialise writes from the main thread and mouth thread.
+        # Each Nano gets its own lock so chest writes never block head writes.
+        self._chest_lock = threading.Lock()
+        self._head_lock  = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Put both Nanos into the idle state.  Safe to call multiple times."""
+        self._send_chest(config.LED_CMD_IDLE)
+        self._send_head(config.LED_CMD_IDLE)
+
+    def stop(self) -> None:
+        """Stop the mouth thread and turn both Nanos off."""
+        self.stop_mouth()
+        self._send_chest(config.LED_CMD_OFF)
+        self._send_head(config.LED_CMD_OFF)
+
+    def close(self) -> None:
+        """stop() then close serial ports."""
+        self.stop()
+        if self._chest is not None:
+            try:
+                self._chest.close()
+            except Exception:
+                pass
+        if self._head is not None:
+            try:
+                self._head.close()
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Effect / color control
+    # ------------------------------------------------------------------
+
+    def set_chest_effect(self, effect: str) -> None:
+        """Send a named effect command to the chest Nano.
+
+        ``effect`` should be one of the LED_CMD_* constant *values* (without
+        the trailing newline) or the constant itself, e.g.:
+
+            leds.set_chest_effect("IDLE")
+            leds.set_chest_effect(config.LED_CMD_ACTIVE)  # also fine
+        """
+        self._send_chest(_normalise_cmd(effect))
+
+    def set_head_effect(self, effect: str) -> None:
+        """Send a named effect command to the head Nano (mouth grid)."""
+        self._send_head(_normalise_cmd(effect))
+
+    def set_eye_color(self, r: int, g: int, b: int) -> None:
+        """Set the eye LED color on the head Nano.
+
+        Parameters are clamped to 0–255.
+        """
+        r, g, b = _clamp(r), _clamp(g), _clamp(b)
+        self._send_head(config.LED_CMD_EYE_COLOR.format(r, g, b))
+
+    # ------------------------------------------------------------------
+    # Mouth brightness
+    # ------------------------------------------------------------------
+
+    def start_mouth(self) -> None:
+        """Start the RMS → brightness thread.  No-op if already running."""
+        if self._mouth_thread is not None and self._mouth_thread.is_alive():
+            return
+        self._mouth_stop.clear()
+        self._mouth_thread = threading.Thread(
+            target=self._mouth_worker,
+            daemon=True,
+            name="djr3x-mouth-leds",
+        )
+        self._mouth_thread.start()
+
+    def stop_mouth(self) -> None:
+        """Stop the mouth brightness thread and wait for it to exit."""
+        self._mouth_stop.set()
+        if self._mouth_thread is not None:
+            self._mouth_thread.join(timeout=1.0)
+            self._mouth_thread = None
+
+    # ------------------------------------------------------------------
+    # Internal — send helpers
+    # ------------------------------------------------------------------
+
+    def _send_chest(self, cmd: str) -> None:
+        """Write a command string to the chest Nano."""
+        if self._chest is None:
+            return
+        with self._chest_lock:
+            _write(self._chest, cmd, label="chest")
+
+    def _send_head(self, cmd: str) -> None:
+        """Write a command string to the head Nano."""
+        if self._head is None:
+            return
+        with self._head_lock:
+            _write(self._head, cmd, label="head")
+
+    # ------------------------------------------------------------------
+    # Internal — mouth brightness worker thread
+    # ------------------------------------------------------------------
+
+    def _mouth_worker(self) -> None:
+        """Poll player.rms and send BRIGHT:<n> to the head Nano at ~30 Hz."""
+        while not self._mouth_stop.is_set():
+            brightness = int(round(self._player.rms))
+            brightness = _clamp(brightness)
+            self._send_head(config.LED_CMD_BRIGHTNESS.format(brightness))
+            time.sleep(_MOUTH_POLL_INTERVAL)
+
+        # When stopped, send zero brightness so mouth doesn't freeze lit
+        self._send_head(config.LED_CMD_BRIGHTNESS.format(0))
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+def _open_serial(port: str, baud: int, label: str) -> serial.Serial | None:
+    """Try to open a serial port; return None (with a warning) on failure."""
+    try:
+        s = serial.Serial(port, baud, timeout=1.0)
+        log.info("LEDs: opened %s Nano on %s at %d baud", label, port, baud)
+        return s
+    except serial.SerialException as exc:
+        log.warning(
+            "LEDs: could not open %s Nano on %s — %s  (hardware missing?)",
+            label, port, exc,
+        )
+        return None
+
+
+def _write(port: serial.Serial, cmd: str, label: str) -> None:
+    """Write cmd to port; log and swallow serial errors."""
+    try:
+        port.write(cmd.encode())
+    except serial.SerialException as exc:
+        log.warning("LEDs: write to %s Nano failed — %s", label, exc)
+
+
+def _normalise_cmd(effect: str) -> str:
+    """Ensure the command ends with exactly one newline."""
+    return effect.strip() + "\n"
+
+
+def _clamp(value: int) -> int:
+    """Clamp an integer to the 0–255 range."""
+    return max(0, min(255, value))

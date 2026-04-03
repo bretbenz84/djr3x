@@ -69,8 +69,9 @@ MAESTRO_BAUD = 9600          # Pololu default; must match Maestro USB settings
 # Serial — Arduino Nano LED controller(s)
 # ---------------------------------------------------------------------------
 
-LED_NANO_PORT = _optional("LED_NANO_PORT", "/dev/ttyUSB0")
-LED_NANO_BAUD = 9600
+NANO_CHEST_PORT = _optional("NANO_CHEST_PORT", "/dev/ttyUSB0")
+NANO_HEAD_PORT  = _optional("NANO_HEAD_PORT",  "/dev/ttyUSB1")
+LED_NANO_BAUD   = 9600
 
 # ---------------------------------------------------------------------------
 # Servo channel assignments (Maestro channel numbers, 0-based)
@@ -220,3 +221,7 @@ LED_CMD_ACTIVE    = "ACTIVE\n"    # full-brightness steady
 LED_CMD_LISTENING = "LISTEN\n"    # color shift indicating attention
 LED_CMD_SPEAKING  = "SPEAK\n"     # driven per-frame by audio level
 LED_CMD_OFF       = "OFF\n"
+
+# Parameterised commands — format() before sending
+LED_CMD_BRIGHTNESS = "BRIGHT:{}\n"      # 0–255 integer
+LED_CMD_EYE_COLOR  = "EYE:{},{},{}\n"   # R,G,B integers 0–255

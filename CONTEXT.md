@@ -102,3 +102,35 @@ temperature=1.05 — slightly above 1.0 gives the character variance and persona
 History trim rounds to even — excess += excess % 2 ensures we never slice history at an odd index, which would leave a lone assistant message at the front with no corresponding user message. The OpenAI API would accept it but it would confuse the model's turn-taking.
 
 [_SYSTEM_MESSAGE] + self._history — the system prompt is prepended fresh on every call and never stored in _history. This means clear_history() truly resets context without risking the system prompt being included twice.
+
+PHRASE_INDEX built at import time — flat dict of every trigger phrase → its Command. The parser doesn't need to loop through all commands; it just does a dict lookup. Duplicates raise ValueError immediately at import so typos in the phrase list fail loudly during development rather than silently shadowing a command at runtime.
+
+action strings match the state machine / sequences vocabulary — "excited", "sad", "idle", "shutdown", "play_music", "stop_music", "next_track", "volume_up", "volume_down". The parser just returns the Command object; state_machine.py and sequences/animations.py decide what to do with the action key.
+
+No audio filenames yet — the audio field is on the dataclass and ready to use, but left None for now. Once you record or render the canned lines you can drop the .wav filenames in here and the parser will route to player.play_file() instead of TTS, skipping the API call with zero latency.
+
+Response text written in Rex's voice — so even on first-use TTS (cache miss), the ElevenLabs output is already in character. Once cached, it's instant.
+
+All 8 cases pass, including the two that should correctly fall through to the LLM. A few decisions worth noting:
+
+normalize() is a pure standalone function — not a method on the parser — so transcriber.py and tests can call it independently without constructing anything.
+
+difflib.get_close_matches for fuzzy, then SequenceMatcher.ratio() for the score log — get_close_matches uses an internal fast-path (quick_ratio()) to skip hopeless candidates before computing the full ratio, so it's efficient over 119 phrases. The second SequenceMatcher call is only for the debug log line; it doesn't affect the match decision.
+
+Threshold at 0.72 — the test shows it catches one-transposition typos (voulme up) and one-character suffix errors (play musick) but correctly rejects louder please (ratio ≈ 0.57 against louder). If Vosk is clean in practice, you can raise this toward 0.80 to tighten it; if it misses too many real commands, lower it slightly.
+
+None return is the LLM signal — the caller just checks if parse(text) is None: llm.chat_stream(text). No special exception type needed.
+
+is_available() returns True — the user's .env already has WAKE_WORD_MODEL_1 and WAKE_WORD_MODEL_2 pointing at the real trained models (Dee-Jay_Rex.onnx and Hey_DJ_Rex.onnx). The config picks them up correctly.
+
+Key decisions:
+
+1280-sample chunk size (80 ms) — OpenWakeWord's predict() source explicitly requires multiples of 1280 samples. Using AUDIO_CHUNK_SIZE = 1024 would silently degrade accuracy because the mel-spectrogram framing would be misaligned. This gets its own WAKE_WORD_CHUNK_SIZE constant separate from the general AUDIO_CHUNK_SIZE.
+
+Both models in one OWWModel instance — wakeword_model_paths=[path1, path2] loads both into a single model object. predict() then runs all loaded models in one call and returns a single {name: score} dict. This is more efficient than two separate model instances and two separate audio streams.
+
+_suppress is a threading.Event — the audio thread reads it, the main thread sets it. threading.Event is designed for exactly this cross-thread signaling pattern. Setting detector.suppressed = True while Rex is speaking prevents the mic from picking up Rex's own voice and retriggering.
+
+Callback wrapped in try/except — a crash in the callback must not kill the detection thread. The thread logs the exception and continues listening.
+
+for/break on scores — only one callback fires per 80 ms chunk even if both models score above threshold simultaneously. Prevents double-firing on a detection that's right on the boundary.
