@@ -296,14 +296,23 @@ COMMANDS: list[Command] = [
     # -----------------------------------------------------------------------
 
     Command(
-        phrases=["go to sleep", "go to sleep rex", "sleep", "shut up rex",
-                 "be quiet"],
+        phrases=["go to sleep", "go to sleep rex", "sleep", "shut up rex"],
         response=(
             "*BWOOP* ...Fine. Rex is powering down. "
             "But know this, lifeform — the music lives on. "
             "In here. *sad WHIRR* In my spark."
         ),
         action="idle",
+    ),
+
+    Command(
+        phrases=["stop talking", "shut up", "be quiet", "quiet down",
+                 "stop the clips", "stop the sounds"],
+        response=(
+            "*BZZT* ...Muting the atmosphere tracks. "
+            "Say the wake word if you need me, lifeform."
+        ),
+        action="stop_idle_clips",
     ),
 
     Command(

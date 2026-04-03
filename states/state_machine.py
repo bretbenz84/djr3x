@@ -146,6 +146,10 @@ class StateMachine:
         self._music_tracks: list[Path] = _scan_music()
         self._music_index: int = 0
 
+        # Idle atmosphere clips — disabled by "stop talking" command, re-enabled
+        # automatically the next time the wake word activates Rex.
+        self._idle_clips_enabled: bool = True
+
         # Animation player — shares hardware refs with the rest of the machine
         self._animations = AnimationPlayer(self._servos, self._leds)
 
@@ -290,8 +294,10 @@ class StateMachine:
                 )
                 return
 
-            # Timer fired — play a random idle clip with wake word suppressed
-            # so Rex's own audio can't re-trigger detection.
+            # Timer fired — play a random idle clip (if not muted by user).
+            if not self._idle_clips_enabled:
+                continue
+
             clip_path = config.ASSETS_DIR / "audio" / random.choice(_IDLE_CLIPS)
             if clip_path.exists():
                 log.info("Idle clip: %s", clip_path.name)
@@ -343,6 +349,9 @@ class StateMachine:
                 self._player.play_file(wake_ack)
             finally:
                 self._end_speech(servo_stop)
+
+        # Re-enable idle clips now that the user has interacted again.
+        self._idle_clips_enabled = True
 
         # False = first listen since wake word; True = follow-up after a response.
         after_response = False
@@ -655,6 +664,11 @@ class StateMachine:
             self._leds.set_eye_color(0, 60, 180)     # subdued blue
 
         elif action == "idle":
+            return State.IDLE
+
+        elif action == "stop_idle_clips":
+            self._idle_clips_enabled = False
+            log.info("Idle atmosphere clips disabled by voice command")
             return State.IDLE
 
         elif action == "shutdown":

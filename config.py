@@ -234,8 +234,8 @@ COMMAND_FUZZY_THRESHOLD = 0.72
 # State machine
 # ---------------------------------------------------------------------------
 
-IDLE_CLIP_INTERVAL_MIN = 20.0   # minimum seconds between idle atmosphere clips
-IDLE_CLIP_INTERVAL_MAX = 120.0  # maximum seconds between idle atmosphere clips
+IDLE_CLIP_INTERVAL_MIN = 6.0   # minimum seconds between idle atmosphere clips
+IDLE_CLIP_INTERVAL_MAX = 30.0  # maximum seconds between idle atmosphere clips
 
 ACTIVE_IDLE_TIMEOUT  = 20.0  # legacy — superseded by ACTIVE_TIMEOUT_SECONDS
 ACTIVE_TIMEOUT_SECONDS   = 8.0   # seconds of silence after a response before returning to IDLE
