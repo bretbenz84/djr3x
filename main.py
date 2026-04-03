@@ -9,7 +9,8 @@ Start order
   4. SIGINT / SIGTERM handlers registered → sm.request_shutdown().
   5. Startup animation played (blocking, ~2.7 s) before idle thread starts.
   6. sm.start() — loads Vosk + wake word models, starts background threads.
-  7. sm.run() — blocks until SHUTDOWN state plays out and OS halts.
+  7. Startup chime played (blocking) through music output path.
+  8. sm.run() — blocks until SHUTDOWN state plays out and OS halts.
 
 Run
 ---
@@ -144,7 +145,11 @@ def main() -> None:
     # 5. Warmup models and start all background threads
     sm.start()
 
-    # 6. Run — blocks until SHUTDOWN state halts the OS or an exception escapes
+    # 6. Startup chime — after sm.start() so the AudioPlayer OutputStream is
+    #    running, before sm.run() so it plays before entering IDLE/wake-word
+    sm.play_startup_chime()
+
+    # 7. Run — blocks until SHUTDOWN state halts the OS or an exception escapes
     sm.run()
 
 

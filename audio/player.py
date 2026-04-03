@@ -198,6 +198,15 @@ class AudioPlayer:
             self._music_thread.join(timeout=2.0)
             self._music_thread = None
 
+    def wait_for_music(self, timeout: float = 30.0) -> bool:
+        """Block until the current music/chime thread exits (or timeout).
+        Returns True if the thread finished cleanly, False on timeout."""
+        t = self._music_thread
+        if t is None or not t.is_alive():
+            return True
+        t.join(timeout=timeout)
+        return not t.is_alive()
+
     def play_chime(self) -> None:
         """Play the startup chime through the music output path (no mouth-LED
         RMS tracking).  Uses ffmpeg to decode the MP3 to raw PCM in memory.

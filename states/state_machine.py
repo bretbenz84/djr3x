@@ -184,6 +184,18 @@ class StateMachine:
         self._animations.wait(timeout=10.0)
         log.info("Startup animation complete.")
 
+    def play_startup_chime(self) -> None:
+        """Play the startup chime through the music output path and block
+        until it finishes.  Must be called after start() so the AudioPlayer
+        OutputStream is running.  No-ops if the chime file is missing."""
+        log.info("Playing startup chime (%s) …", config.STARTUP_CHIME_PATH)
+        self._player.play_chime()
+        finished = self._player.wait_for_music(timeout=30.0)
+        if finished:
+            log.info("Startup chime complete.")
+        else:
+            log.warning("Startup chime timed out — continuing.")
+
     def hardware_status(self) -> dict[str, bool | int]:
         """Return a snapshot of detected hardware and model availability.
 
