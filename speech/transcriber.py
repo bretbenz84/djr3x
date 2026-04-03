@@ -107,7 +107,7 @@ class Transcriber:
 
         with sd.InputStream(
             samplerate=config.AUDIO_SAMPLE_RATE,
-            channels=config.AUDIO_CHANNELS,
+            channels=config.AUDIO_INPUT_CHANNELS,
             dtype="int16",
             device=config.AUDIO_INPUT_DEVICE,
             blocksize=config.AUDIO_CHUNK_SIZE,

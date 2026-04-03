@@ -97,7 +97,7 @@ class AudioPlayer:
         # --- open the persistent speech output stream ---
         self._speech_stream = sd.OutputStream(
             samplerate=SPEECH_SAMPLE_RATE,
-            channels=1,
+            channels=config.AUDIO_OUTPUT_CHANNELS,
             dtype="int16",
             device=config.AUDIO_OUTPUT_DEVICE,
             blocksize=config.AUDIO_CHUNK_SIZE,
@@ -267,12 +267,13 @@ class AudioPlayer:
 
     def _speech_callback(
         self,
-        outdata: np.ndarray,    # shape (blocksize, 1), dtype int16
+        outdata: np.ndarray,    # shape (blocksize, channels), dtype int16
         frames: int,
         _time,                  # CffiData timestamp — unused
         _status: sd.CallbackFlags,
     ) -> None:
-        output = outdata[:, 0]  # flat view into the mono channel
+        # Build mono scratch buffer; broadcast to all output channels at the end.
+        mono = np.zeros(frames, dtype=np.int16)
         filled = 0
 
         while filled < frames:
@@ -298,20 +299,21 @@ class AudioPlayer:
                 frames - filled,
                 len(self._speech_buf) - self._speech_buf_pos,
             )
-            output[filled : filled + take] = (
+            mono[filled : filled + take] = (
                 self._speech_buf[self._speech_buf_pos : self._speech_buf_pos + take]
             )
             self._speech_buf_pos += take
             filled += take
 
-        # zero-pad any unfilled frames (silence when queue is empty)
-        if filled < frames:
-            output[filled:] = 0
+        # mono[filled:] is already zero from np.zeros — silence for unfilled frames.
+        # Broadcast mono samples to every output channel (handles 1 or 2 channels).
+        for ch in range(outdata.shape[1]):
+            outdata[:, ch] = mono
 
         # --- real-time RMS for mouth LED ---
         # only compute on frames that actually contain audio, not padding
         if filled > 0:
-            chunk_f32 = output[:filled].astype(np.float32)
+            chunk_f32 = mono[:filled].astype(np.float32)
             rms_raw = float(np.sqrt(np.mean(chunk_f32 ** 2)))
             # int16 max = 32767; scale to 0-1, apply gain, map to 0-255
             brightness = min(255.0, (rms_raw / 32767.0) * config.MOUTH_LED_GAIN * 255.0)
