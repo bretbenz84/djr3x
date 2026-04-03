@@ -79,6 +79,23 @@ _GOODBYE_PHRASES: list[str] = [
     "Ok, going back to sleep!",
 ]
 
+_IDLE_CLIPS: list[str] = [
+    "This is your cap.mp3",
+    "Yahoo.mp3",
+    "Roger Control.mp3",
+    "Request Line Open.mp3",
+    "Outer Rim.mp3",
+    "On the Decks.mp3",
+    "Once Again.mp3",
+    "Loose Wire.mp3",
+    "Having Fun.mp3",
+    "Events.mp3",
+    "Endor Travel.mp3",
+    "Dream.mp3",
+    "DJ Pilot.mp3",
+    "Astromech Joke.mp3",
+]
+
 
 # ---------------------------------------------------------------------------
 # State enum
@@ -259,14 +276,39 @@ class StateMachine:
         # Reset conversation context so each active session starts fresh.
         self._llm.clear_history()
 
-        # Block until a wake word fires (or shutdown is requested).
-        self._wake_event.wait()
-        self._wake_event.clear()
+        # Wait for a wake word, playing random atmosphere clips in between.
+        while True:
+            interval = random.uniform(
+                config.IDLE_CLIP_INTERVAL_MIN, config.IDLE_CLIP_INTERVAL_MAX
+            )
+            triggered = self._wake_event.wait(timeout=interval)
 
-        if self._shutdown_event.is_set():
-            self._transition_to(State.SHUTDOWN)
-        else:
-            self._transition_to(State.ACTIVE)
+            if triggered:
+                self._wake_event.clear()
+                self._transition_to(
+                    State.SHUTDOWN if self._shutdown_event.is_set() else State.ACTIVE
+                )
+                return
+
+            # Timer fired — play a random idle clip with wake word suppressed
+            # so Rex's own audio can't re-trigger detection.
+            clip_path = config.ASSETS_DIR / "audio" / random.choice(_IDLE_CLIPS)
+            if clip_path.exists():
+                log.info("Idle clip: %s", clip_path.name)
+                self._wake_word.suppressed = True
+                try:
+                    self._player.play_music(clip_path, loop=False)
+                    self._player.wait_for_music(timeout=120.0)
+                finally:
+                    self._wake_word.suppressed = False
+
+            # Handle wake word or shutdown that arrived during clip playback.
+            if self._wake_event.is_set():
+                self._wake_event.clear()
+                self._transition_to(
+                    State.SHUTDOWN if self._shutdown_event.is_set() else State.ACTIVE
+                )
+                return
 
     # ------------------------------------------------------------------
     # State — ACTIVE
