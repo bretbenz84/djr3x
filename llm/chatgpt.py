@@ -127,9 +127,9 @@ class ChatGPTClient:
         finally:
             # record whatever the assistant managed to say before any error
             if accumulated:
-                self._history.append(
-                    {"role": "assistant", "content": "".join(accumulated)}
-                )
+                full_reply = "".join(accumulated)
+                log.info("Rex (LLM): %s", full_reply)
+                self._history.append({"role": "assistant", "content": full_reply})
                 self._trim_history()
 
     def clear_history(self) -> None:

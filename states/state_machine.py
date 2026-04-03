@@ -308,6 +308,7 @@ class StateMachine:
             cmd = parse(text)
             if cmd is not None:
                 log.info("Matched command: phrases[0]=%r action=%r", cmd.phrases[0], cmd.action)
+                log.info("Rex (cmd): %s", cmd.response)
                 next_state = self._execute_command(cmd)
             else:
                 log.info("No command match — routing to LLM")
