@@ -19,6 +19,7 @@ History management:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Iterator, Optional
 
 from openai import OpenAI, APIConnectionError, APIStatusError, RateLimitError
@@ -75,7 +76,7 @@ class ChatGPTClient:
     # ------------------------------------------------------------------
 
     def chat_stream(
-        self, user_text: str, image: Optional[str] = None
+        self, user_text: str, image: Optional[str] = None, t0: Optional[float] = None
     ) -> Iterator[str]:
         """Stream a response to user_text as a token generator.
 
@@ -120,6 +121,7 @@ class ChatGPTClient:
         self._history.append({"role": "user", "content": user_text})
 
         accumulated: list[str] = []
+        first_token_logged = False
         try:
             stream = self._client.chat.completions.create(
                 model=model,
@@ -131,6 +133,10 @@ class ChatGPTClient:
             for chunk in stream:
                 token = chunk.choices[0].delta.content
                 if token:
+                    if not first_token_logged:
+                        elapsed = f" [+{time.monotonic() - t0:.1f}s]" if t0 is not None else ""
+                        log.info("First ChatGPT token received%s", elapsed)
+                        first_token_logged = True
                     accumulated.append(token)
                     yield token
 

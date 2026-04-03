@@ -165,14 +165,24 @@ class WakeWordDetector:
         """Close the mic stream without stopping the detector thread.
 
         Blocks until the audio thread confirms the stream is closed (at most
-        one 80 ms read chunk).  Safe to call from any thread.
+        one 80 ms read chunk), then waits an additional brief moment so that
+        PipeWire fully releases the device at the OS level before the caller
+        opens its own stream on the same device.  Safe to call from any thread.
         """
         if self._thread is None or not self._thread.is_alive():
+            log.debug("Wake word pause(): thread not running, nothing to pause")
             return
+        log.debug("Wake word pause(): requesting mic release …")
         self._idle_event.clear()
         self._pause_event.set()
-        self._idle_event.wait(timeout=1.0)
-        log.debug("Wake word detection paused (mic released)")
+        released = self._idle_event.wait(timeout=1.0)
+        if released:
+            log.debug("Wake word pause(): mic stream closed — device released")
+        else:
+            log.warning("Wake word pause(): timed out (1 s) waiting for mic stream to close")
+        # Give PipeWire a moment to fully release the device at the OS level
+        # before the transcriber opens its own InputStream on the same device.
+        time.sleep(0.05)
 
     def resume(self) -> None:
         """Reopen the mic stream and resume detection.
@@ -181,9 +191,10 @@ class WakeWordDetector:
         Safe to call from any thread.
         """
         if self._thread is None or not self._thread.is_alive():
+            log.debug("Wake word resume(): thread not running, nothing to resume")
             return
+        log.debug("Wake word resume(): clearing pause flag — stream will reopen on next loop")
         self._pause_event.clear()
-        log.debug("Wake word detection resumed")
 
     # ------------------------------------------------------------------
     # Echo suppression
@@ -276,4 +287,5 @@ class WakeWordDetector:
                 log.exception("Wake word: unexpected error in detection thread")
                 break
             finally:
+                log.debug("Wake word: mic stream closed (finally block — idle_event will be set)")
                 self._idle_event.set()   # stream is closed; pause() may unblock

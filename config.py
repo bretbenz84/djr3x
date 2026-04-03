@@ -146,6 +146,10 @@ AUDIO_FORMAT       = 8       # pyaudio.paInt16 == 8 (avoids importing pyaudio he
 AUDIO_INPUT_DEVICE  = _optional_int("AUDIO_INPUT_DEVICE")   # None → system default
 AUDIO_OUTPUT_DEVICE = _optional_int("AUDIO_OUTPUT_DEVICE")  # None → system default
 
+# Software volume: 0.0 (mute) – 1.0 (full). ReSpeaker Lite has no hardware
+# mixer, so all output paths scale samples by this factor before writing.
+AUDIO_VOLUME: float = max(0.0, min(1.0, float(_optional("AUDIO_VOLUME", "0.5"))))
+
 # Silence-gated recording: stop capturing when RMS drops below threshold
 # for SILENCE_DURATION consecutive seconds (or MAX_RECORD_SECONDS elapses)
 SILENCE_THRESHOLD            = 300   # RMS amplitude (0–32767) — legacy, kept for reference
@@ -194,6 +198,11 @@ WHISPER_LANGUAGE = _optional("WHISPER_LANGUAGE", "en")
 # Minimum number of words in a Whisper result to be treated as real speech.
 # Results shorter than this are discarded as likely hallucinations.
 WHISPER_MIN_WORDS = 2
+
+# Whisper-specific recording limits (tighter than the generic caps in the
+# "recording / wake word" section above — shorter recording = lower latency).
+WHISPER_MAX_RECORD_SECONDS = float(_optional("WHISPER_MAX_RECORD_SECONDS", "8.0"))
+WHISPER_SILENCE_DURATION   = float(_optional("WHISPER_SILENCE_DURATION",   "0.6"))
 
 # Substrings (lowercase) that identify known Whisper hallucination phrases.
 # Any result whose lowercased text contains one of these is silently dropped.

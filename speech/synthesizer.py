@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 import wave
 from pathlib import Path
 from typing import Iterator
@@ -85,7 +86,7 @@ class Synthesizer:
             self._player.stop_speech()
             raise
 
-    def speak_stream(self, text_iter: Iterator[str]) -> None:
+    def speak_stream(self, text_iter: Iterator[str], t0: float | None = None) -> None:
         """Accept a streaming token iterator (e.g. from ChatGPT) and pipe it
         through ElevenLabs convert_realtime() to the player.
 
@@ -100,7 +101,7 @@ class Synthesizer:
                 output_format="pcm_16000",
                 voice_settings=self._voice_settings,
             )
-            self._pipe_to_player(chunks, cache_path=None)
+            self._pipe_to_player(chunks, cache_path=None, t0=t0)
         except Exception:
             log.exception("ElevenLabs realtime TTS error")
             self._player.stop_speech()
@@ -114,6 +115,7 @@ class Synthesizer:
         self,
         audio_chunks: Iterator[bytes],
         cache_path: Path | None,
+        t0: float | None = None,
     ) -> None:
         """Stream audio chunks to the player as they arrive.
 
@@ -125,11 +127,16 @@ class Synthesizer:
         in a clean state.
         """
         accumulator: list[bytes] | None = [] if cache_path is not None else None
+        first_chunk_logged = False
 
         try:
             for chunk in audio_chunks:
                 if not chunk:
                     continue
+                if not first_chunk_logged:
+                    elapsed = f" [+{time.monotonic() - t0:.1f}s]" if t0 is not None else ""
+                    log.info("First audio chunk playing%s", elapsed)
+                    first_chunk_logged = True
                 self._player.feed_speech_chunk(chunk)
                 if accumulator is not None:
                     accumulator.append(chunk)

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import io
 import logging
+import time
 import wave
 
 import numpy as np
@@ -35,14 +36,14 @@ import config
 
 log = logging.getLogger(__name__)
 
-# Chunks of silence required to end the recording.
-# Computed at import time from config so it's visible in debugger.
+# Whisper-specific recording limits — tighter than the generic caps to reduce
+# the audio sent to the API and lower end-to-end latency.
 _SILENCE_CHUNKS_NEEDED: int = max(
     1,
-    round(config.SILENCE_DURATION * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE),
+    round(config.WHISPER_SILENCE_DURATION * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE),
 )
 _MAX_CHUNKS: int = round(
-    config.MAX_RECORD_SECONDS * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE
+    config.WHISPER_MAX_RECORD_SECONDS * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE
 )
 
 
@@ -76,26 +77,35 @@ class Transcriber:
     # Transcription
     # ------------------------------------------------------------------
 
-    def transcribe(self, wait_for_speech_seconds: float | None = None) -> str | None:
+    def transcribe(
+        self,
+        wait_for_speech_seconds: float | None = None,
+        t0: float | None = None,
+    ) -> str | None:
         """Capture one utterance from the microphone and return its text.
 
-        Opens the mic, reads chunks using the same silence-gating logic as
-        the former Vosk implementation, then encodes the buffer as a WAV
-        and sends it to the Whisper API. Returns the transcription as a
-        stripped string, or empty string if no speech was detected, or the
-        API call fails.
+        Opens the mic, reads chunks using silence-gating logic, then encodes
+        the buffer as a WAV and sends it to the Whisper API. Trims leading and
+        trailing silence before sending so dead air doesn't inflate latency.
+
+        Returns the transcription as a stripped string, empty string if no
+        speech was detected, or the API call fails.
 
         If wait_for_speech_seconds is given, returns None (without an API
         call) if speech has not started within that many seconds. This lets
         the caller distinguish "no speech in the window" from "speech was
         detected but Whisper returned nothing".
 
+        t0: optional monotonic timestamp from wake word detection; when
+        provided, all INFO log lines include an elapsed-since-wake marker.
+
         Raises sounddevice.PortAudioError if the mic cannot be opened.
         """
         frames_list: list[np.ndarray] = []
         silence_chunks: int = 0
         speech_started: bool = False
-        consecutive_speech: int = 0   # chunks above threshold in a row
+        consecutive_speech: int = 0        # chunks above threshold in a row
+        speech_first_chunk: int | None = None   # first chunk at/above threshold
 
         wait_chunks: int | None = (
             round(wait_for_speech_seconds * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE)
@@ -103,7 +113,18 @@ class Transcriber:
             else None
         )
 
-        log.debug("Transcriber: mic open, listening …")
+        def _mark(label: str = "") -> str:
+            """Return ' [+X.Xs]' elapsed marker when t0 is set, else ''."""
+            if t0 is None:
+                return ""
+            return f" [+{time.monotonic() - t0:.1f}s]"
+
+        log.debug(
+            "Transcriber: opening InputStream (device=%s, rate=%d Hz, "
+            "chunk=%d frames, threshold=%d)",
+            config.AUDIO_INPUT_DEVICE, config.AUDIO_SAMPLE_RATE,
+            config.AUDIO_CHUNK_SIZE, config.TRANSCRIBE_SPEECH_THRESHOLD,
+        )
 
         with sd.InputStream(
             samplerate=config.AUDIO_SAMPLE_RATE,
@@ -112,6 +133,7 @@ class Transcriber:
             device=config.AUDIO_INPUT_DEVICE,
             blocksize=config.AUDIO_CHUNK_SIZE,
         ) as stream:
+            log.info("Mic open, listening …%s", _mark())
             for chunk_index in range(_MAX_CHUNKS):
                 frames, overflowed = stream.read(config.AUDIO_CHUNK_SIZE)
                 if overflowed:
@@ -120,14 +142,21 @@ class Transcriber:
                 # frames shape: (AUDIO_CHUNK_SIZE, AUDIO_CHANNELS) dtype int16
                 samples = frames[:, 0]  # flatten to 1-D mono array
                 rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
+                log.debug(
+                    "Transcriber: chunk %3d  rms=%6.0f  speech_started=%-5s  "
+                    "consec=%d  silence=%d",
+                    chunk_index, rms, speech_started, consecutive_speech, silence_chunks,
+                )
 
                 if rms >= config.TRANSCRIBE_SPEECH_THRESHOLD:
+                    if speech_first_chunk is None:
+                        speech_first_chunk = chunk_index
                     consecutive_speech += 1
                     silence_chunks = 0
                     if not speech_started and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS:
-                        log.debug(
-                            "Transcriber: speech confirmed (%d consecutive chunks, rms=%.0f)",
-                            consecutive_speech, rms,
+                        log.info(
+                            "Speech detected (rms=%.0f) — recording …%s",
+                            rms, _mark(),
                         )
                         speech_started = True
                 else:
@@ -138,11 +167,6 @@ class Transcriber:
                 frames_list.append(samples)
 
                 if speech_started and silence_chunks >= _SILENCE_CHUNKS_NEEDED:
-                    log.debug(
-                        "Transcriber: silence end-of-speech "
-                        "(%d chunks ≥ %d needed)",
-                        silence_chunks, _SILENCE_CHUNKS_NEEDED,
-                    )
                     break
 
                 # Early exit: speech hasn't been confirmed and the caller's wait window expired.
@@ -154,24 +178,40 @@ class Transcriber:
                     return None
             else:
                 log.debug(
-                    "Transcriber: hit MAX_RECORD_SECONDS cap (%.1f s)",
-                    config.MAX_RECORD_SECONDS,
+                    "Transcriber: hit WHISPER_MAX_RECORD_SECONDS cap (%.1f s)",
+                    config.WHISPER_MAX_RECORD_SECONDS,
                 )
 
         # Speech was never confirmed — skip the API call entirely.
         if not speech_started:
             return ""
 
-        # Encode the captured buffer as a WAV in memory and send to Whisper.
-        pcm = np.concatenate(frames_list)
+        # Trim dead air before sending to Whisper:
+        #   - Leading: start 2 chunks before the first above-threshold chunk
+        #     (preserves attack transients while dropping mic-open silence).
+        #   - Trailing: drop the silent chunks that triggered end-of-speech;
+        #     they add duration without adding information.
+        trim_start = max(0, (speech_first_chunk or 0) - 2)
+        trim_end   = max(trim_start + 1, len(frames_list) - silence_chunks)
+        frames_for_whisper = frames_list[trim_start:trim_end]
+
+        pcm = np.concatenate(frames_for_whisper) if frames_for_whisper else np.array([], dtype=np.int16)
+        audio_duration = len(pcm) / config.AUDIO_SAMPLE_RATE
+
+        log.info(
+            "Silence detected — sending %.1f s audio to Whisper …%s",
+            audio_duration, _mark(),
+        )
+
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
-            wf.setnchannels(config.AUDIO_CHANNELS)
+            wf.setnchannels(1)
             wf.setsampwidth(2)   # int16 = 2 bytes per sample
             wf.setframerate(config.AUDIO_SAMPLE_RATE)
             wf.writeframes(pcm.tobytes())
         buf.seek(0)
 
+        t_api = time.monotonic()
         try:
             result = self._client.audio.transcriptions.create(
                 model="whisper-1",
@@ -183,6 +223,10 @@ class Transcriber:
             log.exception("Whisper transcription API error")
             return ""
 
+        log.info(
+            "Whisper transcription complete (API %.1f s)%s",
+            time.monotonic() - t_api, _mark(),
+        )
         log.debug("Whisper result: %r", text)
         return _filter_hallucination(text)
 

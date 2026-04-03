@@ -141,6 +141,7 @@ class StateMachine:
         self._wake_event = threading.Event()    # set by wake word callback
         self._shutdown_event = threading.Event()
         self._os_shutdown_requested: bool = False  # True only for voice/button shutdown
+        self._pipeline_t0: float = 0.0          # monotonic time of last wake word detection
 
         # Music library — scanned once at startup
         self._music_tracks: list[Path] = _scan_music()
@@ -374,7 +375,10 @@ class StateMachine:
             # Pause wake word: both share the same mic device.
             self._wake_word.pause()
             try:
-                text = self._transcriber.transcribe(wait_for_speech_seconds=speech_timeout)
+                text = self._transcriber.transcribe(
+                    wait_for_speech_seconds=speech_timeout,
+                    t0=self._pipeline_t0,
+                )
             except Exception:
                 log.exception("Transcription error — skipping utterance")
                 continue
@@ -446,14 +450,15 @@ class StateMachine:
             self._leds.set_chest_effect(config.LED_CMD_SPEAKING)
 
             # --- Parse and respond ---
+            _elapsed = f" [+{time.monotonic() - self._pipeline_t0:.1f}s]"
             cmd = parse(text)
             if cmd is not None:
-                log.info("Matched command: phrases[0]=%r action=%r", cmd.phrases[0], cmd.action)
+                log.info("Command matched: %r → %r%s", cmd.phrases[0], cmd.action, _elapsed)
                 log.info("Rex (cmd): %s", cmd.response)
                 next_state = self._execute_command(cmd)
             else:
-                log.info("No command match — routing to LLM")
-                next_state = self._speak_llm(text, image=self._last_frame)
+                log.info("No command match — sending to ChatGPT%s", _elapsed)
+                next_state = self._speak_llm(text, image=self._last_frame, t0=self._pipeline_t0)
 
             # Ensure all audio has finished before re-opening the mic.
             self._player.wait_for_speech()
@@ -521,6 +526,7 @@ class StateMachine:
 
     def _on_wake_word(self, model_name: str) -> None:
         if self._state == State.IDLE:
+            self._pipeline_t0 = time.monotonic()
             log.info("Wake word detected (%s)", model_name)
             # Capture a frame at the moment of wake — this is the scene
             # context that will accompany the next LLM call.
@@ -625,12 +631,12 @@ class StateMachine:
     # LLM fallback
     # ------------------------------------------------------------------
 
-    def _speak_llm(self, text: str, image: str | None = None) -> State | None:
+    def _speak_llm(self, text: str, image: str | None = None, t0: float | None = None) -> State | None:
         """Stream text (and optional vision frame) through ChatGPT → ElevenLabs."""
         servo_stop = self._begin_speech(emotion="neutral")
         try:
-            tokens = self._llm.chat_stream(text, image=image)
-            self._synthesizer.speak_stream(tokens)
+            tokens = self._llm.chat_stream(text, image=image, t0=t0)
+            self._synthesizer.speak_stream(tokens, t0=t0)
         except Exception:
             log.exception("LLM/TTS error for: %.60s", text)
         finally:

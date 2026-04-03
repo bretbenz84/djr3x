@@ -355,8 +355,9 @@ class AudioPlayer:
             self._speech_buf_pos += take
             filled += take
 
-        # mono[filled:] is already zero from np.zeros — silence for unfilled frames.
-        # Broadcast mono samples to every output channel (handles 1 or 2 channels).
+        # Apply software volume, then broadcast to every output channel.
+        if config.AUDIO_VOLUME != 1.0:
+            mono = (mono.astype(np.float32) * config.AUDIO_VOLUME).astype(np.int16)
         for ch in range(outdata.shape[1]):
             outdata[:, ch] = mono
 
@@ -415,7 +416,7 @@ class AudioPlayer:
 
                 remaining = len(data) - pos
                 take = min(frames, remaining)
-                outdata[:take] = data[pos : pos + take]
+                outdata[:take] = data[pos : pos + take] * config.AUDIO_VOLUME
                 if take < frames:
                     outdata[take:] = 0.0
                 pos += take
