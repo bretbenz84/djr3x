@@ -332,6 +332,11 @@ class StateMachine:
             # Restore ACTIVE indicators for next listen turn
             self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
 
+        # While loop exited without an explicit break — only happens when
+        # _shutdown_event is set. Transition so run() stops calling us.
+        if self._state == State.ACTIVE:
+            self._transition_to(State.SHUTDOWN)
+
     # ------------------------------------------------------------------
     # State — SHUTDOWN
     # ------------------------------------------------------------------
