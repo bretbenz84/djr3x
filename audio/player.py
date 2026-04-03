@@ -137,6 +137,9 @@ class AudioPlayer:
         has finished playing or stop_speech() is called."""
         path = Path(path)
         data, sr = _load_audio_file(path, target_sr=SPEECH_SAMPLE_RATE)
+        # Mix stereo (or higher) down to mono for the speech stream.
+        if data.ndim == 2:
+            data = data.mean(axis=1)
         # float32 → int16 for the speech stream
         samples = np.clip(data * 32767.0, -32768, 32767).astype(np.int16)
 
