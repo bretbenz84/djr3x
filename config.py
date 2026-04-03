@@ -145,10 +145,11 @@ AUDIO_OUTPUT_DEVICE = _optional_int("AUDIO_OUTPUT_DEVICE")  # None → system de
 
 # Silence-gated recording: stop capturing when RMS drops below threshold
 # for SILENCE_DURATION consecutive seconds (or MAX_RECORD_SECONDS elapses)
-SILENCE_THRESHOLD         = 300    # RMS amplitude (0–32767) — legacy, kept for reference
-TRANSCRIBE_SPEECH_THRESHOLD = 200  # RMS threshold used by Transcriber to detect speech start
-SILENCE_DURATION          = 1.2    # seconds of silence to end capture
-MAX_RECORD_SECONDS        = 12.0   # hard cap on a single utterance
+SILENCE_THRESHOLD            = 300   # RMS amplitude (0–32767) — legacy, kept for reference
+TRANSCRIBE_SPEECH_THRESHOLD  = 500  # RMS threshold to detect speech start (raise if hallucinating on noise)
+TRANSCRIBE_MIN_SPEECH_CHUNKS = 3    # consecutive chunks above threshold required before speech is confirmed
+SILENCE_DURATION             = 1.2  # seconds of silence to end capture
+MAX_RECORD_SECONDS           = 12.0 # hard cap on a single utterance
 
 # ---------------------------------------------------------------------------
 # Audio — mouth LED brightness

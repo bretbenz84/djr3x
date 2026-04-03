@@ -95,6 +95,7 @@ class Transcriber:
         frames_list: list[np.ndarray] = []
         silence_chunks: int = 0
         speech_started: bool = False
+        consecutive_speech: int = 0   # chunks above threshold in a row
 
         wait_chunks: int | None = (
             round(wait_for_speech_seconds * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE)
@@ -121,12 +122,18 @@ class Transcriber:
                 rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
 
                 if rms >= config.TRANSCRIBE_SPEECH_THRESHOLD:
-                    if not speech_started:
-                        log.debug("Transcriber: speech start detected (rms=%.0f)", rms)
-                    speech_started = True
+                    consecutive_speech += 1
                     silence_chunks = 0
-                elif speech_started:
-                    silence_chunks += 1
+                    if not speech_started and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS:
+                        log.debug(
+                            "Transcriber: speech confirmed (%d consecutive chunks, rms=%.0f)",
+                            consecutive_speech, rms,
+                        )
+                        speech_started = True
+                else:
+                    consecutive_speech = 0
+                    if speech_started:
+                        silence_chunks += 1
 
                 frames_list.append(samples)
 
@@ -138,7 +145,7 @@ class Transcriber:
                     )
                     break
 
-                # Early exit: speech hasn't started and the caller's wait window expired.
+                # Early exit: speech hasn't been confirmed and the caller's wait window expired.
                 if not speech_started and wait_chunks is not None and chunk_index + 1 >= wait_chunks:
                     log.debug(
                         "Transcriber: no speech within %.1f s — returning None",
@@ -151,7 +158,7 @@ class Transcriber:
                     config.MAX_RECORD_SECONDS,
                 )
 
-        # Nothing above the silence threshold — skip the API call entirely.
+        # Speech was never confirmed — skip the API call entirely.
         if not speech_started:
             return ""
 
