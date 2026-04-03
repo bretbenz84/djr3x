@@ -190,7 +190,7 @@ WHISPER_LANGUAGE = _optional("WHISPER_LANGUAGE", "en")
 
 # Minimum number of words in a Whisper result to be treated as real speech.
 # Results shorter than this are discarded as likely hallucinations.
-WHISPER_MIN_WORDS = 3
+WHISPER_MIN_WORDS = 2
 
 # Substrings (lowercase) that identify known Whisper hallucination phrases.
 # Any result whose lowercased text contains one of these is silently dropped.
