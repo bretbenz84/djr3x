@@ -42,6 +42,7 @@ from __future__ import annotations
 import enum
 import logging
 import os
+import random
 import threading
 import time
 from pathlib import Path
@@ -62,6 +63,21 @@ log = logging.getLogger(__name__)
 
 # How often the servo-speak worker calls speak_move() during TTS (~20 Hz).
 _SERVO_SPEAK_INTERVAL: float = 0.05
+
+_ARE_YOU_THERE_PHRASES: list[str] = [
+    "Are you there?",
+    "Hello?",
+    "Did you need something?",
+    "I'm listening...",
+    "Uh... hello?",
+]
+
+_GOODBYE_PHRASES: list[str] = [
+    "Ok, nevermind!",
+    "Alright, catch you later!",
+    "I'll be here if you need me.",
+    "Ok, going back to sleep!",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +274,16 @@ class StateMachine:
 
     def _run_active(self) -> None:
         """Full interactivity loop: transcribe → parse/LLM → speak; repeat
-        until ACTIVE_IDLE_TIMEOUT or an explicit state-change action."""
+        until a silence timeout or an explicit state-change action.
+
+        Two timeout modes:
+          - First listen after wake word: WAKE_NO_SPEECH_TIMEOUT seconds.
+            On timeout, Rex prompts "Are you there?" then waits
+            WAKE_GOODBYE_TIMEOUT more seconds.  If still silent, Rex says
+            goodbye and returns to IDLE.
+          - Follow-up listen after a response: ACTIVE_TIMEOUT_SECONDS.
+            On timeout, Rex returns to IDLE directly (no prompt).
+        """
         log.info("→ ACTIVE")
 
         self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
@@ -268,41 +293,92 @@ class StateMachine:
         if self._servos is not None:
             self._servos.set_emotion("neutral")
 
-        last_interaction = time.monotonic()
+        # False = first listen since wake word; True = follow-up after a response.
+        after_response = False
 
         while self._state == State.ACTIVE and not self._shutdown_event.is_set():
-            # --- Idle timeout ---
-            elapsed = time.monotonic() - last_interaction
-            if elapsed >= config.ACTIVE_IDLE_TIMEOUT:
-                log.info("Active idle timeout (%.0f s) — returning to IDLE", elapsed)
-                self._transition_to(State.IDLE)
-                break
-
             if not self._transcriber.is_available():
-                # Transcriber unavailable — just wait for timeout.
                 time.sleep(1.0)
                 continue
 
             # --- Listen indicator ---
             self._leds.set_head_effect(config.LED_CMD_LISTENING)
 
-            # --- Transcribe (blocks until silence or MAX_RECORD_SECONDS) ---
-            # Pause wake word first: both share the same mic device and
-            # opening two InputStreams on it yields PortAudio error -9985.
+            # Choose how long to wait for speech to start.
+            speech_timeout = (
+                config.ACTIVE_TIMEOUT_SECONDS if after_response
+                else config.WAKE_NO_SPEECH_TIMEOUT
+            )
+
+            # --- Transcribe (blocks until speech+silence, timeout, or MAX_RECORD_SECONDS) ---
+            # Pause wake word: both share the same mic device.
             self._wake_word.pause()
             try:
-                text = self._transcriber.transcribe()
+                text = self._transcriber.transcribe(wait_for_speech_seconds=speech_timeout)
             except Exception:
                 log.exception("Transcription error — skipping utterance")
                 continue
             finally:
                 self._wake_word.resume()
 
+            # --- No speech detected within the timeout window ---
+            if text is None:
+                if after_response:
+                    log.info(
+                        "Follow-up silence timeout (%.0f s) — returning to IDLE",
+                        config.ACTIVE_TIMEOUT_SECONDS,
+                    )
+                    self._play_return_to_idle_chime()
+                    self._transition_to(State.IDLE)
+                    return
+
+                # First listen — prompt with "are you there?"
+                prompt = random.choice(_ARE_YOU_THERE_PHRASES)
+                log.info("No speech on first listen — prompting: %r", prompt)
+                self._leds.set_head_effect(config.LED_CMD_SPEAKING)
+                servo_stop = self._begin_speech()
+                try:
+                    self._synthesizer.speak(prompt)
+                finally:
+                    self._end_speech(servo_stop)
+                self._player.wait_for_speech()
+
+                # Second-chance listen
+                self._leds.set_head_effect(config.LED_CMD_LISTENING)
+                self._wake_word.pause()
+                try:
+                    text = self._transcriber.transcribe(
+                        wait_for_speech_seconds=config.WAKE_GOODBYE_TIMEOUT
+                    )
+                except Exception:
+                    log.exception("Transcription error in second-chance listen")
+                    text = None
+                finally:
+                    self._wake_word.resume()
+
+                if not text:   # None (timeout) or "" (Whisper got nothing)
+                    goodbye = random.choice(_GOODBYE_PHRASES)
+                    log.info("Still no speech — saying goodbye: %r", goodbye)
+                    self._leds.set_head_effect(config.LED_CMD_SPEAKING)
+                    servo_stop = self._begin_speech()
+                    try:
+                        self._synthesizer.speak(goodbye)
+                    finally:
+                        self._end_speech(servo_stop)
+                    self._player.wait_for_speech()
+                    self._play_return_to_idle_chime()
+                    self._transition_to(State.IDLE)
+                    return
+                # else: second-chance produced text — fall through to process it
+
+            # --- Speech detected but Whisper returned nothing ---
             if not text:
                 log.debug("Empty transcription — waiting again")
+                after_response = True   # speech was heard; skip "are you there?" next time
                 continue
 
-            last_interaction = time.monotonic()
+            # --- We have a transcription ---
+            after_response = True
             log.info("Transcribed: %r", text)
 
             # --- Speaking indicator ---
@@ -319,15 +395,19 @@ class StateMachine:
                 log.info("No command match — routing to LLM")
                 next_state = self._speak_llm(text, image=self._last_frame)
 
-            if next_state is not None:
-                self._transition_to(next_state)
-                break
+            # Ensure all audio has finished before re-opening the mic.
+            self._player.wait_for_speech()
 
-            # Restore ACTIVE indicators for next listen turn
+            if next_state is not None:
+                if next_state == State.IDLE:
+                    self._play_return_to_idle_chime()
+                self._transition_to(next_state)
+                return
+
+            # Restore ACTIVE indicators for next listen turn.
             self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
 
-        # While loop exited without an explicit break — only happens when
-        # _shutdown_event is set. Transition so run() stops calling us.
+        # Loop exited because _shutdown_event was set.
         if self._state == State.ACTIVE:
             self._transition_to(State.SHUTDOWN)
 
@@ -395,6 +475,12 @@ class StateMachine:
     # ------------------------------------------------------------------
     # Speech helpers
     # ------------------------------------------------------------------
+
+    def _play_return_to_idle_chime(self) -> None:
+        """Play the startup chime to signal Rex is done listening, then wait
+        for it to finish before entering IDLE."""
+        self._player.play_chime()
+        self._player.wait_for_music(timeout=10.0)
 
     def _begin_speech(self, emotion: str = "neutral") -> threading.Event:
         """Prepare hardware for a speech output burst.

@@ -145,9 +145,10 @@ AUDIO_OUTPUT_DEVICE = _optional_int("AUDIO_OUTPUT_DEVICE")  # None → system de
 
 # Silence-gated recording: stop capturing when RMS drops below threshold
 # for SILENCE_DURATION consecutive seconds (or MAX_RECORD_SECONDS elapses)
-SILENCE_THRESHOLD    = 300    # RMS amplitude (0–32767)
-SILENCE_DURATION     = 1.2    # seconds of silence to end capture
-MAX_RECORD_SECONDS   = 12.0   # hard cap on a single utterance
+SILENCE_THRESHOLD         = 300    # RMS amplitude (0–32767) — legacy, kept for reference
+TRANSCRIBE_SPEECH_THRESHOLD = 200  # RMS threshold used by Transcriber to detect speech start
+SILENCE_DURATION          = 1.2    # seconds of silence to end capture
+MAX_RECORD_SECONDS        = 12.0   # hard cap on a single utterance
 
 # ---------------------------------------------------------------------------
 # Audio — mouth LED brightness
@@ -208,7 +209,10 @@ COMMAND_FUZZY_THRESHOLD = 0.72
 # State machine
 # ---------------------------------------------------------------------------
 
-ACTIVE_IDLE_TIMEOUT = 20.0   # seconds of silence before returning to IDLE
+ACTIVE_IDLE_TIMEOUT  = 20.0  # legacy — superseded by ACTIVE_TIMEOUT_SECONDS
+ACTIVE_TIMEOUT_SECONDS   = 8.0   # seconds of silence after a response before returning to IDLE
+WAKE_NO_SPEECH_TIMEOUT   = 5.0   # seconds to wait for first speech after wake word
+WAKE_GOODBYE_TIMEOUT     = 4.0   # seconds to wait after "are you there?" before saying goodbye
 
 # ---------------------------------------------------------------------------
 # Vision — webcam capture

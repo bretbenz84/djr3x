@@ -76,20 +76,31 @@ class Transcriber:
     # Transcription
     # ------------------------------------------------------------------
 
-    def transcribe(self) -> str:
+    def transcribe(self, wait_for_speech_seconds: float | None = None) -> str | None:
         """Capture one utterance from the microphone and return its text.
 
         Opens the mic, reads chunks using the same silence-gating logic as
         the former Vosk implementation, then encodes the buffer as a WAV
         and sends it to the Whisper API. Returns the transcription as a
-        stripped string (empty string if no speech was detected or the API
-        call fails).
+        stripped string, or empty string if no speech was detected, or the
+        API call fails.
+
+        If wait_for_speech_seconds is given, returns None (without an API
+        call) if speech has not started within that many seconds. This lets
+        the caller distinguish "no speech in the window" from "speech was
+        detected but Whisper returned nothing".
 
         Raises sounddevice.PortAudioError if the mic cannot be opened.
         """
         frames_list: list[np.ndarray] = []
         silence_chunks: int = 0
         speech_started: bool = False
+
+        wait_chunks: int | None = (
+            round(wait_for_speech_seconds * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE)
+            if wait_for_speech_seconds is not None
+            else None
+        )
 
         log.debug("Transcriber: mic open, listening …")
 
@@ -100,7 +111,7 @@ class Transcriber:
             device=config.AUDIO_INPUT_DEVICE,
             blocksize=config.AUDIO_CHUNK_SIZE,
         ) as stream:
-            for _ in range(_MAX_CHUNKS):
+            for chunk_index in range(_MAX_CHUNKS):
                 frames, overflowed = stream.read(config.AUDIO_CHUNK_SIZE)
                 if overflowed:
                     log.debug("Transcriber: audio buffer overflowed (input too slow)")
@@ -109,7 +120,7 @@ class Transcriber:
                 samples = frames[:, 0]  # flatten to 1-D mono array
                 rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
 
-                if rms >= config.SILENCE_THRESHOLD:
+                if rms >= config.TRANSCRIBE_SPEECH_THRESHOLD:
                     if not speech_started:
                         log.debug("Transcriber: speech start detected (rms=%.0f)", rms)
                     speech_started = True
@@ -126,6 +137,14 @@ class Transcriber:
                         silence_chunks, _SILENCE_CHUNKS_NEEDED,
                     )
                     break
+
+                # Early exit: speech hasn't started and the caller's wait window expired.
+                if not speech_started and wait_chunks is not None and chunk_index + 1 >= wait_chunks:
+                    log.debug(
+                        "Transcriber: no speech within %.1f s — returning None",
+                        wait_for_speech_seconds,
+                    )
+                    return None
             else:
                 log.debug(
                     "Transcriber: hit MAX_RECORD_SECONDS cap (%.1f s)",
