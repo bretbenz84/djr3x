@@ -130,14 +130,22 @@ STARTUP: list[Step] = [
          chest=config.LED_CMD_IDLE,
          eyes=(0, 40, 140)),
 
-    # 0.5 s — coming up: headlift continuing; neck sweeps to min (looks left).
-    Step(delay=0.5,
+    # 0.4 s — neck returns to center (max→neutral = ~3984 qµs at speed 100 ≈ 0.4 s).
+    #          Headlift and visor continue rising while neck visibly pauses at center.
+    Step(delay=0.4,
+         servos={_T: 4500, _L: 4200, _V: 6000,
+                 _P: 6000},
+         eyes=(0, 55, 180)),
+
+    # 0.8 s — neck sweeps to min (looks left); 6000→1984 = 4016 qµs, completes in ~0.4 s
+    #          leaving 0.4 s for arms and visor to catch up before the next step.
+    Step(delay=0.8,
          servos={_T: 4400, _L: 5000, _V: 6300,
                  _P: config.SERVO_CHANNELS[_P]["min"],
                  _AL: 5900, _AR: 5900, _HL: 5800, _HR: 5800},
          eyes=(0, 70, 220)),
 
-    # 0.5 s — fully up: headlift at neutral, neck returns to center, visor open.
+    # 0.5 s — fully up: neck returns to center, headlift at neutral, visor open.
     #          Reset neck speed back to default so idle/speech motion is normal.
     Step(delay=0.5,
          speeds={_P: config.SERVO_DEFAULT_SPEED},
