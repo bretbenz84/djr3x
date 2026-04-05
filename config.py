@@ -198,15 +198,23 @@ MOUTH_LED_GAIN      = 3.0    # multiplier applied to normalised RMS before
 # Speech — wake word (OpenWakeWord)
 # ---------------------------------------------------------------------------
 
-# Paths to the two .onnx wake word model files.  Override in .env if needed.
+# Paths to the four .onnx wake word model files.  Override in .env if needed.
 # Put custom-trained models in assets/models/ and point these at them.
 WAKE_WORD_MODEL_1 = Path(
     _optional("WAKE_WORD_MODEL_1",
-              str(MODELS_DIR / "hey_rex.onnx"))
+              str(MODELS_DIR / "Dee-Jay_Rex.onnx"))
 )
 WAKE_WORD_MODEL_2 = Path(
     _optional("WAKE_WORD_MODEL_2",
-              str(MODELS_DIR / "hey_r3x.onnx"))
+              str(MODELS_DIR / "Hey_DJ_Rex.onnx"))
+)
+WAKE_WORD_MODEL_3 = Path(
+    _optional("WAKE_WORD_MODEL_3",
+              str(MODELS_DIR / "Hey_rex.onnx"))
+)
+WAKE_WORD_MODEL_4 = Path(
+    _optional("WAKE_WORD_MODEL_4",
+              str(MODELS_DIR / "Yo_robot.onnx"))
 )
 
 WAKE_WORD_THRESHOLD = 0.6    # minimum score (0–1) to count as a detection

@@ -8,5 +8,4 @@ dist/
 build/
 assets/audio/*.wav
 assets/audio/*.mp3
-models/
 djr3x.log*

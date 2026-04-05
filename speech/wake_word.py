@@ -73,17 +73,26 @@ class WakeWordDetector:
     # Setup
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _all_model_paths() -> tuple:
+        return (
+            config.WAKE_WORD_MODEL_1,
+            config.WAKE_WORD_MODEL_2,
+            config.WAKE_WORD_MODEL_3,
+            config.WAKE_WORD_MODEL_4,
+        )
+
     def is_available(self) -> bool:
         """Return True if at least one wake word model file exists on disk.
 
         Does NOT load the model. Safe to call at any time.
         """
-        return config.WAKE_WORD_MODEL_1.exists() or config.WAKE_WORD_MODEL_2.exists()
+        return any(p.exists() for p in self._all_model_paths())
 
     def warmup(self) -> None:
         """Load wake word model(s) into memory. Call once at startup.
 
-        Loads whichever of the two configured .onnx files actually exist.
+        Loads whichever of the four configured .onnx files actually exist.
         Raises RuntimeError if no model files are found.
         Raises RuntimeError if called more than once.
         """
@@ -91,26 +100,21 @@ class WakeWordDetector:
             log.warning("WakeWordDetector.warmup() called more than once — ignoring")
             return
 
-        paths = [
-            p for p in (config.WAKE_WORD_MODEL_1, config.WAKE_WORD_MODEL_2)
-            if p.exists()
-        ]
+        all_paths = self._all_model_paths()
+        paths = [p for p in all_paths if p.exists()]
         if not paths:
             raise RuntimeError(
                 "No wake word model files found.\n"
-                f"  Model 1: {config.WAKE_WORD_MODEL_1}\n"
-                f"  Model 2: {config.WAKE_WORD_MODEL_2}\n"
-                "Place trained .onnx files at those paths or update .env."
+                + "\n".join(f"  Model {i+1}: {p}" for i, p in enumerate(all_paths))
+                + "\nPlace trained .onnx files at those paths or update .env."
             )
 
-        missing = [
-            p for p in (config.WAKE_WORD_MODEL_1, config.WAKE_WORD_MODEL_2)
-            if not p.exists()
-        ]
+        missing = [p for p in all_paths if not p.exists()]
+        total = len(all_paths)
         if missing:
             log.warning(
                 "Wake word model(s) not found (running with %d/%d): %s",
-                len(paths), 2, [str(m) for m in missing],
+                len(paths), total, [str(m) for m in missing],
             )
 
         log.info(
@@ -121,7 +125,7 @@ class WakeWordDetector:
             wakeword_model_paths=[str(p) for p in paths],
         )
         loaded = list(self._model.models.keys())
-        log.info("Wake word models loaded: %s", loaded)
+        log.info("Wake word models loaded (%d/%d models): %s", len(loaded), total, loaded)
 
     # ------------------------------------------------------------------
     # Lifecycle
