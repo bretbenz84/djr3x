@@ -566,8 +566,12 @@ class StateMachine:
     def _play_wake_greeting(self) -> None:
         """Greet the user on wake word.
 
-        GREETER_PROBABILITY chance: capture a frame, generate a personalized
-        Rex-style greeting via gpt-4o, and speak it through the synthesizer.
+        GREETER_PROBABILITY chance: play a holding clip while concurrently
+        capturing a frame and generating a personalized Rex-style greeting via
+        gpt-4o.  When both finish, speak the personalized greeting.  If the
+        clip ends before the greeting is ready, wait silently then speak.  If
+        the greeting fails for any reason, fall back to the canned greeting.
+
         Falls back to a simple canned greeting if the camera is unavailable,
         the API call fails, or the random roll doesn't land.
 
@@ -581,18 +585,41 @@ class StateMachine:
 
         if do_personalized:
             log.info("Wake greeting: attempting personalized greeting")
-            frame = self._camera.capture_frame()
-            if frame:
-                greeting = self._greeter.generate(frame)
-                if greeting:
-                    servo_stop = self._begin_speech(emotion="excited")
+            _HOLDING_CLIP = config.ASSETS_DIR / "audio" / "This is your cap.mp3"
+            greeting_result: list[str | None] = [None]
+
+            def _generate_personalized() -> None:
+                frame = self._camera.capture_frame()
+                if frame:
+                    greeting_result[0] = self._greeter.generate(frame)
+
+            greeter_thread = threading.Thread(
+                target=_generate_personalized,
+                daemon=True,
+                name="djr3x-greeter",
+            )
+            greeter_thread.start()
+
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                # Play holding clip while camera capture + GPT-4o calls run in background.
+                if _HOLDING_CLIP.exists():
+                    self._player.play_file(_HOLDING_CLIP)
+                # Clip done (or missing) — wait silently if greeting isn't ready yet.
+                greeter_thread.join(timeout=15.0)
+                if greeting_result[0]:
                     try:
-                        self._synthesizer.speak(greeting)
+                        self._synthesizer.speak(greeting_result[0])
                     except Exception:
                         log.exception("Wake greeting: TTS error")
-                    finally:
-                        self._end_speech(servo_stop)
-                    return
+            except Exception:
+                log.exception("Wake greeting: personalized path error")
+                greeter_thread.join(timeout=1.0)
+            finally:
+                self._end_speech(servo_stop)
+
+            if greeting_result[0]:
+                return
             log.info("Wake greeting: personalized path failed — falling back to canned")
 
         # Simple canned greeting — audio file or short TTS line.
