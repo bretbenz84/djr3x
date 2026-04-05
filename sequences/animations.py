@@ -159,23 +159,32 @@ SHUTDOWN: list[Step] = [
          chest=config.LED_CMD_IDLE,
          eyes=(0, 60, 180)),
 
-    # 0.5 s — head drooping further, headlift starts dropping, visor lowering more
+    # 0.5 s — head drooping, headlift drops, visor lowering; neck starts centering,
+    #          elbow begins lowering, arms start dropping
     Step(delay=0.5,
-         servos={_T: 4900, _L: 5000, _V: 5500, _AL: 5500, _AR: 5500},
+         servos={_T: 4900, _L: 5000, _V: 5500,
+                 _P: 6100,                       # neck drifting toward center
+                 _AL: 5800, _AR: 5000, _HR: 5000},
          eyes=_EYE_SAD),
 
-    # 0.6 s — headlift continuing down, headtilt and visor nearly at extremes
+    # 0.6 s — headlift continuing down, headtilt and visor nearly at extremes;
+    #          neck reaches center, elbow and arms continuing down
     Step(delay=0.6,
          servos={_T: 5200, _L: 3500, _V: 5000,
-                 _AL: 5100, _AR: 5100, _HL: 5500, _HR: 5500},
+                 _P: 6000,                       # neck centered
+                 _AL: 6100, _AR: 4400, _HL: 5500, _HR: 4400},
          eyes=_EYE_DIM_BLUE),
 
-    # 0.6 s — fully powered-down slump: headlift min, headtilt max, visor min
+    # 0.6 s — fully powered-down slump: all channels at final shutdown positions
     Step(delay=0.6,
          servos={_T: config.SERVO_CHANNELS[_T]["max"],   # headtilt fully down
                  _L: config.SERVO_CHANNELS[_L]["min"],   # headlift fully down
                  _V: config.SERVO_CHANNELS[_V]["min"],   # visor fully down = eyes covered
-                 _AL: 5000, _AR: 5000, _HL: 5000, _HR: 5000},
+                 _P: config.SERVO_CHANNELS[_P]["neutral"],  # neck at center
+                 _AL: config.SERVO_CHANNELS[_AL]["min"], # elbow fully down (6300)
+                 _AR: config.SERVO_CHANNELS[_AR]["min"], # pokerarm fully down (3968)
+                 _HL: 5000,
+                 _HR: config.SERVO_CHANNELS[_HR]["min"]},  # heroarm fully down (3968)
          chest=config.LED_CMD_OFF,
          eyes=_EYE_OFF),
 

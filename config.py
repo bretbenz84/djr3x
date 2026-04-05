@@ -130,6 +130,10 @@ SERVO_SLUMPED_POSITIONS: dict[int, int] = {
     1: SERVO_CHANNELS[1]["min"],    # headlift fully down (1984)
     2: SERVO_CHANNELS[2]["max"],    # headtilt fully down (5504)
     3: SERVO_CHANNELS[3]["min"],    # visor fully down / eyes covered (4544)
+    4: SERVO_CHANNELS[4]["min"],    # elbow fully down (6300)
+    6: SERVO_CHANNELS[6]["min"],    # pokerarm fully down (3968)
+    7: SERVO_CHANNELS[7]["min"],    # heroarm fully down (3968)
+    # ch 0 (neck) intentionally omitted — neutral (6000) is correct for startup
 }
 
 # Random idle motion timing (seconds)
