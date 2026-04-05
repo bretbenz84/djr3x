@@ -29,6 +29,8 @@ import wave
 from pathlib import Path
 from typing import Iterator
 
+import numpy as np
+
 from elevenlabs.client import ElevenLabs
 from elevenlabs import VoiceSettings
 
@@ -137,6 +139,7 @@ class Synthesizer:
                     elapsed = f" [+{time.monotonic() - t0:.1f}s]" if t0 is not None else ""
                     log.info("First audio chunk playing%s", elapsed)
                     first_chunk_logged = True
+                chunk = _apply_gain(chunk)
                 self._player.feed_speech_chunk(chunk)
                 if accumulator is not None:
                     accumulator.append(chunk)
@@ -156,6 +159,22 @@ class Synthesizer:
 # ---------------------------------------------------------------------------
 # Module-level helpers (no instance state needed)
 # ---------------------------------------------------------------------------
+
+def _apply_gain(chunk: bytes) -> bytes:
+    """Multiply PCM int16 samples by SYNTHESIZER_VOLUME_GAIN and clip.
+
+    Returns the original bytes unchanged when gain is 1.0 to avoid the
+    numpy round-trip overhead on every chunk.
+    """
+    if config.SYNTHESIZER_VOLUME_GAIN == 1.0:
+        return chunk
+    samples = np.frombuffer(chunk, dtype=np.int16).copy()
+    boosted = np.clip(
+        samples.astype(np.float32) * config.SYNTHESIZER_VOLUME_GAIN,
+        -32768.0, 32767.0,
+    ).astype(np.int16)
+    return boosted.tobytes()
+
 
 def _cache_path(text: str) -> Path:
     """Return the .wav cache path for this exact text string.

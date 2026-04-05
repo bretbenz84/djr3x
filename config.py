@@ -170,6 +170,11 @@ AUDIO_OUTPUT_DEVICE = _optional_int("AUDIO_OUTPUT_DEVICE")  # None → system de
 # mixer, so all output paths scale samples by this factor before writing.
 AUDIO_VOLUME: float = max(0.0, min(1.0, float(_optional("AUDIO_VOLUME", "0.5"))))
 
+# TTS gain boost applied to ElevenLabs PCM chunks in synthesizer.py before
+# queuing for playback.  Multiplies int16 samples and clips to [-32768, 32767].
+# Values above 1.0 boost volume; 1.0 = no change.
+SYNTHESIZER_VOLUME_GAIN: float = float(_optional("SYNTHESIZER_VOLUME_GAIN", "2.0"))
+
 # Silence-gated recording: stop capturing when RMS drops below threshold
 # for SILENCE_DURATION consecutive seconds (or MAX_RECORD_SECONDS elapses)
 SILENCE_THRESHOLD            = 300   # RMS amplitude (0–32767) — legacy, kept for reference
