@@ -346,11 +346,20 @@ class StateMachine:
         if self._servos is not None:
             self._servos.set_emotion("neutral")
 
-        # Arm wave — runs in background, concurrent with greeting audio
+        # Start arm wave in background (non-blocking — idle thread stopped inside).
         self._animations.play_wake_greeting_arms()
 
-        # Greet the user — personalized (camera + gpt-4o) or simple canned line.
+        # Greet the user concurrently with the arm wave.
         self._play_wake_greeting()
+
+        # Wait for the wave to finish (usually already done by the time audio ends),
+        # then restore hand speed and restart the servo idle thread.
+        self._animations.wait(timeout=5.0)
+        if self._servos is not None:
+            self._servos.set_channel_speed(
+                config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
+            )
+            self._servos.start()
 
         # Re-enable idle clips now that the user has interacted again.
         self._idle_clips_enabled = True

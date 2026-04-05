@@ -234,7 +234,8 @@ SAD: list[Step] = [
 # so the servo physically reaches its travel extremes for a pronounced twist.
 # 0.4 s per step at max speed (255) gives the servo ~1000 µs of travel time per
 # half-swing (~25% of range per 50 ms), completing the full 4032 qµs span.
-# Runs blocking via play_wake_greeting_arms() — audio starts only after the wave.
+# Launched non-blocking via play_wake_greeting_arms() — runs concurrently with
+# greeting audio so Rex waves while speaking.
 
 WAKE_GREETING: list[Step] = [
     # Elbow raises slightly; hand twists to physical low limit
@@ -323,19 +324,20 @@ class AnimationPlayer:
         self._launch(SHUTDOWN, blocking=True)
 
     def play_wake_greeting_arms(self) -> None:
-        """Play the excited arm-wave greeting, blocking until all 3 cycles complete.
+        """Start the excited arm-wave greeting in a background thread and return immediately.
 
-        The idle thread is stopped for the duration so neither head nor arm
-        motion can fight the animation.  Hand speed is set to maximum (255)
-        so the servo can traverse the full ~4032 qµs span within each 0.4 s
-        step window.  Audio should not start until this method returns.
+        Stops the idle thread and sets hand speed to maximum (255) before
+        launching so no conflicting serial commands can fight the wave.
+        Returns as soon as the animation thread is running so the caller can
+        start greeting audio concurrently.
 
-        - Stops the idle thread before launching so no conflicting serial
-          commands are sent to any channel during the wave.
-        - Sets ch 5 speed to 255 (Maestro maximum) for the greeting only,
-          then restores SERVO_DEFAULT_SPEED before restarting idle motion.
-        - Uses config.SERVO_CHANNELS[5]['min'] / ['max'] as targets (set in
-          the WAKE_GREETING sequence) — no hardcoded values.
+        The caller is responsible for cleanup once both audio and animation
+        have finished:
+            self._animations.wait(timeout=5.0)
+            if self._servos is not None:
+                self._servos.set_channel_speed(
+                    config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED)
+                self._servos.start()
         """
         log.info(
             "WAKE_GREETING: ch 5 (hand) targets  low=%d qµs  high=%d qµs"
@@ -353,15 +355,8 @@ class AnimationPlayer:
             # extreme within the 0.4 s step window (speed 255 ≈ unlimited).
             self._servos.set_channel_speed(config.SERVO_HAND_LEFT, 255)
 
-        # Run blocking — returns only after the last step completes.
-        self._launch(WAKE_GREETING, blocking=True)
-
-        if self._servos is not None:
-            # Restore normal hand speed, then restart the idle thread.
-            self._servos.set_channel_speed(
-                config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
-            )
-            self._servos.start()
+        # Non-blocking — returns immediately; animation runs in daemon thread.
+        self._launch(WAKE_GREETING, blocking=False)
 
     def play_emotion(self, emotion: str) -> None:
         """Play an emotion animation in the background.
