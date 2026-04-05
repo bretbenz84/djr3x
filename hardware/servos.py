@@ -228,11 +228,25 @@ class ServoController:
     def home(self) -> None:
         """Move all servos to their neutral home positions.
 
+        In SERVO_SAFE_MODE, moves one channel at a time with a slow speed
+        command before each move and a 0.5 s delay between channels.
+        In normal mode, sends all targets simultaneously.
+
         Call on startup (done by __init__) and on shutdown.
         """
-        with self._lock:
+        if config.SERVO_SAFE_MODE:
+            log.info("Safe-mode homing: moving channels one at a time.")
             for channel, cfg in config.SERVO_CHANNELS.items():
-                self._send_target(channel, cfg["neutral"])
+                with self._lock:
+                    self._send_speed(channel, config.SERVO_STARTUP_SPEED)
+                    self._send_target(channel, cfg["neutral"])
+                log.debug("Homed channel %d (%s) at startup speed %d",
+                          channel, cfg["name"], config.SERVO_STARTUP_SPEED)
+                time.sleep(0.5)
+        else:
+            with self._lock:
+                for channel, cfg in config.SERVO_CHANNELS.items():
+                    self._send_target(channel, cfg["neutral"])
         log.debug("All servos moved to home positions.")
 
     # ------------------------------------------------------------------

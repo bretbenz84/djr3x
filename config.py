@@ -115,6 +115,12 @@ SERVO_IDLE_MOVE_INTERVAL_MAX = 4.0   # maximum time between random moves
 SERVO_DEFAULT_SPEED        = 20
 SERVO_EXCITED_SPEED        = 40
 SERVO_SAD_SPEED            = 8
+SERVO_STARTUP_SPEED        = 8    # slow speed used during safe-mode homing
+
+# Safe startup mode: home servos one at a time with a 0.5 s delay between
+# each channel, preceded by a speed command to ensure a slow controlled move.
+# Set SERVO_SAFE_MODE=false in .env once all neutral positions are confirmed.
+SERVO_SAFE_MODE: bool = _optional("SERVO_SAFE_MODE", "true").lower() not in ("0", "false", "no")
 
 # ---------------------------------------------------------------------------
 # Audio — recording / wake word
