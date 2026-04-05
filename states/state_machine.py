@@ -537,9 +537,9 @@ class StateMachine:
         # Theatrical power-down sequence (blocking — 2.2 s).
         self._animations.play_shutdown()
 
-        # Final safe state: all servos home, all LEDs off.
-        if self._servos is not None:
-            self._servos.home()
+        # Shutdown animation IS the final servo state — do not call home() here,
+        # it would override the slumped pose with neutral positions.
+        # Just kill the LEDs.
         self._leds.set_chest_effect(config.LED_CMD_OFF)
         self._leds.set_head_effect(config.LED_CMD_OFF)
 
