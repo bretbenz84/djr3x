@@ -132,8 +132,9 @@ ARM_IDLE_INTERVAL_MIN   = float(_optional("ARM_IDLE_INTERVAL_MIN",   "2.0"))   #
 ARM_IDLE_INTERVAL_MAX   = float(_optional("ARM_IDLE_INTERVAL_MAX",   "4.0"))
 
 # Arm speech-reactive tuning
-SERVO_ELBOW_SPEAK_MULT  = float(_optional("SERVO_ELBOW_SPEAK_MULT", "1.2"))   # elbow intensity multiplier (lower = less jerk on narrow range)
-SERVO_HAND_SPEAK_SPEED  = int(_optional("SERVO_HAND_SPEAK_SPEED",   "100"))   # ch 5 Maestro speed during speech/greeting (higher = completes twist in time)
+SERVO_ELBOW_SPEAK_MULT     = float(_optional("SERVO_ELBOW_SPEAK_MULT",     "1.2"))  # elbow intensity multiplier (lower = less jerk on narrow range)
+SERVO_ELBOW_SPEAK_THROTTLE = int(_optional("SERVO_ELBOW_SPEAK_THROTTLE",   "3"))    # only update elbow every N speak_move() calls so it completes each raise/lower
+SERVO_HAND_SPEAK_SPEED     = int(_optional("SERVO_HAND_SPEAK_SPEED",       "100"))  # ch 5 Maestro speed during speech (higher = completes twist in time)
 
 # Maestro move speed (0 = unlimited; units = (0.25µs) / (10ms))
 SERVO_DEFAULT_SPEED        = 20

@@ -55,6 +55,7 @@ log = logging.getLogger(__name__)
 _CMD_SET_TARGET = 0x84   # Set Target:       0x84 ch lo hi
 _CMD_SET_SPEED  = 0x87   # Set Speed:        0x87 ch lo hi
 _CMD_SET_ACCEL  = 0x89   # Set Acceleration: 0x89 ch lo hi
+_CMD_GO_HOME    = 0xA2   # Go Home (compact, single byte — no parameters)
 
 # Channels moved by the background idle thread (arms only)
 _IDLE_CHANNELS = config.ARM_CHANNELS
@@ -113,9 +114,16 @@ class ServoController:
         self._current_speed: int = config.SERVO_DEFAULT_SPEED
         self._stop_event = threading.Event()
         self._idle_thread: threading.Thread | None = None
-        # Throttle counter for ch 5 (hand) in speak_move(): servo is too slow to
-        # complete large sweeps at 20 Hz, so we only send a new target every 4 calls.
+        # Throttle counters for slow-moving arm channels in speak_move().
+        # ch 5 (hand): update every 4 calls (~200 ms) — servo needs time to
+        #   complete each full-range twist before receiving a new target.
+        # ch 4 (elbow): update every SERVO_ELBOW_SPEAK_THROTTLE calls so it
+        #   makes slow deliberate raises rather than rapid small jitters.
         self._hand_speak_counter: int = 0
+        self._elbow_speak_counter: int = 0
+        # Set by pause_arm_idle() to prevent the idle loop from sending conflicting
+        # commands to ch 4/5/7 while an arm animation is running.
+        self._arm_idle_pause = threading.Event()
 
         log.info("Opening Maestro serial port %s @ %d baud",
                  config.MAESTRO_PORT, config.MAESTRO_BAUD)
@@ -159,11 +167,53 @@ class ServoController:
         log.info("Servo idle-motion thread stopped.")
 
     def close(self) -> None:
-        """Stop motion, move to home, and close the serial port."""
+        """Stop motion, move to home, power off servos, and close the serial port."""
         self.stop()
         self.home()
+        # Give servos time to reach neutral before cutting PWM output.
+        # In SERVO_SAFE_MODE home() already waits 0.5 s per channel; in normal
+        # mode there is no delay, so we always add 1 s here.
+        time.sleep(1.0)
+        self.power_off()
         self._serial.close()
         log.info("Maestro serial port closed.")
+
+    def power_off(self) -> None:
+        """Disable PWM output on all channels so servos go limp.
+
+        Sequence:
+          1. Send the Maestro compact Go Home command (0xA2) — tells the
+             controller to move channels to their stored home positions, which
+             also confirms the serial link is alive.
+          2. Send Set Target = 0 for every channel.  A target of 0 is the
+             Pololu protocol signal to stop emitting PWM pulses; the servo
+             de-energises and goes limp immediately.
+          3. Flush the OS serial buffer and wait briefly so the Maestro has
+             time to process the commands before the port is closed.
+        """
+        with self._lock:
+            # Step 1 — Go Home (0xA2, compact protocol, no parameters)
+            log.info("power_off: sending Go Home (0xA2)")
+            self._serial.write(bytes([_CMD_GO_HOME]))
+            self._serial.flush()
+            time.sleep(0.1)   # let the Maestro act on Go Home before disabling
+
+            # Step 2 — disable every channel (target = 0 → no PWM pulse)
+            for channel in _ALL_CHANNELS:
+                raw = _encode(_CMD_SET_TARGET, channel, 0)
+                log.info(
+                    "power_off: ch %d (%s) → target 0  bytes=%s",
+                    channel,
+                    config.SERVO_CHANNELS.get(channel, {}).get("name", "?"),
+                    raw.hex(),
+                )
+                self._serial.write(raw)
+
+            # Step 3 — flush and wait for Maestro to process
+            self._serial.flush()
+
+        time.sleep(0.2)   # allow Maestro to act before port closes
+        log.info("Servo power off complete — all channels PWM disabled.")
 
     # ------------------------------------------------------------------
     # Emotion
@@ -246,26 +296,29 @@ class ServoController:
         )
 
         # --- Arm gestures ---
-        # Elbow uses a lower multiplier (SERVO_ELBOW_SPEAK_MULT) to avoid jerky
-        # jumps on its narrow range.  Hand/heroarm use the full multiplier.
-        elbow_intensity = min(1.0, intensity * config.SERVO_ELBOW_SPEAK_MULT)
-        arm_intensity   = min(1.0, intensity * _ARM_SPEAK_INTENSITY_MULT)
+        arm_intensity = min(1.0, intensity * _ARM_SPEAK_INTENSITY_MULT)
 
         elbow_lo, elbow_hi = self._effective_limits(config.SERVO_ARM_LEFT)   # ch 4
         hand_lo,  hand_hi  = self._effective_limits(config.SERVO_HAND_LEFT)  # ch 5
         hero_lo,  hero_hi  = self._effective_limits(config.SERVO_HAND_RIGHT) # ch 7
 
-        # Elbow rises with intensity — reduced multiplier prevents harsh snapping
-        elbow_pos = _clamp(
-            int(elbow_lo + elbow_intensity * (elbow_hi - elbow_lo))
-            + random.randint(-80, 80),
-            elbow_lo, elbow_hi,
-        )
+        # Elbow (ch 4): update every SERVO_ELBOW_SPEAK_THROTTLE calls so the servo
+        # has time to complete each raise/lower before a new target arrives.
+        # Alternates between the low and high end of at least 50% of its span,
+        # scaled by intensity — produces slow deliberate raises instead of jitter.
+        self._elbow_speak_counter += 1
+        elbow_target: int | None = None
+        if self._elbow_speak_counter % config.SERVO_ELBOW_SPEAK_THROTTLE == 0:
+            elbow_center    = (elbow_lo + elbow_hi) // 2
+            # Amplitude: 50–75% of span, growing with intensity
+            elbow_amplitude = int((elbow_hi - elbow_lo) * (0.50 + 0.25 * intensity))
+            if (self._elbow_speak_counter // config.SERVO_ELBOW_SPEAK_THROTTLE) % 2 == 0:
+                elbow_target = _clamp(elbow_center - elbow_amplitude, elbow_lo, elbow_hi)
+            else:
+                elbow_target = _clamp(elbow_center + elbow_amplitude, elbow_lo, elbow_hi)
 
         # Hand (ch 5): only update every 4th call (~200 ms) so the servo can
-        # complete each twist before receiving a new target.  Root cause of
-        # "ch 5 not moving": at 20 Hz with speed 40, the servo only travels
-        # ~25 µs per 50 ms window and random targets cancel each other out.
+        # complete each twist before receiving a new target.
         # Alternates between low and high extremes; amplitude grows with intensity.
         self._hand_speak_counter += 1
         hand_target: int | None = None
@@ -293,12 +346,14 @@ class ServoController:
             self._send_target(1, lift_pos)
             self._send_target(2, tilt_pos)
             self._send_target(3, visor_pos)
-            # Elbow and heroarm at excited speed; hand at higher dedicated speed
-            # so it completes each ~200 ms twist within the throttled window
-            self._send_speed(config.SERVO_ARM_LEFT,   config.SERVO_EXCITED_SPEED)
+            # Elbow at default speed so each raise/lower is slow and deliberate.
+            # Hand at dedicated higher speed so it completes full twists in 200 ms.
+            # Heroarm at excited speed for snappy gestures.
+            self._send_speed(config.SERVO_ARM_LEFT,   config.SERVO_DEFAULT_SPEED)
             self._send_speed(config.SERVO_HAND_RIGHT, config.SERVO_EXCITED_SPEED)
             self._send_speed(config.SERVO_HAND_LEFT,  config.SERVO_HAND_SPEAK_SPEED)
-            self._send_target(config.SERVO_ARM_LEFT,   elbow_pos)
+            if elbow_target is not None:
+                self._send_target(config.SERVO_ARM_LEFT, elbow_target)
             if hand_target is not None:
                 self._send_target(config.SERVO_HAND_LEFT, hand_target)
             self._send_target(config.SERVO_HAND_RIGHT, hero_pos)
@@ -345,6 +400,20 @@ class ServoController:
         with self._lock:
             self._send_speed(channel, speed)
 
+    def pause_arm_idle(self) -> None:
+        """Prevent the idle loop from moving expressive arm channels (ch 4, 5, 7).
+
+        Call before starting an arm animation so the idle thread does not
+        fight the animation with conflicting serial commands to those channels.
+        """
+        self._arm_idle_pause.set()
+        log.debug("Arm idle paused (ch 4/5/7 suppressed during animation)")
+
+    def resume_arm_idle(self) -> None:
+        """Allow the idle loop to resume moving expressive arm channels."""
+        self._arm_idle_pause.clear()
+        log.debug("Arm idle resumed")
+
     def set_position(self, channel: int, position: int) -> None:
         """Move a single channel to position (qµs), clamped to its limits.
 
@@ -353,6 +422,11 @@ class ServoController:
         """
         lo, hi = self._effective_limits(channel)
         position = _clamp(position, lo, hi)
+        if channel == config.SERVO_HAND_LEFT:
+            log.debug(
+                "set_position: ch 5 (hand) → %d qµs  (config limits %d–%d)",
+                position, lo, hi,
+            )
         with self._lock:
             self._send_target(channel, position)
 
@@ -423,7 +497,8 @@ class ServoController:
                 _next_visor = now + random.uniform(5.0, 8.0)
 
             # --- Expressive arms (ch 4, 5, 7): center ARM_IDLE_RANGE_PERCENT of range ---
-            if now >= _next_expressive:
+            # Skipped while pause_arm_idle() is active (arm animation in progress).
+            if now >= _next_expressive and not self._arm_idle_pause.is_set():
                 ch = random.choice(list(_SPEAK_ARM_CHANNELS))
                 lo, hi     = self._effective_limits(ch)
                 center     = (lo + hi) // 2

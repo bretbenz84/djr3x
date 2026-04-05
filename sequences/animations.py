@@ -229,26 +229,27 @@ SAD: list[Step] = [
 
 
 # --- Wake Greeting ----------------------------------------------------------
-# Excited wave hello — elbow raises, hand twists back and forth 3 times (~1.5 s).
-# Uses near-extreme positions on ch 5 (min 3968, max 8000) for a pronounced twist.
-# Arm channels only; runs concurrently with the greeting audio.
-# play_wake_greeting_arms() sets SERVO_HAND_SPEAK_SPEED on ch 5 before launching
-# so the servo has enough speed to complete each twist within the 200 ms windows.
+# Excited wave hello — elbow raises, hand twists back and forth 3 times (~2.9 s).
+# Uses exactly config.SERVO_CHANNELS[5]['min'] / ['max'] for the shake targets
+# so the servo physically reaches its travel extremes for a pronounced twist.
+# 0.4 s per step at max speed (255) gives the servo ~1000 µs of travel time per
+# half-swing (~25% of range per 50 ms), completing the full 4032 qµs span.
+# Runs blocking via play_wake_greeting_arms() — audio starts only after the wave.
 
 WAKE_GREETING: list[Step] = [
-    # Elbow raises slightly; hand twists to low extreme — start of wave
+    # Elbow raises slightly; hand twists to physical low limit
     Step(delay=0.0,
-         servos={_AL: 6450, _HL: 4300}),
+         servos={_AL: 6450, _HL: config.SERVO_CHANNELS[_HL]["min"]}),
 
-    # Alternate near-extreme twists — 3 complete low/high cycles
-    Step(delay=0.20, servos={_HL: 7700}),
-    Step(delay=0.20, servos={_HL: 4300}),
-    Step(delay=0.20, servos={_HL: 7700}),
-    Step(delay=0.20, servos={_HL: 4300}),
-    Step(delay=0.20, servos={_HL: 7700}),
+    # Alternate full-range twists — 3 complete low/high cycles at 0.4 s each
+    Step(delay=0.4, servos={_HL: config.SERVO_CHANNELS[_HL]["max"]}),
+    Step(delay=0.4, servos={_HL: config.SERVO_CHANNELS[_HL]["min"]}),
+    Step(delay=0.4, servos={_HL: config.SERVO_CHANNELS[_HL]["max"]}),
+    Step(delay=0.4, servos={_HL: config.SERVO_CHANNELS[_HL]["min"]}),
+    Step(delay=0.4, servos={_HL: config.SERVO_CHANNELS[_HL]["max"]}),
 
     # Return elbow and hand to neutral
-    Step(delay=0.45,
+    Step(delay=0.50,
          servos={_AL: 6720, _HL: 6000}),
 ]
 
@@ -322,19 +323,45 @@ class AnimationPlayer:
         self._launch(SHUTDOWN, blocking=True)
 
     def play_wake_greeting_arms(self) -> None:
-        """Play the excited arm-wave greeting in the background.
+        """Play the excited arm-wave greeting, blocking until all 3 cycles complete.
 
-        Runs concurrently with greeting audio — call before _play_wake_greeting()
-        so the wave overlaps the speech.  Arm channels only; does not touch head.
+        The idle thread is stopped for the duration so neither head nor arm
+        motion can fight the animation.  Hand speed is set to maximum (255)
+        so the servo can traverse the full ~4032 qµs span within each 0.4 s
+        step window.  Audio should not start until this method returns.
 
-        Sets SERVO_HAND_SPEAK_SPEED on ch 5 before launching so the servo has
-        enough speed to complete each low/high twist within the 200 ms step windows.
+        - Stops the idle thread before launching so no conflicting serial
+          commands are sent to any channel during the wave.
+        - Sets ch 5 speed to 255 (Maestro maximum) for the greeting only,
+          then restores SERVO_DEFAULT_SPEED before restarting idle motion.
+        - Uses config.SERVO_CHANNELS[5]['min'] / ['max'] as targets (set in
+          the WAKE_GREETING sequence) — no hardcoded values.
         """
+        log.info(
+            "WAKE_GREETING: ch 5 (hand) targets  low=%d qµs  high=%d qµs"
+            "  (config min=%d  max=%d)",
+            config.SERVO_CHANNELS[config.SERVO_HAND_LEFT]["min"],
+            config.SERVO_CHANNELS[config.SERVO_HAND_LEFT]["max"],
+            config.SERVO_CHANNELS[config.SERVO_HAND_LEFT]["min"],
+            config.SERVO_CHANNELS[config.SERVO_HAND_LEFT]["max"],
+        )
         if self._servos is not None:
+            # Stop the full idle thread so head and arm randomisation cannot
+            # interfere with the wave animation on any channel.
+            self._servos.stop()
+            # Maximum Maestro speed on ch 5 — ensures servo reaches each
+            # extreme within the 0.4 s step window (speed 255 ≈ unlimited).
+            self._servos.set_channel_speed(config.SERVO_HAND_LEFT, 255)
+
+        # Run blocking — returns only after the last step completes.
+        self._launch(WAKE_GREETING, blocking=True)
+
+        if self._servos is not None:
+            # Restore normal hand speed, then restart the idle thread.
             self._servos.set_channel_speed(
-                config.SERVO_HAND_LEFT, config.SERVO_HAND_SPEAK_SPEED
+                config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
             )
-        self._launch(WAKE_GREETING, blocking=False)
+            self._servos.start()
 
     def play_emotion(self, emotion: str) -> None:
         """Play an emotion animation in the background.
