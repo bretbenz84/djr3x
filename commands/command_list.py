@@ -292,6 +292,27 @@ COMMANDS: list[Command] = [
     ),
 
     # -----------------------------------------------------------------------
+    # Vision — these are forwarded to the LLM with a live camera frame;
+    # the response field is never spoken (action="vision" bypasses TTS).
+    # They live here so the fuzzy parser catches close matches reliably.
+    # -----------------------------------------------------------------------
+
+    Command(
+        phrases=["take a picture", "take a photo", "take a photo of me",
+                 "take a picture of me", "snap a photo", "snap a picture"],
+        response="",   # not spoken — action=vision routes to LLM
+        action="vision",
+    ),
+
+    Command(
+        phrases=["what do you see", "what can you see", "look around",
+                 "tell me what you see", "describe what you see",
+                 "what's in front of you", "whats in front of you"],
+        response="",   # not spoken — action=vision routes to LLM
+        action="vision",
+    ),
+
+    # -----------------------------------------------------------------------
     # Shutdown / sleep
     # -----------------------------------------------------------------------
 

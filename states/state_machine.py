@@ -53,6 +53,7 @@ from commands.parser import parse
 from hardware.leds import LEDController
 from hardware.servos import ServoController
 from llm.chatgpt import ChatGPTClient
+from llm.vision_intent import vision_intent
 from sequences.animations import AnimationPlayer
 from speech.synthesizer import Synthesizer
 from speech.transcriber import Transcriber
@@ -134,7 +135,6 @@ class StateMachine:
 
         # Vision
         self._camera = Camera()
-        self._last_frame: str | None = None   # captured at wake word, passed to LLM
 
         # State control
         self._state: State = State.IDLE
@@ -453,13 +453,30 @@ class StateMachine:
             # --- Parse and respond ---
             _elapsed = f" [+{time.monotonic() - self._pipeline_t0:.1f}s]"
             cmd = parse(text)
-            if cmd is not None:
+            if cmd is not None and cmd.action == "vision":
+                # Vision command — capture a fresh frame right now and send to LLM.
+                log.info("Vision command: %r%s", cmd.phrases[0], _elapsed)
+                frame = self._camera.capture_frame()
+                if frame:
+                    log.debug("Camera: fresh frame captured for vision command (%d bytes b64)",
+                              len(frame))
+                next_state = self._speak_llm(text, image=frame, t0=self._pipeline_t0)
+            elif cmd is not None:
                 log.info("Command matched: %r → %r%s", cmd.phrases[0], cmd.action, _elapsed)
                 log.info("Rex (cmd): %s", cmd.response)
                 next_state = self._execute_command(cmd)
             else:
-                log.info("No command match — sending to ChatGPT%s", _elapsed)
-                next_state = self._speak_llm(text, image=self._last_frame, t0=self._pipeline_t0)
+                # No command match — check visual intent before calling LLM.
+                if vision_intent(text):
+                    log.info("Vision intent detected — capturing frame%s", _elapsed)
+                    frame = self._camera.capture_frame()
+                    if frame:
+                        log.debug("Camera: fresh frame captured for vision intent (%d bytes b64)",
+                                  len(frame))
+                else:
+                    log.info("No vision intent — sending text only to ChatGPT%s", _elapsed)
+                    frame = None
+                next_state = self._speak_llm(text, image=frame, t0=self._pipeline_t0)
 
             # Ensure all audio has finished before re-opening the mic.
             self._player.wait_for_speech()
@@ -529,12 +546,6 @@ class StateMachine:
         if self._state == State.IDLE:
             self._pipeline_t0 = time.monotonic()
             log.info("Wake word detected (%s)", model_name)
-            # Capture a frame at the moment of wake — this is the scene
-            # context that will accompany the next LLM call.
-            self._last_frame = self._camera.capture_frame()
-            if self._last_frame:
-                log.debug("Camera: frame captured at wake word (%d bytes b64)",
-                          len(self._last_frame))
             self._wake_event.set()
         # Ignore detections in ACTIVE/SHUTDOWN (suppression should already
         # block the callback, but this is a belt-and-suspenders guard).
