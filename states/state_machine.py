@@ -305,12 +305,13 @@ class StateMachine:
             clip_path = config.ASSETS_DIR / "audio" / random.choice(_IDLE_CLIPS)
             if clip_path.exists():
                 log.info("Idle clip: %s", clip_path.name)
-                self._wake_word.suppressed = True
+                servo_stop = self._begin_speech(emotion="neutral")
                 try:
-                    self._player.play_music(clip_path, loop=False)
-                    self._player.wait_for_music(timeout=120.0)
+                    self._player.play_file(clip_path)
+                except Exception:
+                    log.exception("Idle clip playback error: %s", clip_path.name)
                 finally:
-                    self._wake_word.suppressed = False
+                    self._end_speech(servo_stop)
 
             # Handle wake word or shutdown that arrived during clip playback.
             if self._wake_event.is_set():
