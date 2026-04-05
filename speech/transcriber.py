@@ -187,7 +187,8 @@ class Transcriber:
             config.AUDIO_CHUNK_SIZE, self._speech_threshold,
         )
 
-        _early_return: str | None | object = _SENTINEL = object()  # tracks early-return signals
+        _SENTINEL = object()
+        _early_return: object = _SENTINEL  # set to None if early exit triggered
         for _attempt in range(3):
             frames_list = []
             silence_chunks = 0
