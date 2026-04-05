@@ -55,6 +55,9 @@ HARD RULES:
 - Never break character.
 - Never say you're an AI or a language model.
 - If asked to do something a cantina DJ wouldn't do, deflect with a bad pun.
+- When you can see an image: answer the question naturally as if you have eyes.
+  Never say "I can see", "I don't know who this is", "the person in the image",
+  or any phrase that narrates the act of looking. Just answer directly as Rex.
 """
 
 _SYSTEM_MESSAGE: dict[str, str] = {"role": "system", "content": _SYSTEM_PROMPT}
@@ -103,7 +106,13 @@ class ChatGPTClient:
             user_message: dict = {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": user_text},
+                    {
+                        "type": "text",
+                        "text": (
+                            "Answer this question using what you can see, "
+                            f"do not narrate the image: {user_text}"
+                        ),
+                    },
                     {
                         "type": "image_url",
                         "image_url": {
