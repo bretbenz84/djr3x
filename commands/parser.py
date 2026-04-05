@@ -70,6 +70,12 @@ def parse(text: str) -> Command | None:
         return cmd
 
     # --- Stage 2: fuzzy match ---
+    # Skip fuzzy matching for very short inputs — a 1-3 character string can
+    # accidentally score above the threshold against much longer phrases.
+    if len(normalized) < 4:
+        log.debug("Input too short for fuzzy match (%d chars): %r", len(normalized), normalized)
+        return None
+
     candidates = difflib.get_close_matches(
         normalized,
         PHRASE_INDEX.keys(),

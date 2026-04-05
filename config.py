@@ -266,7 +266,7 @@ ELEVENLABS_SIMILARITY = 0.80
 # accepted. 0.72 catches one-word transcription errors ("louder" → "loudr")
 # while rejecting accidental matches between short unrelated phrases.
 # Lower = more permissive; raise toward 0.85 if you get false positives.
-COMMAND_FUZZY_THRESHOLD = 0.72
+COMMAND_FUZZY_THRESHOLD = 0.82
 
 # ---------------------------------------------------------------------------
 # State machine
