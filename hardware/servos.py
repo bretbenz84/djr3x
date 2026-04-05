@@ -292,9 +292,13 @@ class ServoController:
             tilt_lo, tilt_ceiling,
         )
 
-        # visor opens (rises) with intensity — higher qµs = open/revealed
+        # visor opens (rises) with intensity — higher qµs = open/revealed.
+        # Anchors at ~5800 (slightly below neutral) when silent, rises toward
+        # max (6976) at full intensity.  Uses a fixed speak base rather than
+        # emotion-derived visor_lo so silent speech never closes the visor.
+        _VISOR_SPEAK_BASE = 5800
         visor_pos = _clamp(
-            int(visor_lo + intensity * (visor_hi - visor_lo)),
+            int(_VISOR_SPEAK_BASE + intensity * (visor_hi - _VISOR_SPEAK_BASE)),
             visor_lo, visor_hi,
         )
 
@@ -516,12 +520,18 @@ class ServoController:
 
             # --- Visor idle: ch 3 ---
             if now >= _next_visor:
-                # Drift in the open (high-value) end of the range so eyes stay
-                # visible during idle.  Higher qµs = open, so anchor to max.
+                # Drift around a naturally open resting position — centre ~5650,
+                # ±150 qµs window.  Higher = more open; this keeps eyes visible
+                # without being fully extended.
+                _VISOR_IDLE_CENTER = 5650
+                _VISOR_IDLE_HALF   = 150
                 v_min = config.SERVO_CHANNELS[config.SERVO_VISOR]["min"]
                 v_max = config.SERVO_CHANNELS[config.SERVO_VISOR]["max"]
-                target = random.randint(v_max - int((v_max - v_min) * 0.3),
-                                        v_max)
+                target = _clamp(
+                    random.randint(_VISOR_IDLE_CENTER - _VISOR_IDLE_HALF,
+                                   _VISOR_IDLE_CENTER + _VISOR_IDLE_HALF),
+                    v_min, v_max,
+                )
                 with self._lock:
                     self._send_speed(config.SERVO_VISOR, config.SERVO_VISOR_IDLE_SPEED)
                     self._send_target(config.SERVO_VISOR, target)
