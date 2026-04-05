@@ -198,9 +198,9 @@ EXCITED: list[Step] = [
     Step(delay=0.2,
          servos={_T: 3950, _V: 4600}),
 
-    # 0.3 s — settle into a proud, head-up resting pose
+    # 0.3 s — settle into neutral tilt resting pose
     Step(delay=0.3,
-         servos={_T: 4050, _V: 4800},
+         servos={_T: 4320, _V: 4800},
          eyes=_EYE_AMBER),
 ]
 

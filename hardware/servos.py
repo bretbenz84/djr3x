@@ -213,10 +213,14 @@ class ServoController:
             lift_lo, lift_hi,
         )
 
-        # headtilt rises with intensity (inverted: lower qµs = head up)
+        # headtilt rises with intensity (inverted: lower qµs = head up).
+        # Constrain to [min, neutral] — can tilt up from neutral but never
+        # goes below neutral (which would point the head down).
+        tilt_neutral = config.SERVO_CHANNELS[2]["neutral"]
+        tilt_ceiling = tilt_neutral   # never go below neutral
         tilt_pos = _clamp(
-            int(tilt_hi - intensity * (tilt_hi - tilt_lo)),
-            tilt_lo, tilt_hi,
+            int(tilt_ceiling - intensity * (tilt_ceiling - tilt_lo)),
+            tilt_lo, tilt_ceiling,
         )
 
         # visor opens with intensity (inverted: lower qµs = open)
