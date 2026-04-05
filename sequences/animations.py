@@ -79,12 +79,16 @@ class Step:
     ----------
     delay   : seconds to wait *before* executing this step.
     servos  : channel → position (qµs) mapping; only listed channels move.
+    speeds  : channel → speed override applied *before* servo positions this
+              step.  Lets sequences set per-channel speeds inline (e.g. a fast
+              neck sweep during startup) without touching other channels.
     chest   : effect string sent to chest Nano, or None to leave unchanged.
     head    : effect string sent to head Nano (mouth grid), or None.
     eyes    : (R, G, B) sent via set_eye_color(), or None.
     """
     delay:  float
     servos: dict[int, int]               = field(default_factory=dict)
+    speeds: dict[int, int]               = field(default_factory=dict)
     chest:  Optional[str]                = None
     head:   Optional[str]                = None
     eyes:   Optional[tuple[int,int,int]] = None
@@ -111,25 +115,32 @@ STARTUP: list[Step] = [
          head=config.LED_CMD_OFF,
          eyes=_EYE_OFF),
 
-    # 0.5 s — a faint flicker: head still down, visor barely lifting
+    # 0.5 s — a faint flicker: head still down, visor barely lifting.
+    #          Set neck to fast speed so the coming look-around sweep feels lively.
     Step(delay=0.5,
+         speeds={_P: config.SERVO_NECK_STARTUP_SPEED},
          servos={_T: 5100, _V: 5100},
          eyes=(0, 0, 40)),
 
-    # 0.5 s — waking up: headlift begins rising, headtilt lifts, visor rising
+    # 0.5 s — waking up: headlift begins rising; neck sweeps to max (looks right).
     Step(delay=0.5,
-         servos={_T: 4700, _L: 3500, _V: 5700, _AL: 5600, _AR: 5600},
+         servos={_T: 4700, _L: 3500, _V: 5700,
+                 _P: config.SERVO_CHANNELS[_P]["max"],
+                 _AL: 5600, _AR: 5600},
          chest=config.LED_CMD_IDLE,
          eyes=(0, 40, 140)),
 
-    # 0.5 s — coming up: headlift continuing to rise, visor opening further
+    # 0.5 s — coming up: headlift continuing; neck sweeps to min (looks left).
     Step(delay=0.5,
          servos={_T: 4400, _L: 5000, _V: 6300,
+                 _P: config.SERVO_CHANNELS[_P]["min"],
                  _AL: 5900, _AR: 5900, _HL: 5800, _HR: 5800},
          eyes=(0, 70, 220)),
 
-    # 0.5 s — fully up: headlift at neutral, all home, visor open, LEDs active
+    # 0.5 s — fully up: headlift at neutral, neck returns to center, visor open.
+    #          Reset neck speed back to default so idle/speech motion is normal.
     Step(delay=0.5,
+         speeds={_P: config.SERVO_DEFAULT_SPEED},
          servos={_T: 4200, _L: config.SERVO_CHANNELS[_L]["neutral"], _P: 6000, _V: 6600,
                  _AL: 6000, _AR: 6000, _HL: 6000, _HR: 6000},
          chest=config.LED_CMD_ACTIVE,
@@ -456,7 +467,18 @@ class AnimationPlayer:
 
     def _execute_step(self, step: Step) -> None:
         """Apply servo positions and LED commands for one step."""
-        # --- Servos ---
+        # --- Per-step speed overrides (applied before positions) ---
+        if self._servos is not None and step.speeds:
+            for channel, speed in step.speeds.items():
+                try:
+                    self._servos.set_channel_speed(channel, speed)
+                except Exception:
+                    log.warning(
+                        "AnimationPlayer: set_channel_speed(%d, %d) failed",
+                        channel, speed, exc_info=True,
+                    )
+
+        # --- Servo positions ---
         if self._servos is not None and step.servos:
             for channel, position in step.servos.items():
                 try:

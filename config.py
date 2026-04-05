@@ -168,6 +168,7 @@ SERVO_SAD_SPEED            = 8
 SERVO_STARTUP_SPEED        = 8    # slow speed used during safe-mode homing
 SERVO_HEAD_IDLE_SPEED      = 3    # very slow lazy head drift during idle
 SERVO_VISOR_IDLE_SPEED     = 2    # barely-perceptible visor scanning during idle
+SERVO_NECK_STARTUP_SPEED   = 100  # fast neck speed for startup look-around sweep
 
 # Safe startup mode: home servos one at a time with a 0.5 s delay between
 # each channel, preceded by a speed command to ensure a slow controlled move.
