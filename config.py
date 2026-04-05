@@ -239,6 +239,15 @@ WHISPER_HALLUCINATION_FILTER: list[str] = [
     "derivative work",
     "touhou project",
     "no relation to the original",
+    # URLs and transcription service names — always hallucinations
+    "https://",
+    "http://",
+    "www.",
+    ".com",
+    ".ai",
+    ".org",
+    "otter.ai",
+    "transcribed by",
 ]
 
 # ---------------------------------------------------------------------------
