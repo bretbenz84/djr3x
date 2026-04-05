@@ -195,6 +195,7 @@ class ServoController:
 
         neck_lo,  neck_hi  = self._effective_limits(0)   # neck
         lift_lo,  lift_hi  = self._effective_limits(1)   # headlift
+        tilt_lo,  tilt_hi  = self._effective_limits(2)   # headtilt
         visor_lo, visor_hi = self._effective_limits(3)   # visor
 
         # neck moves up on louder speech; small random jitter keeps it lively
@@ -212,6 +213,12 @@ class ServoController:
             lift_lo, lift_hi,
         )
 
+        # headtilt rises with intensity (inverted: lower qµs = head up)
+        tilt_pos = _clamp(
+            int(tilt_hi - intensity * (tilt_hi - tilt_lo)),
+            tilt_lo, tilt_hi,
+        )
+
         # visor opens with intensity (inverted: lower qµs = open)
         visor_pos = _clamp(
             int(visor_hi - intensity * (visor_hi - visor_lo)),
@@ -220,10 +227,11 @@ class ServoController:
 
         with self._lock:
             # Restore emotion speed — idle loop may have slowed these channels
-            for ch in (0, 1, 3):
+            for ch in (0, 1, 2, 3):
                 self._send_speed(ch, self._current_speed)
             self._send_target(0, neck_pos)
             self._send_target(1, lift_pos)
+            self._send_target(2, tilt_pos)
             self._send_target(3, visor_pos)
 
     # ------------------------------------------------------------------
