@@ -352,8 +352,8 @@ class AnimationPlayer:
             # interfere with the wave animation on any channel.
             self._servos.stop()
             # Maximum Maestro speed on ch 5 — ensures servo reaches each
-            # extreme within the 0.4 s step window (speed 255 ≈ unlimited).
-            self._servos.set_channel_speed(config.SERVO_HAND_LEFT, 255)
+            # extreme within the 0.4 s step window for a dramatic full-range wave.
+            self._servos.set_channel_speed(config.SERVO_HAND_LEFT, config.SERVO_HAND_SPEAK_SPEED)
 
         # Non-blocking — returns immediately; animation runs in daemon thread.
         self._launch(WAKE_GREETING, blocking=False)

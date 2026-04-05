@@ -319,12 +319,13 @@ class ServoController:
 
         # Hand (ch 5): only update every 4th call (~200 ms) so the servo can
         # complete each twist before receiving a new target.
-        # Alternates between low and high extremes; amplitude grows with intensity.
+        # Alternates between low and high extremes; amplitude is intentionally
+        # small (15–30% of range) so the movement is subtle during speech.
         self._hand_speak_counter += 1
         hand_target: int | None = None
         if self._hand_speak_counter % 4 == 0:
             hand_center = (hand_lo + hand_hi) // 2
-            amplitude   = int((hand_hi - hand_lo) * (0.25 + 0.25 * arm_intensity))
+            amplitude   = int((hand_hi - hand_lo) * (0.15 + 0.15 * arm_intensity))
             if (self._hand_speak_counter // 4) % 2 == 0:
                 hand_target = _clamp(hand_center - amplitude, hand_lo, hand_hi)
             else:
@@ -347,11 +348,11 @@ class ServoController:
             self._send_target(2, tilt_pos)
             self._send_target(3, visor_pos)
             # Elbow at default speed so each raise/lower is slow and deliberate.
-            # Hand at dedicated higher speed so it completes full twists in 200 ms.
+            # Hand at relaxed speed — subtle, unhurried twist during speech.
             # Heroarm at excited speed for snappy gestures.
             self._send_speed(config.SERVO_ARM_LEFT,   config.SERVO_DEFAULT_SPEED)
             self._send_speed(config.SERVO_HAND_RIGHT, config.SERVO_EXCITED_SPEED)
-            self._send_speed(config.SERVO_HAND_LEFT,  config.SERVO_HAND_SPEAK_SPEED)
+            self._send_speed(config.SERVO_HAND_LEFT,  config.SERVO_HAND_SPEAK_SPEED_RELAXED)
             if elbow_target is not None:
                 self._send_target(config.SERVO_ARM_LEFT, elbow_target)
             if hand_target is not None:
