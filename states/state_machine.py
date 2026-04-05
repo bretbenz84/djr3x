@@ -683,6 +683,12 @@ class StateMachine:
 
         if self._servos is not None:
             self._servos.set_emotion(emotion)
+            # Raise elbow to speaking position so speak_move() has it
+            # starting from a raised pose rather than the idle lowered rest.
+            self._servos.set_channel_speed(
+                config.SERVO_ARM_LEFT, config.SERVO_DEFAULT_SPEED
+            )
+            self._servos.set_position(config.SERVO_ARM_LEFT, 7100)
 
         self._leds.start_mouth()
 
@@ -703,6 +709,11 @@ class StateMachine:
         self._wake_word.suppressed = False
         if self._servos is not None:
             self._servos.set_emotion("neutral")
+            # Gradually lower elbow back to the idle rest position.
+            self._servos.set_channel_speed(
+                config.SERVO_ARM_LEFT, config.SERVO_HEAD_IDLE_SPEED
+            )
+            self._servos.set_position(config.SERVO_ARM_LEFT, config.IDLE_ELBOW_REST)
 
     def _servo_speak_worker(self, stop: threading.Event) -> None:
         """Poll player.rms → speak_move(intensity) at ~20 Hz."""

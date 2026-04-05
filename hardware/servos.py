@@ -447,8 +447,10 @@ class ServoController:
             very slow speed — produces a gradual, relaxed resting pose.
         Visor (ch 3): every 5-8 s, very slow speed,
             constrained to the open (low) 30% of its range.
-        Expressive arms (ch 4 elbow, ch 5 hand, ch 7 heroarm): one channel
-            every ARM_IDLE_INTERVAL_MIN–MAX s, constrained to the center
+        Elbow (ch 4): drifts toward IDLE_ELBOW_REST every 4-7 s at very slow
+            speed — lowered resting pose; rises at speech start via _begin_speech().
+        Expressive arms (ch 5 hand, ch 7 heroarm): one channel every
+            ARM_IDLE_INTERVAL_MIN–MAX s, constrained to the center
             ARM_IDLE_RANGE_PERCENT of the channel's min/max span.
         Pokerarm (ch 6): every SERVO_IDLE_MOVE_INTERVAL_MIN–MAX s, full range.
         """
@@ -456,6 +458,7 @@ class ServoController:
         _next_head          = time.monotonic() + random.uniform(2.0, 4.0)
         _next_tilt          = time.monotonic() + random.uniform(3.0, 6.0)
         _next_visor         = time.monotonic() + random.uniform(3.0, 6.0)
+        _next_elbow         = time.monotonic() + random.uniform(3.0, 5.0)
         _next_expressive    = time.monotonic() + random.uniform(1.0, 2.5)
         _next_other_arm     = time.monotonic() + random.uniform(2.0, 4.0)
 
@@ -467,11 +470,11 @@ class ServoController:
                 ch = random.choice(config.IDLE_HEAD_CHANNELS)
 
                 if ch == config.SERVO_HEAD_LIFT:
-                    # Inverted servo: lower qµs = head up, higher = down.
-                    # Bias range toward neutral (level) so Rex doesn't spend
-                    # too much time looking fully upward; stay in upper quarter.
-                    idle_lo = config.SERVO_CHANNELS[1]["neutral"] - 1500   # ~4500
-                    idle_hi = config.SERVO_CHANNELS[1]["neutral"]           # 6000
+                    # Higher qµs = head up, lower = head down.  Constrain to
+                    # [min, neutral] so Rex always looks upward or level, never
+                    # drooping down (Rex is ~3 ft tall and looks up at people).
+                    idle_lo = config.SERVO_CHANNELS[1]["min"]       # 1984 — head up
+                    idle_hi = config.SERVO_CHANNELS[1]["neutral"]   # 6000 — head level
                 else:
                     # Neck: middle 60% of effective range for lazy turns
                     lo, hi    = self._effective_limits(ch)
@@ -521,10 +524,30 @@ class ServoController:
                     self._send_target(config.SERVO_VISOR, target)
                 _next_visor = now + random.uniform(5.0, 8.0)
 
-            # --- Expressive arms (ch 4, 5, 7): center ARM_IDLE_RANGE_PERCENT of range ---
+            # --- Elbow idle (ch 4): drift toward IDLE_ELBOW_REST ---
+            # Skipped while pause_arm_idle() is active (arm animation in progress).
+            # ch 4 is excluded from the expressive arm random section below so
+            # only this dedicated timer drives it during idle.
+            if now >= _next_elbow and not self._arm_idle_pause.is_set():
+                elbow_lo, elbow_hi = self._effective_limits(config.SERVO_ARM_LEFT)
+                target = _clamp(
+                    random.randint(
+                        config.IDLE_ELBOW_REST - 50,
+                        config.IDLE_ELBOW_REST + 100,
+                    ),
+                    elbow_lo, elbow_hi,
+                )
+                log.debug("Elbow idle: ch 4 → %d (rest=%d)", target, config.IDLE_ELBOW_REST)
+                with self._lock:
+                    self._send_speed(config.SERVO_ARM_LEFT, config.SERVO_HEAD_IDLE_SPEED)
+                    self._send_target(config.SERVO_ARM_LEFT, target)
+                _next_elbow = now + random.uniform(4.0, 7.0)
+
+            # --- Expressive arms (ch 5, 7): center ARM_IDLE_RANGE_PERCENT of range ---
+            # ch 4 (elbow) has its own dedicated timer above — excluded here.
             # Skipped while pause_arm_idle() is active (arm animation in progress).
             if now >= _next_expressive and not self._arm_idle_pause.is_set():
-                ch = random.choice(list(_SPEAK_ARM_CHANNELS))
+                ch = random.choice([config.SERVO_HAND_LEFT, config.SERVO_HAND_RIGHT])
                 lo, hi     = self._effective_limits(ch)
                 center     = (lo + hi) // 2
                 half_span  = int((hi - lo) * config.ARM_IDLE_RANGE_PERCENT) // 2
