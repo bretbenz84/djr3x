@@ -145,8 +145,9 @@ SERVO_SAFE_MODE: bool = _optional("SERVO_SAFE_MODE", "true").lower() not in ("0"
 
 AUDIO_SAMPLE_RATE   = 16000   # Hz — required by OpenWakeWord; also used for mic capture
 SPEECH_SAMPLE_RATE  = int(_optional("SPEECH_SAMPLE_RATE", "16000"))  # Hz — TTS output; ReSpeaker Lite only supports 16000
-AUDIO_CHANNELS      = 1       # mono mic input (legacy alias — prefer AUDIO_INPUT_CHANNELS)
-AUDIO_INPUT_CHANNELS  = 1     # microphone input channels (mono)
+AUDIO_CHANNELS      = 1       # mono mic input (legacy alias — prefer MIC_CHANNELS)
+AUDIO_INPUT_CHANNELS  = 1     # microphone input channels (legacy — prefer MIC_CHANNELS)
+MIC_CHANNELS          = int(_optional("MIC_CHANNELS", "2"))  # physical mic channels; ReSpeaker Lite requires 2
 AUDIO_OUTPUT_CHANNELS = 2     # speaker output channels (stereo — ReSpeaker Lite requires 2)
 AUDIO_CHUNK_SIZE   = 1024    # frames per buffer read
 AUDIO_FORMAT       = 8       # pyaudio.paInt16 == 8 (avoids importing pyaudio here)

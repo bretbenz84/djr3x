@@ -238,7 +238,7 @@ class WakeWordDetector:
                 self._idle_event.clear()
                 with sd.InputStream(
                     samplerate=config.AUDIO_SAMPLE_RATE,
-                    channels=config.AUDIO_INPUT_CHANNELS,
+                    channels=config.MIC_CHANNELS,
                     dtype="int16",
                     device=config.AUDIO_INPUT_DEVICE,
                     blocksize=config.WAKE_WORD_CHUNK_SIZE,
@@ -254,8 +254,8 @@ class WakeWordDetector:
                         if overflowed:
                             log.debug("Wake word stream: buffer overflow")
 
-                        # flatten to 1-D mono int16 (OpenWakeWord requirement)
-                        audio = frames[:, 0]
+                        # Mix down to 1-D mono int16 (OpenWakeWord requirement)
+                        audio = frames.astype(np.float32).mean(axis=1).astype(np.int16)
 
                         scores: dict[str, float] = self._model.predict(audio)
 

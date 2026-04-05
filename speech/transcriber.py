@@ -104,7 +104,7 @@ class Transcriber:
             raw = sd.rec(
                 n_frames,
                 samplerate=config.AUDIO_SAMPLE_RATE,
-                channels=config.AUDIO_INPUT_CHANNELS,
+                channels=config.MIC_CHANNELS,
                 dtype="int16",
                 device=config.AUDIO_INPUT_DEVICE,
                 blocking=True,
@@ -116,7 +116,7 @@ class Transcriber:
             )
             return
 
-        mono = raw[:, 0].astype(np.float32)
+        mono = raw.astype(np.float32).mean(axis=1)
         noise_rms = float(np.sqrt(np.mean(mono ** 2)))
         raw_threshold = int(noise_rms * config.NOISE_FLOOR_MULTIPLIER)
         new_threshold = max(
@@ -198,7 +198,7 @@ class Transcriber:
             try:
                 with sd.InputStream(
                     samplerate=config.AUDIO_SAMPLE_RATE,
-                    channels=config.AUDIO_INPUT_CHANNELS,
+                    channels=config.MIC_CHANNELS,
                     dtype="int16",
                     device=config.AUDIO_INPUT_DEVICE,
                     blocksize=config.AUDIO_CHUNK_SIZE,
@@ -209,8 +209,8 @@ class Transcriber:
                         if overflowed:
                             log.debug("Transcriber: audio buffer overflowed (input too slow)")
 
-                        # frames shape: (AUDIO_CHUNK_SIZE, AUDIO_CHANNELS) dtype int16
-                        samples = frames[:, 0]  # flatten to 1-D mono array
+                        # Mix down to 1-D mono int16
+                        samples = frames.astype(np.float32).mean(axis=1).astype(np.int16)
                         rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
                         log.debug(
                             "Transcriber: chunk %3d  rms=%6.0f  speech_started=%-5s  "
