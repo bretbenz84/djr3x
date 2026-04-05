@@ -100,6 +100,7 @@ class ServoController:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._emotion: str = "neutral"
+        self._current_speed: int = config.SERVO_DEFAULT_SPEED
         self._stop_event = threading.Event()
         self._idle_thread: threading.Thread | None = None
 
@@ -172,6 +173,7 @@ class ServoController:
             "sad":     config.SERVO_SAD_SPEED,
         }.get(emotion, config.SERVO_DEFAULT_SPEED)
 
+        self._current_speed = speed
         self._apply_speed(speed)
         log.debug("Emotion set to %r (speed=%d)", emotion, speed)
 
@@ -217,6 +219,9 @@ class ServoController:
         )
 
         with self._lock:
+            # Restore emotion speed — idle loop may have slowed these channels
+            for ch in (0, 1, 3):
+                self._send_speed(ch, self._current_speed)
             self._send_target(0, neck_pos)
             self._send_target(1, lift_pos)
             self._send_target(3, visor_pos)
@@ -269,16 +274,51 @@ class ServoController:
     # ------------------------------------------------------------------
 
     def _idle_loop(self) -> None:
-        """Continuously move arm and hand servos to random positions.
+        """Continuously move servos to random positions during idle.
 
-        Each iteration picks ONE channel to move (natural-looking staggered
-        motion) then sleeps for a random interval from config.
+        Arms (channels 4-7): one channel per iteration, every 1.5-4.0 s.
+        Head (neck ch 0, headlift ch 1): one channel every 3-5 s, slow speed,
+            constrained to the middle 60% of each channel's range.
+        Visor (ch 3): every 5-8 s, very slow speed,
+            constrained to the middle 30% of its range.
+        Headtilt (ch 2) is reserved for speech reactions and is not touched.
         """
-        while not self._stop_event.is_set():
-            channel = random.choice(_IDLE_CHANNELS)
-            lo, hi = self._effective_limits(channel)
-            target = random.randint(lo, hi)
+        # Stagger initial head/visor moves so they don't all fire at t=0
+        _next_head  = time.monotonic() + random.uniform(2.0, 4.0)
+        _next_visor = time.monotonic() + random.uniform(3.0, 6.0)
 
+        while not self._stop_event.is_set():
+            now = time.monotonic()
+
+            # --- Head idle: neck (ch 0) and headlift (ch 1) ---
+            if now >= _next_head:
+                ch = random.choice([config.SERVO_HEAD_PAN, config.SERVO_HEAD_LIFT])
+                lo, hi    = self._effective_limits(ch)
+                center    = (lo + hi) // 2
+                half_span = (hi - lo) // 2
+                target    = random.randint(center - int(half_span * 0.6),
+                                           center + int(half_span * 0.6))
+                with self._lock:
+                    self._send_speed(ch, config.SERVO_HEAD_IDLE_SPEED)
+                    self._send_target(ch, target)
+                _next_head = now + random.uniform(3.0, 5.0)
+
+            # --- Visor idle: ch 3 ---
+            if now >= _next_visor:
+                lo, hi    = self._effective_limits(config.SERVO_VISOR)
+                center    = (lo + hi) // 2
+                half_span = (hi - lo) // 2
+                target    = random.randint(center - int(half_span * 0.3),
+                                           center + int(half_span * 0.3))
+                with self._lock:
+                    self._send_speed(config.SERVO_VISOR, config.SERVO_VISOR_IDLE_SPEED)
+                    self._send_target(config.SERVO_VISOR, target)
+                _next_visor = now + random.uniform(5.0, 8.0)
+
+            # --- Arms (unchanged): pick one channel, full range ---
+            channel = random.choice(_IDLE_CHANNELS)
+            lo, hi  = self._effective_limits(channel)
+            target  = random.randint(lo, hi)
             with self._lock:
                 self._send_target(channel, target)
 

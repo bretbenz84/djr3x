@@ -81,7 +81,7 @@ LED_NANO_BAUD   = 9600
 SERVO_CHANNELS: dict[int, dict] = {
     0: {"name": "neck",     "min": 1984,  "max": 9984,  "acceleration": 15, "neutral": 6000},
     1: {"name": "headlift", "min": 1984,  "max": 7744,  "acceleration": 20, "neutral": 6000},
-    2: {"name": "headtilt", "min": 4032,  "max": 5824,  "acceleration": 25, "neutral": 5824},
+    2: {"name": "headtilt", "min": 3904,  "max": 5504,  "acceleration": 25, "neutral": 4320},
     3: {"name": "visor",    "min": 4544,  "max": 6976,  "acceleration": 10, "neutral": 6000},
     4: {"name": "elbow",    "min": 3968,  "max": 8000,  "acceleration": 10, "neutral": 6000},
     5: {"name": "hand",     "min": 3968,  "max": 8000,  "acceleration":  5, "neutral": 6000},
@@ -92,6 +92,16 @@ SERVO_CHANNELS: dict[int, dict] = {
 # Channel groups used by the servo controller
 HEAD_CHANNELS = [0, 1, 2, 3]   # neck, headlift, headtilt, visor
 ARM_CHANNELS  = [4, 5, 6, 7]   # elbow, hand, pokerarm, heroarm
+
+# Channel number aliases — used by sequences/animations.py for readability
+SERVO_HEAD_PAN   = 0   # neck rotation
+SERVO_HEAD_LIFT  = 1   # headlift
+SERVO_HEAD_TILT  = 2   # headtilt
+SERVO_VISOR      = 3   # visor open/close
+SERVO_ARM_LEFT   = 4   # elbow
+SERVO_HAND_LEFT  = 5   # hand
+SERVO_ARM_RIGHT  = 6   # pokerarm
+SERVO_HAND_RIGHT = 7   # heroarm
 
 # Emotion bias: each emotion overrides (min, max) for affected channels (qµs).
 # Only channels that differ from SERVO_CHANNELS limits need to be listed.
@@ -116,6 +126,8 @@ SERVO_DEFAULT_SPEED        = 20
 SERVO_EXCITED_SPEED        = 40
 SERVO_SAD_SPEED            = 8
 SERVO_STARTUP_SPEED        = 8    # slow speed used during safe-mode homing
+SERVO_HEAD_IDLE_SPEED      = 3    # very slow lazy head drift during idle
+SERVO_VISOR_IDLE_SPEED     = 2    # barely-perceptible visor scanning during idle
 
 # Safe startup mode: home servos one at a time with a 0.5 s delay between
 # each channel, preceded by a speed command to ensure a slow controlled move.
