@@ -53,6 +53,7 @@ from commands.parser import parse
 from hardware.leds import LEDController
 from hardware.servos import ServoController
 from llm.chatgpt import ChatGPTClient
+from llm.greeter import Greeter
 from llm.vision_intent import vision_intent
 from sequences.animations import AnimationPlayer
 from speech.synthesizer import Synthesizer
@@ -132,6 +133,7 @@ class StateMachine:
 
         # LLM
         self._llm = ChatGPTClient()
+        self._greeter = Greeter()
 
         # Vision
         self._camera = Camera()
@@ -343,14 +345,8 @@ class StateMachine:
         if self._servos is not None:
             self._servos.set_emotion("neutral")
 
-        # Play wake word acknowledgement chime.
-        wake_ack = config.ASSETS_DIR / "audio" / "Hi There.mp3"
-        if wake_ack.exists():
-            servo_stop = self._begin_speech()
-            try:
-                self._player.play_file(wake_ack)
-            finally:
-                self._end_speech(servo_stop)
+        # Greet the user — personalized (camera + gpt-4o) or simple canned line.
+        self._play_wake_greeting()
 
         # Re-enable idle clips now that the user has interacted again.
         self._idle_clips_enabled = True
@@ -553,6 +549,59 @@ class StateMachine:
     # ------------------------------------------------------------------
     # Speech helpers
     # ------------------------------------------------------------------
+
+    def _play_wake_greeting(self) -> None:
+        """Greet the user on wake word.
+
+        GREETER_PROBABILITY chance: capture a frame, generate a personalized
+        Rex-style greeting via gpt-4o, and speak it through the synthesizer.
+        Falls back to a simple canned greeting if the camera is unavailable,
+        the API call fails, or the random roll doesn't land.
+
+        Always completes (audio finishes) before returning so the caller can
+        open the mic immediately afterwards.
+        """
+        do_personalized = (
+            random.random() < config.GREETER_PROBABILITY
+            and self._camera.is_available()
+        )
+
+        if do_personalized:
+            log.info("Wake greeting: attempting personalized greeting")
+            frame = self._camera.capture_frame()
+            if frame:
+                greeting = self._greeter.generate(frame)
+                if greeting:
+                    servo_stop = self._begin_speech(emotion="excited")
+                    try:
+                        self._synthesizer.speak(greeting)
+                    except Exception:
+                        log.exception("Wake greeting: TTS error")
+                    finally:
+                        self._end_speech(servo_stop)
+                    return
+            log.info("Wake greeting: personalized path failed — falling back to canned")
+
+        # Simple canned greeting — audio file or short TTS line.
+        _CANNED_AUDIO = config.ASSETS_DIR / "audio" / "Hi There.mp3"
+        _CANNED_TTS = [
+            "Hey hey hey!",
+            "What's up, lifeform!",
+            "HEY! You're back!",
+            "*BWOOP* Hello there!",
+            "Oga's Cantina is OPEN!",
+        ]
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            if _CANNED_AUDIO.exists():
+                self._player.play_file(_CANNED_AUDIO)
+                self._player.wait_for_speech(timeout=10.0)
+            else:
+                self._synthesizer.speak(random.choice(_CANNED_TTS))
+        except Exception:
+            log.exception("Wake greeting: canned greeting error")
+        finally:
+            self._end_speech(servo_stop)
 
     def _play_return_to_idle_chime(self) -> None:
         """Play the startup chime to signal Rex is done listening, then wait
