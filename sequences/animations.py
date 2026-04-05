@@ -99,34 +99,38 @@ class Step:
 # All channels animated — idle thread has not started yet at this point.
 
 STARTUP: list[Step] = [
-    # Immediately: start dark and slumped — head down (high), visor closed (high)
+    # Immediately: powered-down slump — headlift at min (down), headtilt at max
+    # (tilted down), visor at max (fully closed), arms low, all LEDs off.
     Step(delay=0.0,
-         servos={_T: 5400, _P: 6000, _V: 6800,
+         servos={_T: config.SERVO_CHANNELS[_T]["max"],   # headtilt fully down
+                 _L: config.SERVO_CHANNELS[_L]["min"],   # headlift fully down
+                 _P: 6000,
+                 _V: config.SERVO_CHANNELS[_V]["max"],   # visor fully closed
                  _AL: 5200, _AR: 5200, _HL: 5000, _HR: 5000},
          chest=config.LED_CMD_OFF,
          head=config.LED_CMD_OFF,
          eyes=_EYE_OFF),
 
-    # 0.5 s — a faint flicker: head still low, visor barely cracked
+    # 0.5 s — a faint flicker: head still down, visor barely cracked
     Step(delay=0.5,
          servos={_T: 5100, _V: 6400},
          eyes=(0, 0, 40)),
 
-    # 0.5 s — rising: head coming up, visor opening
+    # 0.5 s — waking up: headlift begins rising, headtilt lifts, visor opening
     Step(delay=0.5,
-         servos={_T: 4700, _V: 5800, _AL: 5600, _AR: 5600},
+         servos={_T: 4700, _L: 3500, _V: 5800, _AL: 5600, _AR: 5600},
          chest=config.LED_CMD_IDLE,
          eyes=(0, 40, 140)),
 
-    # 0.5 s — almost there: head up more, visor opening further, arms near home
+    # 0.5 s — coming up: headlift continuing to rise, visor opening further
     Step(delay=0.5,
-         servos={_T: 4400, _V: 5200,
+         servos={_T: 4400, _L: 5000, _V: 5200,
                  _AL: 5900, _AR: 5900, _HL: 5800, _HR: 5800},
          eyes=(0, 70, 220)),
 
-    # 0.5 s — fully up: all home, visor open, LEDs active
+    # 0.5 s — fully up: headlift at neutral, all home, visor open, LEDs active
     Step(delay=0.5,
-         servos={_T: 4200, _P: 6000, _V: 4900,
+         servos={_T: 4200, _L: config.SERVO_CHANNELS[_L]["neutral"], _P: 6000, _V: 4900,
                  _AL: 6000, _AR: 6000, _HL: 6000, _HR: 6000},
          chest=config.LED_CMD_ACTIVE,
          head=config.LED_CMD_ACTIVE,
@@ -149,26 +153,28 @@ STARTUP: list[Step] = [
 # All channels animated — idle thread is stopped before this runs.
 
 SHUTDOWN: list[Step] = [
-    # Immediately: head begins to droop (rising value), visor starts closing
+    # Immediately: head begins to droop (rising tilt), visor starts closing
     Step(delay=0.0,
          servos={_T: 4500, _V: 5400},
          chest=config.LED_CMD_IDLE,
          eyes=(0, 60, 180)),
 
-    # 0.5 s — head drooping further, visor closing more
+    # 0.5 s — head drooping further, headlift starts dropping, visor closing more
     Step(delay=0.5,
-         servos={_T: 4900, _V: 6000, _AL: 5500, _AR: 5500},
+         servos={_T: 4900, _L: 5000, _V: 6000, _AL: 5500, _AR: 5500},
          eyes=_EYE_SAD),
 
-    # 0.6 s — head nearly down, visor mostly closed
+    # 0.6 s — headlift continuing down, headtilt and visor nearly at extremes
     Step(delay=0.6,
-         servos={_T: 5200, _V: 6500,
+         servos={_T: 5200, _L: 3500, _V: 6500,
                  _AL: 5100, _AR: 5100, _HL: 5500, _HR: 5500},
          eyes=_EYE_DIM_BLUE),
 
-    # 0.6 s — fully slumped, visor closed, chest LED off
+    # 0.6 s — fully powered-down slump: headlift min, headtilt max, visor max
     Step(delay=0.6,
-         servos={_T: 5400, _V: 6900,
+         servos={_T: config.SERVO_CHANNELS[_T]["max"],   # headtilt fully down
+                 _L: config.SERVO_CHANNELS[_L]["min"],   # headlift fully down
+                 _V: config.SERVO_CHANNELS[_V]["max"],   # visor fully closed
                  _AL: 5000, _AR: 5000, _HL: 5000, _HR: 5000},
          chest=config.LED_CMD_OFF,
          eyes=_EYE_OFF),
