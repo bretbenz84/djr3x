@@ -183,7 +183,7 @@ SHUTDOWN: list[Step] = [
                  _P: config.SERVO_CHANNELS[_P]["neutral"],  # neck at center
                  _AL: config.SERVO_CHANNELS[_AL]["min"], # elbow fully down (6300)
                  _AR: config.SERVO_CHANNELS[_AR]["min"], # pokerarm fully down (3968)
-                 _HL: 5000,
+                 _HL: config.SERVO_CHANNELS[_HL]["neutral"], # hand at neutral (6000)
                  _HR: config.SERVO_CHANNELS[_HR]["min"]},  # heroarm fully down (3968)
          chest=config.LED_CMD_OFF,
          eyes=_EYE_OFF),
