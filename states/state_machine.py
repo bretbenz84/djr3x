@@ -160,6 +160,11 @@ class StateMachine:
         # automatically the next time the wake word activates Rex.
         self._idle_clips_enabled: bool = True
 
+        # Greeting toggle — alternates between canned ("Hi There.mp3") and
+        # personalized (GPT-4o + camera) on successive wake word activations.
+        # False → canned first, then flips to True for personalized, and so on.
+        self._greeting_toggle: bool = False
+
         # Animation player — shares hardware refs with the rest of the machine
         self._animations = AnimationPlayer(self._servos, self._leds)
 
@@ -584,22 +589,19 @@ class StateMachine:
     def _play_wake_greeting(self) -> None:
         """Greet the user on wake word.
 
-        GREETER_PROBABILITY chance: play a holding clip while concurrently
-        capturing a frame and generating a personalized Rex-style greeting via
-        gpt-4o.  When both finish, speak the personalized greeting.  If the
-        clip ends before the greeting is ready, wait silently then speak.  If
-        the greeting fails for any reason, fall back to the canned greeting.
+        Alternates strictly between two greeting modes on successive activations:
+          toggle=False → canned greeting ("Hi There.mp3")
+          toggle=True  → personalized greeting (camera capture + GPT-4o)
 
-        Falls back to a simple canned greeting if the camera is unavailable,
-        the API call fails, or the random roll doesn't land.
+        The toggle flips after every activation regardless of which path ran.
+        If the personalized path fails for any reason, falls back to the canned
+        greeting without consuming the toggle (next activation retries canned).
 
         Always completes (audio finishes) before returning so the caller can
         open the mic immediately afterwards.
         """
-        do_personalized = (
-            random.random() < config.GREETER_PROBABILITY
-            and self._camera.is_available()
-        )
+        do_personalized = self._greeting_toggle and self._camera.is_available()
+        self._greeting_toggle = not self._greeting_toggle
 
         if do_personalized:
             log.info("Wake greeting: attempting personalized greeting")

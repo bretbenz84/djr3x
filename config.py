@@ -322,12 +322,9 @@ COMMAND_FUZZY_THRESHOLD = 0.82
 # State machine
 # ---------------------------------------------------------------------------
 
-IDLE_CLIP_INTERVAL_MIN = 30.0   # minimum seconds between idle atmosphere clips
+IDLE_CLIP_INTERVAL_MIN = 10.0   # minimum seconds between idle atmosphere clips
 IDLE_CLIP_INTERVAL_MAX = 60.0  # maximum seconds between idle atmosphere clips
 
-# Probability (0.0–1.0) that Rex gives a personalized camera-based greeting
-# on wake word rather than a simple canned ack.  Set to 0.0 to disable.
-GREETER_PROBABILITY: float = float(_optional("GREETER_PROBABILITY", "0.4"))
 
 ACTIVE_IDLE_TIMEOUT  = 20.0  # legacy — superseded by ACTIVE_TIMEOUT_SECONDS
 ACTIVE_TIMEOUT_SECONDS   = 5.0   # seconds of silence after a response before returning to IDLE
