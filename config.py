@@ -161,8 +161,17 @@ AUDIO_VOLUME: float = max(0.0, min(1.0, float(_optional("AUDIO_VOLUME", "0.5")))
 # Silence-gated recording: stop capturing when RMS drops below threshold
 # for SILENCE_DURATION consecutive seconds (or MAX_RECORD_SECONDS elapses)
 SILENCE_THRESHOLD            = 300   # RMS amplitude (0–32767) — legacy, kept for reference
-TRANSCRIBE_SPEECH_THRESHOLD  = 500  # RMS threshold to detect speech start (raise if hallucinating on noise)
+TRANSCRIBE_SPEECH_THRESHOLD  = 500  # RMS threshold fallback if calibration is skipped
 TRANSCRIBE_MIN_SPEECH_CHUNKS = 3    # consecutive chunks above threshold required before speech is confirmed
+
+# Noise floor calibration — run once at startup to adapt threshold to the room.
+# threshold = clamp(noise_rms * NOISE_FLOOR_MULTIPLIER,
+#                   TRANSCRIBE_SPEECH_THRESHOLD_MIN,
+#                   TRANSCRIBE_SPEECH_THRESHOLD_MAX)
+TRANSCRIBE_NOISE_FLOOR_DURATION    = float(_optional("TRANSCRIBE_NOISE_FLOOR_DURATION", "0.5"))  # seconds of ambient audio to sample
+NOISE_FLOOR_MULTIPLIER             = float(_optional("NOISE_FLOOR_MULTIPLIER",           "2.0"))  # scale factor applied to measured RMS
+TRANSCRIBE_SPEECH_THRESHOLD_MIN    = int(_optional("TRANSCRIBE_SPEECH_THRESHOLD_MIN",    "300"))  # floor — avoids cutting out real speech
+TRANSCRIBE_SPEECH_THRESHOLD_MAX    = int(_optional("TRANSCRIBE_SPEECH_THRESHOLD_MAX",    "800"))  # ceiling — noisy room can't silence Rex
 SILENCE_DURATION             = 1.2  # seconds of silence to end capture
 MAX_RECORD_SECONDS           = 12.0 # hard cap on a single utterance
 

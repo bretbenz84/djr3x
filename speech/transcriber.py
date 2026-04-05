@@ -75,9 +75,17 @@ class Transcriber:
         the transcriber.
         """
 
-    def calibrate_noise_floor(self, duration: float = 0.5) -> None:
-        """Record a short burst of ambient silence and set the speech detection
-        threshold to 3× the measured RMS noise floor.
+    def calibrate_noise_floor(
+        self,
+        duration: float | None = None,
+    ) -> None:
+        """Record ambient silence and set the speech detection threshold.
+
+        threshold = clamp(
+            noise_rms * NOISE_FLOOR_MULTIPLIER,
+            TRANSCRIBE_SPEECH_THRESHOLD_MIN,
+            TRANSCRIBE_SPEECH_THRESHOLD_MAX,
+        )
 
         Call once at startup (after the mic device is known to be free) so the
         threshold adapts to the actual room noise rather than relying on the
@@ -85,6 +93,8 @@ class Transcriber:
 
         Raises sounddevice.PortAudioError if the mic cannot be opened.
         """
+        if duration is None:
+            duration = config.TRANSCRIBE_NOISE_FLOOR_DURATION
         n_frames = round(duration * config.AUDIO_SAMPLE_RATE)
         log.info(
             "Calibrating noise floor (%.1f s on device %s) …",
@@ -108,10 +118,19 @@ class Transcriber:
 
         mono = raw[:, 0].astype(np.float32)
         noise_rms = float(np.sqrt(np.mean(mono ** 2)))
-        new_threshold = max(int(noise_rms * 3), 50)   # floor of 50 to avoid pathological quiet rooms
+        raw_threshold = int(noise_rms * config.NOISE_FLOOR_MULTIPLIER)
+        new_threshold = max(
+            config.TRANSCRIBE_SPEECH_THRESHOLD_MIN,
+            min(config.TRANSCRIBE_SPEECH_THRESHOLD_MAX, raw_threshold),
+        )
         log.info(
-            "Noise floor: RMS=%.0f → speech threshold set to %d (was %d)",
-            noise_rms, new_threshold, self._speech_threshold,
+            "Noise floor calibration complete: "
+            "RMS=%.0f × %.1f = %d → clamped to %d "
+            "(min=%d max=%d, was %d)",
+            noise_rms, config.NOISE_FLOOR_MULTIPLIER, raw_threshold, new_threshold,
+            config.TRANSCRIBE_SPEECH_THRESHOLD_MIN,
+            config.TRANSCRIBE_SPEECH_THRESHOLD_MAX,
+            self._speech_threshold,
         )
         self._speech_threshold = new_threshold
 
