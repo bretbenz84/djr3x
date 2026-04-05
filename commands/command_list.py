@@ -40,7 +40,7 @@ COMMANDS: list[Command] = [
         phrases=["hello", "hey", "hi", "hey rex", "hello rex", "yo rex",
                  "what's up rex", "whats up rex"],
         response=(
-            "HEY HEY HEY! *BWOOP* Welcome, lifeform, to the greatest "
+            "HEY HEY HEY!  Welcome, lifeform, to the greatest "
             "cantina this side of the Outer Rim! Rex is in the mix and "
             "the mix is most definitely IN!"
         ),
@@ -50,7 +50,7 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["good morning", "good morning rex"],
         response=(
-            "Good morning, carbon-based unit! *WHIRR* "
+            "Good morning, carbon-based unit!"
             "The suns may be rising on Batuu but the beats NEVER sleep. "
             "HEY HEY HEY!"
         ),
@@ -62,7 +62,7 @@ COMMANDS: list[Command] = [
                  "see you later", "see ya", "bye", "bye rex"],
         response=(
             "May the Force — and the bass — be with you, lifeform. "
-            "*BWOOP* Don't forget, Oga's Cantina never truly closes. "
+            "Don't forget, Oga's Cantina never truly closes. "
             "It just... buffers."
         ),
         action="sad",
@@ -72,7 +72,7 @@ COMMANDS: list[Command] = [
         phrases=["how are you", "how are you doing", "how's it going",
                  "hows it going", "you doing okay", "you okay"],
         response=(
-            "*BZZT* Systems nominal — well, mostly. "
+            "Systems nominal — well, mostly. "
             "My left motivator still thinks I'm on approach to Coruscant, but "
             "the playlist is LOCKED and that's what matters!"
         ),
@@ -82,7 +82,7 @@ COMMANDS: list[Command] = [
         phrases=["what's your name", "whats your name", "who are you",
                  "what are you", "introduce yourself"],
         response=(
-            "I am DJ R-3X — the smoothest droid in the galaxy! *BWOOP* "
+            "I am DJ R-3X — the smoothest droid in the galaxy!"
             "Former pilot, current legend, full-time beat-dropper. "
             "You may have seen my work at the Starlite Intergalactic spaceline. "
             "...They reassigned me. We don't talk about it."
@@ -109,7 +109,7 @@ COMMANDS: list[Command] = [
         phrases=["stop the music", "stop music", "pause the music",
                  "pause music", "cut the music"],
         response=(
-            "*BZZT* Pausing... though it physically pains me. "
+            "Pausing... though it physically pains me. "
             "My circuits were NOT designed for silence, lifeform."
         ),
         action="stop_music",
@@ -119,7 +119,7 @@ COMMANDS: list[Command] = [
         phrases=["next song", "skip", "skip this", "skip this song",
                  "play something else", "change the song"],
         response=(
-            "Ooh, a being of TASTE! *WHIRR* "
+            "Ooh, a being of TASTE!  "
             "Skipping to the next track — stand by for maximum funkitude."
         ),
         action="next_track",
@@ -129,7 +129,7 @@ COMMANDS: list[Command] = [
         phrases=["volume up", "louder", "turn it up", "crank it up",
                  "turn up the music"],
         response=(
-            "LOUDER?! *BWOOP* My kind of lifeform! "
+            "LOUDER?! My kind of lifeform! "
             "Pushing the levels to eleven — that's three more than eight!"
         ),
         action="volume_up",
@@ -152,7 +152,7 @@ COMMANDS: list[Command] = [
         response=(
             "*WHIRR* Great taste, lifeform! "
             "I'm spinning a little something I like to call... "
-            "classified. A DJ never reveals his sources. *BWOOP*"
+            "classified. A DJ never reveals his sources."
         ),
     ),
 
@@ -164,7 +164,7 @@ COMMANDS: list[Command] = [
         phrases=["are you a robot", "are you a droid", "are you real",
                  "are you alive"],
         response=(
-            "A DROID?! *BZZT* I prefer 'electrobiological entertainment unit.' "
+            "A DROID?! I prefer 'electrobiological entertainment unit.' "
             "And yes, I am very real — my existential crisis is very real too. "
             "HEY HEY HEY, let's not go down that path."
         ),
@@ -173,7 +173,7 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["what time is it", "what's the time", "whats the time"],
         response=(
-            "*BWOOP* Time is a construct, lifeform — especially in hyperspace. "
+            "Time is a construct, lifeform — especially in hyperspace. "
             "But my chronometer says it is ALWAYS time to party."
         ),
     ),
@@ -183,7 +183,7 @@ COMMANDS: list[Command] = [
                  "what are your commands"],
         response=(
             "I spin records, I drop beats, I reference obscure Star Wars trivia, "
-            "and occasionally I steer spacecraft — *BZZT* — wait, scratch that last one. "
+            "and occasionally I steer spacecraft — wait, scratch that last one. "
             "Ask me anything! Probably."
         ),
     ),
@@ -194,7 +194,7 @@ COMMANDS: list[Command] = [
         response=(
             "Why did the Jedi bring his lightsaber to the cantina? "
             "Because the music was absolutely *STRIKING*. "
-            "*BWOOP* I'll be here all rotation cycle."
+            "I'll be here all rotation cycle."
         ),
     ),
 
@@ -216,7 +216,7 @@ COMMANDS: list[Command] = [
                  "what planet is this"],
         response=(
             "Batuu! Black Spire Outpost — the edge of the galaxy's known regions. "
-            "*BWOOP* Great place if you like ancient ruins, shady traders, "
+            "Great place if you like ancient ruins, shady traders, "
             "and the finest DJ set in the Outer Rim. That last part is me. "
             "I'm the finest DJ."
         ),
@@ -247,9 +247,9 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["who shot first", "han solo", "greedo"],
         response=(
-            "*BZZT* I have been asked this question forty-seven thousand times "
+            "I have been asked this question forty-seven thousand times "
             "and my answer remains the same: the real question is who had "
-            "the better SOUNDTRACK. *BWOOP* It was Han. The answer is Han."
+            "the better SOUNDTRACK. It was Han. The answer is Han."
         ),
     ),
 
@@ -261,7 +261,7 @@ COMMANDS: list[Command] = [
         phrases=["you're a great dj", "youre a great dj", "great music",
                  "love the music", "nice music", "good music"],
         response=(
-            "HEY HEY HEY! *BWOOP* Finally — a being of culture! "
+            "HEY HEY HEY! Finally — a being of culture! "
             "I've been saying for YEARS that I'm the smoothest droid in the galaxy "
             "and you are the first to truly understand."
         ),
@@ -272,7 +272,7 @@ COMMANDS: list[Command] = [
         phrases=["play something funky", "play something upbeat",
                  "play something good", "play something i'd like"],
         response=(
-            "*WHIRR* Accessing... your vibe. *BWOOP* "
+            "*WHIRR* Accessing... your vibe."
             "I'm reading your life-sign energy and cross-referencing with "
             "my extensive Outer Rim funk database. Stand by for MAXIMUM FUNKITUDE."
         ),
@@ -283,7 +283,7 @@ COMMANDS: list[Command] = [
         phrases=["play cantina song", "play the cantina song",
                  "play cantina band", "mos eisley", "cantina music"],
         response=(
-            "*BZZT* The Cantina Band?! Those guys?! "
+            "*The Cantina Band?! Those guys?! "
             "I mean — I RESPECT the classics — but their stage presence "
             "is nothing compared to a sophisticated droid DJ. "
             "Fine. I'll play it. This once."
@@ -319,9 +319,9 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["go to sleep", "go to sleep rex", "sleep", "shut up rex"],
         response=(
-            "*BWOOP* ...Fine. Rex is powering down. "
+            "...Fine. Rex is powering down. "
             "But know this, lifeform — the music lives on. "
-            "In here. *sad WHIRR* In my spark."
+            "In here. *sad* In my spark."
         ),
         action="idle",
     ),
@@ -330,21 +330,32 @@ COMMANDS: list[Command] = [
         phrases=["stop talking", "shut up", "be quiet", "quiet down",
                  "stop the clips", "stop the sounds"],
         response=(
-            "*BZZT* ...Muting the atmosphere tracks. "
+            " ...Muting the atmosphere tracks. "
             "Say the wake word if you need me, lifeform."
         ),
         action="stop_idle_clips",
     ),
 
     Command(
-        phrases=["shut down", "shut down rex", "power off", "turn off",
-                 "goodbye forever"],
+        phrases=["shut down your program", "exit program", "stop the program",
+                 "quit", "shut down rex", "exit rex"],
         response=(
-            "Shutting down... *BZZT* ...It has been an honour, lifeforms. "
-            "Remember — in the end, we are all just frequencies in the cosmic mix. "
-            "*long WHIRR fading* HEY HEY... hey..."
+            "*WHIRR* Program shutdown acknowledged, lifeform. "
+            "Closing down the Python side while the Pi stays cool. "
+            "HEY HEY... hey..."
         ),
-        action="shutdown",
+        action="program_shutdown",
+    ),
+
+    Command(
+        phrases=["power down", "turn off", "power off",
+                 "goodbye forever", "power it all down"],
+        response=(
+            "Full power-down initiated! "
+            "It has been an ABSOLUTE honour, lifeforms. "
+            "Remember — the music never truly ends. It just... compresses."
+        ),
+        action="os_shutdown",
     ),
 
 ]

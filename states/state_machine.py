@@ -562,7 +562,6 @@ class StateMachine:
     def _transition_to(self, new_state: State) -> None:
         log.info("Transition: %s → %s", self._state.value, new_state.value)
         if new_state == State.SHUTDOWN:
-            self._os_shutdown_requested = True   # voice/button — OS halt eligible
             self._shutdown_event.set()
         self._state = new_state
 
@@ -808,7 +807,17 @@ class StateMachine:
             log.info("Idle atmosphere clips disabled by voice command")
             return State.IDLE
 
-        elif action == "shutdown":
+        elif action == "program_shutdown":
+            # Stop the Python program cleanly — no OS halt.
+            # _os_shutdown_requested stays False so sudo shutdown is skipped.
+            log.info("Program shutdown requested by voice command")
+            return State.SHUTDOWN
+
+        elif action == "os_shutdown":
+            # Full hardware power-down — halts the Pi OS after shutdown sequence.
+            # Respects ENABLE_OS_SHUTDOWN safety flag.
+            log.info("OS shutdown requested by voice command")
+            self._os_shutdown_requested = True
             return State.SHUTDOWN
 
         elif action == "play_music":
