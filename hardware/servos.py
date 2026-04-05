@@ -54,25 +54,16 @@ log = logging.getLogger(__name__)
 
 _CMD_SET_TARGET = 0x84   # Set Target:       0x84 ch lo hi
 _CMD_SET_SPEED  = 0x87   # Set Speed:        0x87 ch lo hi
-_CMD_SET_ACCEL  = 0x89   # Set Acceleration: 0x89 ch lo hi  (unused — Maestro default)
+_CMD_SET_ACCEL  = 0x89   # Set Acceleration: 0x89 ch lo hi
 
-# Channels moved by the background idle thread (arms + hands only)
-_IDLE_CHANNELS = [
-    config.SERVO_ARM_LEFT,
-    config.SERVO_ARM_RIGHT,
-    config.SERVO_HAND_LEFT,
-    config.SERVO_HAND_RIGHT,
-]
+# Channels moved by the background idle thread (arms only)
+_IDLE_CHANNELS = config.ARM_CHANNELS
 
-# Channels moved during speech (head tilt, pan, visor)
-_SPEECH_CHANNELS = [
-    config.SERVO_HEAD_TILT,
-    config.SERVO_HEAD_PAN,
-    config.SERVO_VISOR,
-]
+# Channels moved during speech (head group)
+_SPEECH_CHANNELS = config.HEAD_CHANNELS
 
 # All managed channels in channel-number order
-_ALL_CHANNELS = sorted(config.SERVO_HOME.keys())
+_ALL_CHANNELS = sorted(config.SERVO_CHANNELS.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +111,8 @@ class ServoController:
             timeout=1,
         )
 
-        # Apply default speed to all channels and move to home
+        # Apply per-channel acceleration, default speed, then move to home
+        self._apply_acceleration()
         self._apply_speed(config.SERVO_DEFAULT_SPEED)
         self.home()
 
@@ -191,7 +183,7 @@ class ServoController:
         """Move head and visor to speech-reactive positions.
 
         intensity: 0.0 (quiet) → 1.0 (loud), typically derived from
-                   AudioPlayer.rms scaled to 0-1.  Maps to head tilt
+                   AudioPlayer.rms scaled to 0-1.  Maps to neck rotation
                    (up = loud) and visor open amount.  A small random
                    jitter keeps the motion from looking mechanical.
 
@@ -199,23 +191,23 @@ class ServoController:
         """
         intensity = max(0.0, min(1.0, float(intensity)))
 
-        tilt_lo, tilt_hi = self._effective_limits(config.SERVO_HEAD_TILT)
-        pan_lo,  pan_hi  = self._effective_limits(config.SERVO_HEAD_PAN)
-        visor_lo, visor_hi = self._effective_limits(config.SERVO_VISOR)
+        neck_lo,  neck_hi  = self._effective_limits(0)   # neck
+        lift_lo,  lift_hi  = self._effective_limits(1)   # headlift
+        visor_lo, visor_hi = self._effective_limits(3)   # visor
 
-        # head tilts up on louder speech; small random jitter keeps it lively
+        # neck moves up on louder speech; small random jitter keeps it lively
         jitter = random.randint(-80, 80)
-        tilt_pos = _clamp(
-            int(tilt_lo + intensity * (tilt_hi - tilt_lo)) + jitter,
-            tilt_lo, tilt_hi,
+        neck_pos = _clamp(
+            int(neck_lo + intensity * (neck_hi - neck_lo)) + jitter,
+            neck_lo, neck_hi,
         )
 
-        # pan wobbles gently around center
-        pan_center = (pan_lo + pan_hi) // 2
-        pan_spread = int((pan_hi - pan_lo) * 0.15)
-        pan_pos = _clamp(
-            pan_center + random.randint(-pan_spread, pan_spread),
-            pan_lo, pan_hi,
+        # headlift wobbles gently around center
+        lift_center = (lift_lo + lift_hi) // 2
+        lift_spread = int((lift_hi - lift_lo) * 0.15)
+        lift_pos = _clamp(
+            lift_center + random.randint(-lift_spread, lift_spread),
+            lift_lo, lift_hi,
         )
 
         # visor opens with intensity
@@ -225,9 +217,9 @@ class ServoController:
         )
 
         with self._lock:
-            self._send_target(config.SERVO_HEAD_TILT, tilt_pos)
-            self._send_target(config.SERVO_HEAD_PAN, pan_pos)
-            self._send_target(config.SERVO_VISOR, visor_pos)
+            self._send_target(0, neck_pos)
+            self._send_target(1, lift_pos)
+            self._send_target(3, visor_pos)
 
     # ------------------------------------------------------------------
     # Safe home position
@@ -239,8 +231,8 @@ class ServoController:
         Call on startup (done by __init__) and on shutdown.
         """
         with self._lock:
-            for channel, position in config.SERVO_HOME.items():
-                self._send_target(channel, position)
+            for channel, cfg in config.SERVO_CHANNELS.items():
+                self._send_target(channel, cfg["neutral"])
         log.debug("All servos moved to home positions.")
 
     # ------------------------------------------------------------------
@@ -303,12 +295,21 @@ class ServoController:
             for channel in _ALL_CHANNELS:
                 self._send_speed(channel, speed)
 
+    def _apply_acceleration(self) -> None:
+        """Set per-channel acceleration from SERVO_CHANNELS config."""
+        with self._lock:
+            for channel, cfg in config.SERVO_CHANNELS.items():
+                self._serial.write(
+                    _encode(_CMD_SET_ACCEL, channel, cfg["acceleration"])
+                )
+
     # ------------------------------------------------------------------
     # Internal — effective range lookup
     # ------------------------------------------------------------------
 
     def _effective_limits(self, channel: int) -> tuple[int, int]:
         """Return (min, max) qµs for channel, with emotion overrides applied."""
-        base = config.SERVO_LIMITS[channel]
+        ch_cfg = config.SERVO_CHANNELS[channel]
+        base = (ch_cfg["min"], ch_cfg["max"])
         overrides = config.SERVO_EMOTION_LIMITS.get(self._emotion, {})
         return overrides.get(channel, base)

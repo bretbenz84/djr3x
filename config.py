@@ -72,54 +72,39 @@ NANO_HEAD_PORT  = _optional("NANO_HEAD_PORT",  "/dev/ttyUSB1")
 LED_NANO_BAUD   = 9600
 
 # ---------------------------------------------------------------------------
-# Servo channel assignments (Maestro channel numbers, 0-based)
+# Servo channel definitions (Pololu Maestro, 0-based channel numbers)
+#
+# All position values are in quarter-microseconds (qµs).
+# Maestro GUI shows microseconds — multiply by 4 for the serial protocol.
 # ---------------------------------------------------------------------------
 
-SERVO_HEAD_TILT   = 0
-SERVO_HEAD_PAN    = 1
-SERVO_VISOR       = 2
-SERVO_ARM_LEFT    = 3
-SERVO_ARM_RIGHT   = 4
-SERVO_HAND_LEFT   = 5
-SERVO_HAND_RIGHT  = 6
-
-# Maestro position values are in quarter-microseconds.
-# Standard servo center = 1500 µs = 6000 qµs; typical range 4000–8000.
-
-# Home/neutral positions for each channel (qµs)
-SERVO_HOME = {
-    SERVO_HEAD_TILT:  6000,
-    SERVO_HEAD_PAN:   6000,
-    SERVO_VISOR:      5500,
-    SERVO_ARM_LEFT:   6000,
-    SERVO_ARM_RIGHT:  6000,
-    SERVO_HAND_LEFT:  6000,
-    SERVO_HAND_RIGHT: 6000,
+SERVO_CHANNELS: dict[int, dict] = {
+    0: {"name": "neck",     "min": 1984,  "max": 9984,  "acceleration": 15, "neutral": 6000},
+    1: {"name": "headlift", "min": 1984,  "max": 7744,  "acceleration": 20, "neutral": 6000},
+    2: {"name": "headtilt", "min": 4032,  "max": 5824,  "acceleration": 25, "neutral": 5824},
+    3: {"name": "visor",    "min": 4544,  "max": 6976,  "acceleration": 10, "neutral": 6000},
+    4: {"name": "elbow",    "min": 3968,  "max": 8000,  "acceleration": 10, "neutral": 6000},
+    5: {"name": "hand",     "min": 3968,  "max": 8000,  "acceleration":  5, "neutral": 6000},
+    6: {"name": "pokerarm", "min": 3968,  "max": 8000,  "acceleration":  4, "neutral": 6000},
+    7: {"name": "heroarm",  "min": 3968,  "max": 8000,  "acceleration":  4, "neutral": 6000},
 }
 
-# Per-channel (min, max) travel limits enforced in software (qµs)
-SERVO_LIMITS = {
-    SERVO_HEAD_TILT:  (4500, 7500),
-    SERVO_HEAD_PAN:   (4000, 8000),
-    SERVO_VISOR:      (4000, 7000),
-    SERVO_ARM_LEFT:   (4000, 8000),
-    SERVO_ARM_RIGHT:  (4000, 8000),
-    SERVO_HAND_LEFT:  (4500, 7500),
-    SERVO_HAND_RIGHT: (4500, 7500),
-}
+# Channel groups used by the servo controller
+HEAD_CHANNELS = [0, 1, 2, 3]   # neck, headlift, headtilt, visor
+ARM_CHANNELS  = [4, 5, 6, 7]   # elbow, hand, pokerarm, heroarm
 
-# Emotion bias: each emotion overrides (min, max) for affected channels.
-# Only channels that differ from SERVO_LIMITS need to be listed.
+# Emotion bias: each emotion overrides (min, max) for affected channels (qµs).
+# Only channels that differ from SERVO_CHANNELS limits need to be listed.
 SERVO_EMOTION_LIMITS = {
     "excited": {
-        SERVO_HEAD_TILT: (5500, 7500),   # head up
-        SERVO_VISOR:     (5500, 7000),   # visor high
+        0: (5500, 7500),   # neck up
+        3: (5500, 6976),   # visor high
     },
     "sad": {
-        SERVO_HEAD_TILT: (4500, 5500),   # head down
-        SERVO_VISOR:     (4000, 5000),   # visor low
+        0: (4500, 5500),   # neck down
+        3: (4544, 5500),   # visor low
     },
-    "neutral": {},  # use default SERVO_LIMITS
+    "neutral": {},  # use default SERVO_CHANNELS limits
 }
 
 # Random idle motion timing (seconds)
