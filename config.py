@@ -83,7 +83,7 @@ SERVO_CHANNELS: dict[int, dict] = {
     1: {"name": "headlift", "min": 1984,  "max": 7744,  "acceleration": 20, "neutral": 6000},
     2: {"name": "headtilt", "min": 3904,  "max": 5504,  "acceleration": 25, "neutral": 4320},
     3: {"name": "visor",    "min": 4544,  "max": 6976,  "acceleration": 10, "neutral": 6000},
-    4: {"name": "elbow",    "min": 6300,  "max": 7688,  "acceleration": 10, "neutral": 6720},
+    4: {"name": "elbow",    "min": 6300,  "max": 7560,  "acceleration": 10, "neutral": 6720},
     5: {"name": "hand",     "min": 3968,  "max": 8000,  "acceleration":  0, "neutral": 6000},
     6: {"name": "pokerarm", "min": 3968,  "max": 8000,  "acceleration":  4, "neutral": 6000},
     7: {"name": "heroarm",  "min": 3968,  "max": 8000,  "acceleration":  4, "neutral": 6000},
