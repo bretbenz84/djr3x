@@ -50,6 +50,9 @@
 - If matched: execute locally, play cached response audio
 - If no match: stream to ChatGPT → ElevenLabs → speakers
 - Mouth PCB brightness driven by speech audio buffer level
+- Audio input: ReSpeaker Lite via PipeWire device index 3 (NOT direct ALSA hw:4,0)
+- Audio output: bcm2835 Headphones device index 0
+- PipeWire is the audio manager — all audio must go through it
 
 ## LED System
 - Arduino Nanos receive simple serial commands from Pi
