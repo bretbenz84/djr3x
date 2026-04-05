@@ -90,7 +90,10 @@ SERVO_CHANNELS: dict[int, dict] = {
 }
 
 # Channel groups used by the servo controller
-HEAD_CHANNELS = [0, 1, 2, 3]   # neck, headlift, headtilt, visor
+HEAD_CHANNELS      = [0, 1, 2, 3]   # neck, headlift, headtilt, visor — full head group
+IDLE_HEAD_CHANNELS = [0, 1]         # channels eligible for idle head motion
+                                    # ch 2 (headtilt) and ch 3 (visor) are excluded:
+                                    # headtilt is speech-only; visor has its own idle timer
 ARM_CHANNELS  = [4, 5, 6, 7]   # elbow, hand, pokerarm, heroarm
 
 # Channel number aliases — used by sequences/animations.py for readability

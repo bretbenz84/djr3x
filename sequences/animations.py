@@ -47,13 +47,14 @@ log = logging.getLogger(__name__)
 # Channel aliases — shorter names for sequence tables
 # ---------------------------------------------------------------------------
 
-_T  = config.SERVO_HEAD_TILT    # ch 0 — tilt  (higher = head up)
-_P  = config.SERVO_HEAD_PAN     # ch 1 — pan   (center = 6000)
-_V  = config.SERVO_VISOR        # ch 2 — visor (higher = more open)
-_AL = config.SERVO_ARM_LEFT     # ch 3
-_AR = config.SERVO_ARM_RIGHT    # ch 4
-_HL = config.SERVO_HAND_LEFT    # ch 5
-_HR = config.SERVO_HAND_RIGHT   # ch 6
+_P  = config.SERVO_HEAD_PAN     # ch 0 — neck rotation (pan)
+_L  = config.SERVO_HEAD_LIFT    # ch 1 — headlift (inverted: lower qµs = head up)
+_T  = config.SERVO_HEAD_TILT    # ch 2 — headtilt (speech-reactive only)
+_V  = config.SERVO_VISOR        # ch 3 — visor open/close
+_AL = config.SERVO_ARM_LEFT     # ch 4 — elbow
+_HL = config.SERVO_HAND_LEFT    # ch 5 — hand
+_AR = config.SERVO_ARM_RIGHT    # ch 6 — pokerarm
+_HR = config.SERVO_HAND_RIGHT   # ch 7 — heroarm
 
 # ---------------------------------------------------------------------------
 # Named eye colours

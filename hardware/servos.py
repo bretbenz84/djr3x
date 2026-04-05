@@ -292,7 +292,7 @@ class ServoController:
 
             # --- Head idle: neck (ch 0) and headlift (ch 1) ---
             if now >= _next_head:
-                ch = random.choice([config.SERVO_HEAD_PAN, config.SERVO_HEAD_LIFT])
+                ch = random.choice(config.IDLE_HEAD_CHANNELS)
 
                 if ch == config.SERVO_HEAD_LIFT:
                     # Inverted servo: lower qµs = head up.  Constrain to
