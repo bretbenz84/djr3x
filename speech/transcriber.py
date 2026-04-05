@@ -187,61 +187,84 @@ class Transcriber:
             config.AUDIO_CHUNK_SIZE, self._speech_threshold,
         )
 
-        with sd.InputStream(
-            samplerate=config.AUDIO_SAMPLE_RATE,
-            channels=config.AUDIO_INPUT_CHANNELS,
-            dtype="int16",
-            device=config.AUDIO_INPUT_DEVICE,
-            blocksize=config.AUDIO_CHUNK_SIZE,
-        ) as stream:
-            log.info("Mic open, listening …%s", _mark())
-            for chunk_index in range(_MAX_CHUNKS):
-                frames, overflowed = stream.read(config.AUDIO_CHUNK_SIZE)
-                if overflowed:
-                    log.debug("Transcriber: audio buffer overflowed (input too slow)")
+        _early_return: str | None | object = _SENTINEL = object()  # tracks early-return signals
+        for _attempt in range(3):
+            frames_list = []
+            silence_chunks = 0
+            speech_started = False
+            consecutive_speech = 0
+            speech_first_chunk = None
+            try:
+                with sd.InputStream(
+                    samplerate=config.AUDIO_SAMPLE_RATE,
+                    channels=config.AUDIO_INPUT_CHANNELS,
+                    dtype="int16",
+                    device=config.AUDIO_INPUT_DEVICE,
+                    blocksize=config.AUDIO_CHUNK_SIZE,
+                ) as stream:
+                    log.info("Mic open, listening …%s", _mark())
+                    for chunk_index in range(_MAX_CHUNKS):
+                        frames, overflowed = stream.read(config.AUDIO_CHUNK_SIZE)
+                        if overflowed:
+                            log.debug("Transcriber: audio buffer overflowed (input too slow)")
 
-                # frames shape: (AUDIO_CHUNK_SIZE, AUDIO_CHANNELS) dtype int16
-                samples = frames[:, 0]  # flatten to 1-D mono array
-                rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
-                log.debug(
-                    "Transcriber: chunk %3d  rms=%6.0f  speech_started=%-5s  "
-                    "consec=%d  silence=%d",
-                    chunk_index, rms, speech_started, consecutive_speech, silence_chunks,
-                )
-
-                if rms >= self._speech_threshold:
-                    if speech_first_chunk is None:
-                        speech_first_chunk = chunk_index
-                    consecutive_speech += 1
-                    silence_chunks = 0
-                    if not speech_started and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS:
-                        log.info(
-                            "Speech detected (rms=%.0f) — recording …%s",
-                            rms, _mark(),
+                        # frames shape: (AUDIO_CHUNK_SIZE, AUDIO_CHANNELS) dtype int16
+                        samples = frames[:, 0]  # flatten to 1-D mono array
+                        rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
+                        log.debug(
+                            "Transcriber: chunk %3d  rms=%6.0f  speech_started=%-5s  "
+                            "consec=%d  silence=%d",
+                            chunk_index, rms, speech_started, consecutive_speech, silence_chunks,
                         )
-                        speech_started = True
-                else:
-                    consecutive_speech = 0
-                    if speech_started:
-                        silence_chunks += 1
 
-                frames_list.append(samples)
+                        if rms >= self._speech_threshold:
+                            if speech_first_chunk is None:
+                                speech_first_chunk = chunk_index
+                            consecutive_speech += 1
+                            silence_chunks = 0
+                            if not speech_started and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS:
+                                log.info(
+                                    "Speech detected (rms=%.0f) — recording …%s",
+                                    rms, _mark(),
+                                )
+                                speech_started = True
+                        else:
+                            consecutive_speech = 0
+                            if speech_started:
+                                silence_chunks += 1
 
-                if speech_started and silence_chunks >= _SILENCE_CHUNKS_NEEDED:
-                    break
+                        frames_list.append(samples)
 
-                # Early exit: speech hasn't been confirmed and the caller's wait window expired.
-                if not speech_started and wait_chunks is not None and chunk_index + 1 >= wait_chunks:
-                    log.debug(
-                        "Transcriber: no speech within %.1f s — returning None",
-                        wait_for_speech_seconds,
+                        if speech_started and silence_chunks >= _SILENCE_CHUNKS_NEEDED:
+                            break
+
+                        # Early exit: speech hasn't been confirmed and the caller's wait window expired.
+                        if not speech_started and wait_chunks is not None and chunk_index + 1 >= wait_chunks:
+                            log.debug(
+                                "Transcriber: no speech within %.1f s — returning None",
+                                wait_for_speech_seconds,
+                            )
+                            _early_return = None
+                            break
+                    else:
+                        log.debug(
+                            "Transcriber: hit WHISPER_MAX_RECORD_SECONDS cap (%.1f s)",
+                            config.WHISPER_MAX_RECORD_SECONDS,
+                        )
+                break  # stream opened and recording completed — exit retry loop
+            except sd.PortAudioError as exc:
+                if _attempt < 2:
+                    log.warning(
+                        "Transcriber: mic open failed (attempt %d/3): %s — retrying in 2 s",
+                        _attempt + 1, exc,
                     )
-                    return None
-            else:
-                log.debug(
-                    "Transcriber: hit WHISPER_MAX_RECORD_SECONDS cap (%.1f s)",
-                    config.WHISPER_MAX_RECORD_SECONDS,
-                )
+                    time.sleep(2.0)
+                else:
+                    log.exception("Transcriber: mic open failed after 3 attempts")
+                    raise
+
+        if _early_return is not _SENTINEL:
+            return _early_return  # type: ignore[return-value]
 
         # Speech was never confirmed — skip the API call entirely.
         if not speech_started:

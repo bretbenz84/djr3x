@@ -224,13 +224,16 @@ class WakeWordDetector:
         without killing this thread — the mic is released while the transcriber
         holds it and reclaimed once transcription is done.
         """
+        _open_attempts = 0
         while not self._stop_event.is_set():
             # Paused: stream is (or should be) closed — signal idle and wait.
             if self._pause_event.is_set():
                 self._idle_event.set()
                 time.sleep(0.02)
+                _open_attempts = 0
                 continue
 
+            _stream_opened = False
             try:
                 self._idle_event.clear()
                 with sd.InputStream(
@@ -240,6 +243,8 @@ class WakeWordDetector:
                     device=config.AUDIO_INPUT_DEVICE,
                     blocksize=config.WAKE_WORD_CHUNK_SIZE,
                 ) as stream:
+                    _stream_opened = True
+                    _open_attempts = 0
                     log.debug("Wake word audio stream open (chunk=%d samples, %.0f ms)",
                               config.WAKE_WORD_CHUNK_SIZE,
                               config.WAKE_WORD_CHUNK_SIZE / config.AUDIO_SAMPLE_RATE * 1000)
@@ -281,6 +286,15 @@ class WakeWordDetector:
                                 break   # one callback per chunk maximum
 
             except sd.PortAudioError:
+                if not _stream_opened:
+                    _open_attempts += 1
+                    if _open_attempts <= 3:
+                        log.warning(
+                            "Wake word: mic open failed (attempt %d/3) — retrying in 2 s",
+                            _open_attempts,
+                        )
+                        time.sleep(2.0)
+                        continue
                 log.exception("Wake word: microphone error — detection thread exiting")
                 break
             except Exception:

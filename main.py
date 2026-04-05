@@ -23,6 +23,7 @@ import logging
 import logging.handlers
 import signal
 import sys
+import time
 from pathlib import Path
 
 import config
@@ -128,6 +129,10 @@ def _register_signals(sm: StateMachine) -> None:
 def main() -> None:
     _setup_logging()
     log.info("DJ-R3X controller starting up …")
+
+    # 0. Allow USB audio devices to fully enumerate after boot
+    log.info("Waiting for audio devices to initialize...")
+    time.sleep(3)
 
     # 1. Construct state machine (probes serial ports, opens hardware)
     sm = StateMachine()
