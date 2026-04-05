@@ -118,6 +118,7 @@ class Camera:
             f"data:image/jpeg;base64,{frame_b64}"
         """
         if not self._available or self._cap is None:
+            log.debug("Camera: capture_frame called but camera unavailable")
             return None
 
         ok, frame = self._cap.read()
@@ -131,4 +132,6 @@ class Camera:
             log.warning("Camera: JPEG encode failed")
             return None
 
-        return base64.b64encode(buf.tobytes()).decode("ascii")
+        b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+        log.debug("Camera: frame captured successfully (%d bytes b64)", len(b64))
+        return b64

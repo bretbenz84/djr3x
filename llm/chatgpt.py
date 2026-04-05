@@ -97,6 +97,8 @@ class ChatGPTClient:
             return
 
         # Build the user message — plain text or multipart with image.
+        log.debug("chat_stream: image received=%s, length=%d bytes",
+                  bool(image), len(image) if image else 0)
         if image:
             user_message: dict = {
                 "role": "user",
@@ -112,9 +114,11 @@ class ChatGPTClient:
                 ],
             }
             model = "gpt-4o"   # gpt-4o-mini does not support vision
+            log.debug("chat_stream: multipart content block constructed, model=gpt-4o")
         else:
             user_message = {"role": "user", "content": user_text}
             model = config.OPENAI_MODEL
+            log.debug("chat_stream: text-only content block, model=%s", model)
 
         # History stores text-only for the user turn so it stays compact and
         # compatible with non-vision turns in the same session.
