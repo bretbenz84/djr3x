@@ -81,6 +81,13 @@ _GOODBYE_PHRASES: list[str] = [
     "Ok, going back to sleep!",
 ]
 
+_SHUTDOWN_PHRASES: list[str] = [
+    "Shutting down, catch you on the flip side!",
+    "Going offline, keep the music alive!",
+    "Powering down, it's been a blast lifeform!",
+    "See you in the next galaxy, signing off!",
+]
+
 _IDLE_CLIPS: list[str] = [
     "This is your cap.mp3",
     "Yahoo.mp3",
@@ -508,8 +515,20 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def _run_shutdown(self) -> None:
-        """Play shutdown animation, home hardware, then halt the OS."""
+        """Speak a goodbye line, play shutdown animation, home hardware, then halt the OS."""
         log.info("→ SHUTDOWN")
+
+        # Speak a farewell line before the animation — idle thread still running
+        # so speech-reactive servo movement works normally.
+        phrase = random.choice(_SHUTDOWN_PHRASES)
+        log.info("Shutdown speech: %r", phrase)
+        servo_stop = self._begin_speech(emotion="neutral")
+        try:
+            self._synthesizer.speak(phrase)
+        except Exception:
+            log.exception("Shutdown speech: TTS error — continuing to shutdown")
+        finally:
+            self._end_speech(servo_stop)
 
         # Stop servo idle thread before the animation so arm channels are free.
         if self._servos is not None:
