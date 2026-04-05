@@ -62,6 +62,16 @@ _IDLE_CHANNELS = config.ARM_CHANNELS
 # Channels moved during speech (head group)
 _SPEECH_CHANNELS = config.HEAD_CHANNELS
 
+# Arm channels animated during speech (elbow, hand, heroarm)
+_SPEAK_ARM_CHANNELS = (
+    config.SERVO_ARM_LEFT,   # ch 4 — elbow
+    config.SERVO_HAND_LEFT,  # ch 5 — hand
+    config.SERVO_HAND_RIGHT, # ch 7 — heroarm
+)
+
+# Arms amplify audio intensity relative to head so gestures read bigger
+_ARM_SPEAK_INTENSITY_MULT: float = 2.0
+
 # All managed channels in channel-number order
 _ALL_CHANNELS = sorted(config.SERVO_CHANNELS.keys())
 
@@ -182,12 +192,15 @@ class ServoController:
     # ------------------------------------------------------------------
 
     def speak_move(self, intensity: float = 0.5) -> None:
-        """Move head and visor to speech-reactive positions.
+        """Move head, visor, and expressive arm channels to speech-reactive positions.
 
         intensity: 0.0 (quiet) → 1.0 (loud), typically derived from
                    AudioPlayer.rms scaled to 0-1.  Maps to neck rotation
-                   (up = loud) and visor open amount.  A small random
-                   jitter keeps the motion from looking mechanical.
+                   (up = loud), visor open amount, and arm gesture range.
+                   A small random jitter keeps the motion from looking mechanical.
+
+        Arms use _ARM_SPEAK_INTENSITY_MULT so they gesture more aggressively
+        than the head — wider swings, more responsive to audio level.
 
         Thread-safe: acquires _lock, safe to call from audio/TTS thread.
         """
@@ -229,14 +242,51 @@ class ServoController:
             visor_lo, visor_hi,
         )
 
+        # --- Arm gestures ---
+        # Amplify intensity so arms react more aggressively than head
+        arm_intensity = min(1.0, intensity * _ARM_SPEAK_INTENSITY_MULT)
+
+        elbow_lo, elbow_hi = self._effective_limits(config.SERVO_ARM_LEFT)   # ch 4
+        hand_lo,  hand_hi  = self._effective_limits(config.SERVO_HAND_LEFT)  # ch 5
+        hero_lo,  hero_hi  = self._effective_limits(config.SERVO_HAND_RIGHT) # ch 7
+
+        # Elbow rises with intensity — loud speech = arm more raised
+        elbow_pos = _clamp(
+            int(elbow_lo + arm_intensity * (elbow_hi - elbow_lo))
+            + random.randint(-100, 100),
+            elbow_lo, elbow_hi,
+        )
+
+        # Hand sweeps expressively; swing width scales with intensity
+        hand_center = (hand_lo + hand_hi) // 2
+        hand_swing  = int((hand_hi - hand_lo) * 0.40 * arm_intensity) + 80
+        hand_pos = _clamp(
+            hand_center + random.randint(-hand_swing, hand_swing),
+            hand_lo, hand_hi,
+        )
+
+        # Heroarm gestures independently — offset from hand for visual variety
+        hero_center = (hero_lo + hero_hi) // 2
+        hero_swing  = int((hero_hi - hero_lo) * 0.40 * arm_intensity) + 80
+        hero_pos = _clamp(
+            hero_center + random.randint(-hero_swing, hero_swing),
+            hero_lo, hero_hi,
+        )
+
         with self._lock:
-            # Restore emotion speed — idle loop may have slowed these channels
+            # Restore emotion speed on head/visor — idle loop may have slowed them
             for ch in (0, 1, 2, 3):
                 self._send_speed(ch, self._current_speed)
             self._send_target(0, neck_pos)
             self._send_target(1, lift_pos)
             self._send_target(2, tilt_pos)
             self._send_target(3, visor_pos)
+            # Arms snap at excited speed during speech for snappy gestures
+            for ch in _SPEAK_ARM_CHANNELS:
+                self._send_speed(ch, config.SERVO_EXCITED_SPEED)
+            self._send_target(config.SERVO_ARM_LEFT,   elbow_pos)
+            self._send_target(config.SERVO_HAND_LEFT,  hand_pos)
+            self._send_target(config.SERVO_HAND_RIGHT, hero_pos)
 
     # ------------------------------------------------------------------
     # Safe home position
@@ -288,16 +338,23 @@ class ServoController:
     def _idle_loop(self) -> None:
         """Continuously move servos to random positions during idle.
 
-        Arms (channels 4-7): one channel per iteration, every 1.5-4.0 s.
+        All timers are independent; the loop polls every 50 ms.
+
         Head (neck ch 0, headlift ch 1): one channel every 3-5 s, slow speed,
             constrained to the middle 60% of each channel's range.
         Visor (ch 3): every 5-8 s, very slow speed,
-            constrained to the middle 30% of its range.
+            constrained to the open (low) 30% of its range.
+        Expressive arms (ch 4 elbow, ch 5 hand, ch 7 heroarm): one channel
+            every ARM_IDLE_INTERVAL_MIN–MAX s, constrained to the center
+            ARM_IDLE_RANGE_PERCENT of the channel's min/max span.
+        Pokerarm (ch 6): every SERVO_IDLE_MOVE_INTERVAL_MIN–MAX s, full range.
         Headtilt (ch 2) is reserved for speech reactions and is not touched.
         """
-        # Stagger initial head/visor moves so they don't all fire at t=0
-        _next_head  = time.monotonic() + random.uniform(2.0, 4.0)
-        _next_visor = time.monotonic() + random.uniform(3.0, 6.0)
+        # Stagger initial moves so they don't all fire at t=0
+        _next_head          = time.monotonic() + random.uniform(2.0, 4.0)
+        _next_visor         = time.monotonic() + random.uniform(3.0, 6.0)
+        _next_expressive    = time.monotonic() + random.uniform(1.0, 2.5)
+        _next_other_arm     = time.monotonic() + random.uniform(2.0, 4.0)
 
         while not self._stop_event.is_set():
             now = time.monotonic()
@@ -340,21 +397,36 @@ class ServoController:
                     self._send_target(config.SERVO_VISOR, target)
                 _next_visor = now + random.uniform(5.0, 8.0)
 
-            # --- Arms (unchanged): pick one channel, full range ---
-            channel = random.choice(_IDLE_CHANNELS)
-            lo, hi  = self._effective_limits(channel)
-            target  = random.randint(lo, hi)
-            with self._lock:
-                self._send_target(channel, target)
+            # --- Expressive arms (ch 4, 5, 7): center ARM_IDLE_RANGE_PERCENT of range ---
+            if now >= _next_expressive:
+                ch = random.choice(list(_SPEAK_ARM_CHANNELS))
+                lo, hi     = self._effective_limits(ch)
+                center     = (lo + hi) // 2
+                half_span  = int((hi - lo) * config.ARM_IDLE_RANGE_PERCENT) // 2
+                target = _clamp(
+                    random.randint(center - half_span, center + half_span),
+                    lo, hi,
+                )
+                log.debug("Expressive arm idle: ch %d (%s) → %d",
+                          ch, config.SERVO_CHANNELS[ch]["name"], target)
+                with self._lock:
+                    self._send_target(ch, target)
+                _next_expressive = now + random.uniform(
+                    config.ARM_IDLE_INTERVAL_MIN, config.ARM_IDLE_INTERVAL_MAX
+                )
 
-            interval = random.uniform(
-                config.SERVO_IDLE_MOVE_INTERVAL_MIN,
-                config.SERVO_IDLE_MOVE_INTERVAL_MAX,
-            )
-            # Sleep in small increments so stop_event is checked promptly
-            deadline = time.monotonic() + interval
-            while not self._stop_event.is_set() and time.monotonic() < deadline:
-                time.sleep(0.05)
+            # --- Pokerarm (ch 6): full range, standard interval ---
+            if now >= _next_other_arm:
+                lo, hi = self._effective_limits(config.SERVO_ARM_RIGHT)
+                target = random.randint(lo, hi)
+                with self._lock:
+                    self._send_target(config.SERVO_ARM_RIGHT, target)
+                _next_other_arm = now + random.uniform(
+                    config.SERVO_IDLE_MOVE_INTERVAL_MIN,
+                    config.SERVO_IDLE_MOVE_INTERVAL_MAX,
+                )
+
+            time.sleep(0.05)
 
     # ------------------------------------------------------------------
     # Internal — serial helpers

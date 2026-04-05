@@ -346,6 +346,9 @@ class StateMachine:
         if self._servos is not None:
             self._servos.set_emotion("neutral")
 
+        # Arm wave — runs in background, concurrent with greeting audio
+        self._animations.play_wake_greeting_arms()
+
         # Greet the user — personalized (camera + gpt-4o) or simple canned line.
         self._play_wake_greeting()
 

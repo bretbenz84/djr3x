@@ -228,6 +228,28 @@ SAD: list[Step] = [
 ]
 
 
+# --- Wake Greeting ----------------------------------------------------------
+# Excited wave hello — elbow raises, hand shakes back and forth 3 times (~1.5 s).
+# Arm channels only; runs concurrently with the greeting audio.
+
+WAKE_GREETING: list[Step] = [
+    # Elbow raises slightly; hand swings to one side — start of wave
+    Step(delay=0.0,
+         servos={_AL: 6450, _HL: 5000}),
+
+    # Rapid back-forth shakes — 3 complete cycles
+    Step(delay=0.20, servos={_HL: 7000}),
+    Step(delay=0.20, servos={_HL: 5000}),
+    Step(delay=0.20, servos={_HL: 7000}),
+    Step(delay=0.20, servos={_HL: 5000}),
+    Step(delay=0.20, servos={_HL: 7000}),
+
+    # Return elbow and hand to neutral
+    Step(delay=0.50,
+         servos={_AL: 6720, _HL: 6000}),
+]
+
+
 # --- Neutral ----------------------------------------------------------------
 # Smooth return to center — used when resetting emotion state (~0.8 s).
 # Head channels only.
@@ -295,6 +317,14 @@ class AnimationPlayer:
         that hardware can be safely closed immediately after.
         """
         self._launch(SHUTDOWN, blocking=True)
+
+    def play_wake_greeting_arms(self) -> None:
+        """Play the excited arm-wave greeting in the background.
+
+        Runs concurrently with greeting audio — call before _play_wake_greeting()
+        so the wave overlaps the speech.  Arm channels only; does not touch head.
+        """
+        self._launch(WAKE_GREETING, blocking=False)
 
     def play_emotion(self, emotion: str) -> None:
         """Play an emotion animation in the background.

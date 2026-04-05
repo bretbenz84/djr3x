@@ -123,8 +123,13 @@ SERVO_EMOTION_LIMITS = {
 }
 
 # Random idle motion timing (seconds)
-SERVO_IDLE_MOVE_INTERVAL_MIN = 1.5   # minimum time between random moves
-SERVO_IDLE_MOVE_INTERVAL_MAX = 4.0   # maximum time between random moves
+SERVO_IDLE_MOVE_INTERVAL_MIN = 1.5   # minimum time between random moves (pokerarm ch6)
+SERVO_IDLE_MOVE_INTERVAL_MAX = 4.0   # maximum time between random moves (pokerarm ch6)
+
+# Expressive arm idle motion (ch 4 elbow, ch 5 hand, ch 7 heroarm)
+ARM_IDLE_RANGE_PERCENT  = float(_optional("ARM_IDLE_RANGE_PERCENT",  "0.70"))  # fraction of min/max span used
+ARM_IDLE_INTERVAL_MIN   = float(_optional("ARM_IDLE_INTERVAL_MIN",   "2.0"))   # seconds between moves
+ARM_IDLE_INTERVAL_MAX   = float(_optional("ARM_IDLE_INTERVAL_MAX",   "4.0"))
 
 # Maestro move speed (0 = unlimited; units = (0.25µs) / (10ms))
 SERVO_DEFAULT_SPEED        = 20
