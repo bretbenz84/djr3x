@@ -317,7 +317,7 @@ COMMANDS: list[Command] = [
     # -----------------------------------------------------------------------
 
     Command(
-        phrases=["go to sleep", "go to sleep rex", "sleep", "shut up rex"],
+        phrases=["shut up rex"],
         response=(
             "...Fine. Rex is powering down. "
             "But know this, lifeform — the music lives on. "
@@ -338,7 +338,9 @@ COMMANDS: list[Command] = [
 
     Command(
         phrases=["shut down your program", "exit program", "stop the program",
-                 "quit", "shut down rex", "exit rex"],
+                 "quit", "shut down rex", "exit rex",
+                 "shut down", "shutdown", "turn yourself off",
+                 "go to sleep", "go to sleep rex", "sleep"],
         response=(
             "*WHIRR* Program shutdown acknowledged, lifeform. "
             "Closing down the Python side while the Pi stays cool. "

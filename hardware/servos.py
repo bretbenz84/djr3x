@@ -167,12 +167,15 @@ class ServoController:
         log.info("Servo idle-motion thread stopped.")
 
     def close(self) -> None:
-        """Stop motion, move to home, power off servos, and close the serial port."""
+        """Stop motion, power off servos, and close the serial port.
+
+        Does NOT call home() — the shutdown animation in play_shutdown() already
+        moves channels to their final slumped pose and calling home() here would
+        override that with neutral positions.
+        """
         self.stop()
-        self.home()
-        # Give servos time to reach neutral before cutting PWM output.
-        # In SERVO_SAFE_MODE home() already waits 0.5 s per channel; in normal
-        # mode there is no delay, so we always add 1 s here.
+        # Wait for servos to settle in their current (post-animation) positions
+        # before cutting PWM output.
         time.sleep(1.0)
         self.power_off()
         self._serial.close()
