@@ -111,11 +111,11 @@ SERVO_HAND_RIGHT = 7   # heroarm
 SERVO_EMOTION_LIMITS = {
     "excited": {
         0: (5500, 7500),   # neck up
-        3: (5500, 6976),   # visor high
+        3: (4544, 5300),   # visor open (low = open; constrain to open range)
     },
     "sad": {
         0: (4500, 5500),   # neck down
-        3: (4544, 5500),   # visor low
+        3: (5800, 6976),   # visor drooped/closed (high = closed)
     },
     "neutral": {},  # use default SERVO_CHANNELS limits
 }

@@ -212,9 +212,9 @@ class ServoController:
             lift_lo, lift_hi,
         )
 
-        # visor opens with intensity
+        # visor opens with intensity (inverted: lower qµs = open)
         visor_pos = _clamp(
-            int(visor_lo + intensity * (visor_hi - visor_lo)),
+            int(visor_hi - intensity * (visor_hi - visor_lo)),
             visor_lo, visor_hi,
         )
 
@@ -317,11 +317,12 @@ class ServoController:
 
             # --- Visor idle: ch 3 ---
             if now >= _next_visor:
-                lo, hi    = self._effective_limits(config.SERVO_VISOR)
-                center    = (lo + hi) // 2
-                half_span = (hi - lo) // 2
-                target    = random.randint(center - int(half_span * 0.3),
-                                           center + int(half_span * 0.3))
+                # Drift in the open (low-value) end of the range so eyes stay
+                # visible during idle.  Lower qµs = open, so anchor to min.
+                v_min = config.SERVO_CHANNELS[config.SERVO_VISOR]["min"]
+                v_max = config.SERVO_CHANNELS[config.SERVO_VISOR]["max"]
+                target = random.randint(v_min,
+                                        v_min + int((v_max - v_min) * 0.3))
                 with self._lock:
                     self._send_speed(config.SERVO_VISOR, config.SERVO_VISOR_IDLE_SPEED)
                     self._send_target(config.SERVO_VISOR, target)
