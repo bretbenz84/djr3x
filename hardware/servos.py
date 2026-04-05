@@ -113,6 +113,9 @@ class ServoController:
         self._current_speed: int = config.SERVO_DEFAULT_SPEED
         self._stop_event = threading.Event()
         self._idle_thread: threading.Thread | None = None
+        # Throttle counter for ch 5 (hand) in speak_move(): servo is too slow to
+        # complete large sweeps at 20 Hz, so we only send a new target every 4 calls.
+        self._hand_speak_counter: int = 0
 
         log.info("Opening Maestro serial port %s @ %d baud",
                  config.MAESTRO_PORT, config.MAESTRO_BAUD)
@@ -243,29 +246,38 @@ class ServoController:
         )
 
         # --- Arm gestures ---
-        # Amplify intensity so arms react more aggressively than head
-        arm_intensity = min(1.0, intensity * _ARM_SPEAK_INTENSITY_MULT)
+        # Elbow uses a lower multiplier (SERVO_ELBOW_SPEAK_MULT) to avoid jerky
+        # jumps on its narrow range.  Hand/heroarm use the full multiplier.
+        elbow_intensity = min(1.0, intensity * config.SERVO_ELBOW_SPEAK_MULT)
+        arm_intensity   = min(1.0, intensity * _ARM_SPEAK_INTENSITY_MULT)
 
         elbow_lo, elbow_hi = self._effective_limits(config.SERVO_ARM_LEFT)   # ch 4
         hand_lo,  hand_hi  = self._effective_limits(config.SERVO_HAND_LEFT)  # ch 5
         hero_lo,  hero_hi  = self._effective_limits(config.SERVO_HAND_RIGHT) # ch 7
 
-        # Elbow rises with intensity — loud speech = arm more raised
+        # Elbow rises with intensity — reduced multiplier prevents harsh snapping
         elbow_pos = _clamp(
-            int(elbow_lo + arm_intensity * (elbow_hi - elbow_lo))
-            + random.randint(-100, 100),
+            int(elbow_lo + elbow_intensity * (elbow_hi - elbow_lo))
+            + random.randint(-80, 80),
             elbow_lo, elbow_hi,
         )
 
-        # Hand sweeps expressively; swing width scales with intensity
-        hand_center = (hand_lo + hand_hi) // 2
-        hand_swing  = int((hand_hi - hand_lo) * 0.40 * arm_intensity) + 80
-        hand_pos = _clamp(
-            hand_center + random.randint(-hand_swing, hand_swing),
-            hand_lo, hand_hi,
-        )
+        # Hand (ch 5): only update every 4th call (~200 ms) so the servo can
+        # complete each twist before receiving a new target.  Root cause of
+        # "ch 5 not moving": at 20 Hz with speed 40, the servo only travels
+        # ~25 µs per 50 ms window and random targets cancel each other out.
+        # Alternates between low and high extremes; amplitude grows with intensity.
+        self._hand_speak_counter += 1
+        hand_target: int | None = None
+        if self._hand_speak_counter % 4 == 0:
+            hand_center = (hand_lo + hand_hi) // 2
+            amplitude   = int((hand_hi - hand_lo) * (0.25 + 0.25 * arm_intensity))
+            if (self._hand_speak_counter // 4) % 2 == 0:
+                hand_target = _clamp(hand_center - amplitude, hand_lo, hand_hi)
+            else:
+                hand_target = _clamp(hand_center + amplitude, hand_lo, hand_hi)
 
-        # Heroarm gestures independently — offset from hand for visual variety
+        # Heroarm gestures independently — random sweep scaled with intensity
         hero_center = (hero_lo + hero_hi) // 2
         hero_swing  = int((hero_hi - hero_lo) * 0.40 * arm_intensity) + 80
         hero_pos = _clamp(
@@ -281,11 +293,14 @@ class ServoController:
             self._send_target(1, lift_pos)
             self._send_target(2, tilt_pos)
             self._send_target(3, visor_pos)
-            # Arms snap at excited speed during speech for snappy gestures
-            for ch in _SPEAK_ARM_CHANNELS:
-                self._send_speed(ch, config.SERVO_EXCITED_SPEED)
+            # Elbow and heroarm at excited speed; hand at higher dedicated speed
+            # so it completes each ~200 ms twist within the throttled window
+            self._send_speed(config.SERVO_ARM_LEFT,   config.SERVO_EXCITED_SPEED)
+            self._send_speed(config.SERVO_HAND_RIGHT, config.SERVO_EXCITED_SPEED)
+            self._send_speed(config.SERVO_HAND_LEFT,  config.SERVO_HAND_SPEAK_SPEED)
             self._send_target(config.SERVO_ARM_LEFT,   elbow_pos)
-            self._send_target(config.SERVO_HAND_LEFT,  hand_pos)
+            if hand_target is not None:
+                self._send_target(config.SERVO_HAND_LEFT, hand_target)
             self._send_target(config.SERVO_HAND_RIGHT, hero_pos)
 
     # ------------------------------------------------------------------
@@ -319,6 +334,16 @@ class ServoController:
     # ------------------------------------------------------------------
     # Direct position command (public, for sequences layer)
     # ------------------------------------------------------------------
+
+    def set_channel_speed(self, channel: int, speed: int) -> None:
+        """Set the Maestro move speed for a single channel.
+
+        Used by sequences/animations.py when a specific channel needs a
+        non-default speed before a scripted sequence (e.g. the hand wave).
+        Thread-safe.
+        """
+        with self._lock:
+            self._send_speed(channel, speed)
 
     def set_position(self, channel: int, position: int) -> None:
         """Move a single channel to position (qµs), clamped to its limits.

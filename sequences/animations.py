@@ -229,23 +229,26 @@ SAD: list[Step] = [
 
 
 # --- Wake Greeting ----------------------------------------------------------
-# Excited wave hello — elbow raises, hand shakes back and forth 3 times (~1.5 s).
+# Excited wave hello — elbow raises, hand twists back and forth 3 times (~1.5 s).
+# Uses near-extreme positions on ch 5 (min 3968, max 8000) for a pronounced twist.
 # Arm channels only; runs concurrently with the greeting audio.
+# play_wake_greeting_arms() sets SERVO_HAND_SPEAK_SPEED on ch 5 before launching
+# so the servo has enough speed to complete each twist within the 200 ms windows.
 
 WAKE_GREETING: list[Step] = [
-    # Elbow raises slightly; hand swings to one side — start of wave
+    # Elbow raises slightly; hand twists to low extreme — start of wave
     Step(delay=0.0,
-         servos={_AL: 6450, _HL: 5000}),
+         servos={_AL: 6450, _HL: 4300}),
 
-    # Rapid back-forth shakes — 3 complete cycles
-    Step(delay=0.20, servos={_HL: 7000}),
-    Step(delay=0.20, servos={_HL: 5000}),
-    Step(delay=0.20, servos={_HL: 7000}),
-    Step(delay=0.20, servos={_HL: 5000}),
-    Step(delay=0.20, servos={_HL: 7000}),
+    # Alternate near-extreme twists — 3 complete low/high cycles
+    Step(delay=0.20, servos={_HL: 7700}),
+    Step(delay=0.20, servos={_HL: 4300}),
+    Step(delay=0.20, servos={_HL: 7700}),
+    Step(delay=0.20, servos={_HL: 4300}),
+    Step(delay=0.20, servos={_HL: 7700}),
 
     # Return elbow and hand to neutral
-    Step(delay=0.50,
+    Step(delay=0.45,
          servos={_AL: 6720, _HL: 6000}),
 ]
 
@@ -323,7 +326,14 @@ class AnimationPlayer:
 
         Runs concurrently with greeting audio — call before _play_wake_greeting()
         so the wave overlaps the speech.  Arm channels only; does not touch head.
+
+        Sets SERVO_HAND_SPEAK_SPEED on ch 5 before launching so the servo has
+        enough speed to complete each low/high twist within the 200 ms step windows.
         """
+        if self._servos is not None:
+            self._servos.set_channel_speed(
+                config.SERVO_HAND_LEFT, config.SERVO_HAND_SPEAK_SPEED
+            )
         self._launch(WAKE_GREETING, blocking=False)
 
     def play_emotion(self, emotion: str) -> None:
