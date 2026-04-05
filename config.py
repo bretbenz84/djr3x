@@ -112,12 +112,12 @@ SERVO_EMOTION_LIMITS = {
     "excited": {
         0: (5500, 7500),   # neck up
         2: (3904, 4200),   # headtilt up (low = up; constrain to upper range)
-        3: (4544, 5300),   # visor open (low = open; constrain to open range)
+        3: (6000, 6976),   # visor open (high = open; constrain to open range)
     },
     "sad": {
         0: (4500, 5500),   # neck down
         2: (4400, 5504),   # headtilt down (high = down; constrain to lower range)
-        3: (5800, 6976),   # visor drooped/closed (high = closed)
+        3: (4544, 5300),   # visor drooped/closed (low = closed; constrain to closed range)
     },
     "neutral": {},  # use default SERVO_CHANNELS limits
 }
