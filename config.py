@@ -122,6 +122,16 @@ SERVO_EMOTION_LIMITS = {
     "neutral": {},  # use default SERVO_CHANNELS limits
 }
 
+# Initial (slumped/shutdown) positions written instantly at boot so the
+# Maestro knows where each servo starts without physically moving it.
+# Channels not listed here default to their neutral position.
+# These must match the final step of the SHUTDOWN animation exactly.
+SERVO_SLUMPED_POSITIONS: dict[int, int] = {
+    1: SERVO_CHANNELS[1]["min"],    # headlift fully down (1984)
+    2: SERVO_CHANNELS[2]["max"],    # headtilt fully down (5504)
+    3: SERVO_CHANNELS[3]["min"],    # visor fully down / eyes covered (4544)
+}
+
 # Random idle motion timing (seconds)
 SERVO_IDLE_MOVE_INTERVAL_MIN = 1.5   # minimum time between random moves (pokerarm ch6)
 SERVO_IDLE_MOVE_INTERVAL_MAX = 4.0   # maximum time between random moves (pokerarm ch6)

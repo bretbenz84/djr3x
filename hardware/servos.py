@@ -133,10 +133,13 @@ class ServoController:
             timeout=1,
         )
 
-        # Apply per-channel acceleration, default speed, then move to home
+        # Apply per-channel acceleration, then snap channels to their slumped
+        # starting positions at speed=0 (instant, no visible movement).
+        # Rex is physically in this pose after shutdown; this just tells the
+        # Maestro where to start from so the STARTUP animation takes over cleanly.
         self._apply_acceleration()
+        self._set_initial_positions()
         self._apply_speed(config.SERVO_DEFAULT_SPEED)
-        self.home()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -365,6 +368,27 @@ class ServoController:
             if hand_target is not None:
                 self._send_target(config.SERVO_HAND_LEFT, hand_target)
             self._send_target(config.SERVO_HAND_RIGHT, hero_pos)
+
+    # ------------------------------------------------------------------
+    # Startup initialisation
+    # ------------------------------------------------------------------
+
+    def _set_initial_positions(self) -> None:
+        """Snap all channels to their startup/slumped positions at speed=0.
+
+        Channels listed in config.SERVO_SLUMPED_POSITIONS receive their
+        slumped values; all others receive their neutral positions.
+        Speed=0 tells the Maestro to jump to the target instantly with no
+        ramp — the servos should already be physically there from the
+        previous shutdown animation, so no visible movement occurs.
+        """
+        with self._lock:
+            for channel in _ALL_CHANNELS:
+                self._send_speed(channel, 0)
+            for channel, cfg in config.SERVO_CHANNELS.items():
+                position = config.SERVO_SLUMPED_POSITIONS.get(channel, cfg["neutral"])
+                self._send_target(channel, position)
+        log.debug("Initial positions set (slumped pose, speed=0).")
 
     # ------------------------------------------------------------------
     # Safe home position
