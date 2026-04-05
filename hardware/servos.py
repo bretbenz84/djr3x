@@ -293,11 +293,23 @@ class ServoController:
             # --- Head idle: neck (ch 0) and headlift (ch 1) ---
             if now >= _next_head:
                 ch = random.choice([config.SERVO_HEAD_PAN, config.SERVO_HEAD_LIFT])
-                lo, hi    = self._effective_limits(ch)
-                center    = (lo + hi) // 2
-                half_span = (hi - lo) // 2
-                target    = random.randint(center - int(half_span * 0.6),
-                                           center + int(half_span * 0.6))
+
+                if ch == config.SERVO_HEAD_LIFT:
+                    # Inverted servo: lower qµs = head up.  Constrain to
+                    # [min, neutral] so Rex always looks upward or level.
+                    idle_lo = config.SERVO_CHANNELS[1]["min"]
+                    idle_hi = config.SERVO_CHANNELS[1]["neutral"]
+                else:
+                    # Neck: middle 60% of effective range for lazy turns
+                    lo, hi    = self._effective_limits(ch)
+                    center    = (lo + hi) // 2
+                    half_span = (hi - lo) // 2
+                    idle_lo   = center - int(half_span * 0.6)
+                    idle_hi   = center + int(half_span * 0.6)
+
+                target = random.randint(idle_lo, idle_hi)
+                log.debug("Head idle: ch %d (%s) → %d (range %d–%d)",
+                          ch, config.SERVO_CHANNELS[ch]["name"], target, idle_lo, idle_hi)
                 with self._lock:
                     self._send_speed(ch, config.SERVO_HEAD_IDLE_SPEED)
                     self._send_target(ch, target)
