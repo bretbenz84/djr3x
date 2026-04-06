@@ -181,7 +181,13 @@ class LEDController:
         self._mouth_stop.set()
         if self._mouth_thread is not None:
             self._mouth_thread.join(timeout=1.0)
+            if self._mouth_thread.is_alive():
+                log.warning(
+                    "Mouth thread did not stop within 1 s — "
+                    "possible serial hang; SPEAK_STOP may arrive out of order"
+                )
             self._mouth_thread = None
+        log.debug("Mouth: sending SPEAK_STOP to head Nano")
         self._send_head(config.LED_CMD_SPEAK_STOP)
 
     # ------------------------------------------------------------------

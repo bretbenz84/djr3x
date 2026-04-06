@@ -317,13 +317,17 @@ class StateMachine:
             clip_path = config.ASSETS_DIR / "audio" / random.choice(_IDLE_CLIPS)
             if clip_path.exists():
                 log.info("Idle clip: %s", clip_path.name)
-                servo_stop = self._begin_speech(emotion="neutral")
+                servo_stop = None
                 try:
+                    servo_stop = self._begin_speech(emotion="neutral")
                     self._player.play_file(clip_path)
                 except Exception:
                     log.exception("Idle clip playback error: %s", clip_path.name)
                 finally:
-                    self._end_speech(servo_stop)
+                    if servo_stop is not None:
+                        self._end_speech(servo_stop)
+                    else:
+                        self._wake_word.suppressed = False
 
             # Handle wake word or shutdown that arrived during clip playback.
             if self._wake_event.is_set():
@@ -719,6 +723,11 @@ class StateMachine:
             )
             self._servos.set_position(config.SERVO_ARM_LEFT, 7100)
 
+        # stop_event is created first so the _trigger_mouth closure below can
+        # reference it safely.  _end_speech() sets this event as its very first
+        # action, giving _trigger_mouth a reliable "speech is over" signal.
+        stop_event = threading.Event()
+
         # Delay mouth LED start until the first audio samples actually reach the
         # output device — prevents the Arduino from pre-glowing before sound
         # comes out of the speakers.  set_mouth_emotion() is also deferred so
@@ -729,14 +738,25 @@ class StateMachine:
 
         def _trigger_mouth() -> None:
             started = self._player.wait_for_audio_start(timeout=5.0)
-            if started:
-                self._leds.set_mouth_emotion(_emotion_for_closure)
-                self._leds.start_mouth()
-            else:
+            if not started:
                 log.warning(
                     "_begin_speech: audio never started within 5 s — "
                     "mouth LEDs suppressed"
                 )
+                return
+            # Guard: _end_speech() sets stop_event as its very first action.
+            # If it fires before we get here (e.g. a short clip finished and
+            # _end_speech() ran before the OS scheduled this thread), SPEAK_STOP
+            # has already been sent.  Starting the mouth now would put the
+            # Arduino back into SPEAK mode — keeping LEDs on after audio ends.
+            if stop_event.is_set():
+                log.debug(
+                    "_begin_speech: speech ended before mouth trigger fired — "
+                    "skipping start_mouth() to avoid post-speech LED glow"
+                )
+                return
+            self._leds.set_mouth_emotion(_emotion_for_closure)
+            self._leds.start_mouth()
 
         threading.Thread(
             target=_trigger_mouth,
@@ -744,7 +764,6 @@ class StateMachine:
             name="djr3x-mouth-trigger",
         ).start()
 
-        stop_event = threading.Event()
         threading.Thread(
             target=self._servo_speak_worker,
             args=(stop_event,),
