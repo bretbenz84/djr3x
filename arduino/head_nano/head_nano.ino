@@ -30,11 +30,13 @@
  *                         emotion = neutral | happy | excited | sad | angry
  *   SPEAK_LEVEL:{0-255}   Update audio intensity — drives pulse speed + brightness.
  *                         Send as often as needed; non-blocking.
- *   SPEAK_STOP            Mouth off immediately; eyes unchanged.
- *   IDLE                  Mouth off; eyes slow blue breathing pulse.
- *   ACTIVE                Mouth off; eyes bright white.
- *   EYE:{r},{g},{b}       Set both eyes to RGB colour.
- *   OFF                   All 82 pixels off immediately.
+ *   SPEAK_STOP            Mouth off immediately; eyes unchanged; blinking
+ *                         suspended until next EYE: or ACTIVE command.
+ *   IDLE                  Mouth off; eyes remain at last EYE: colour; blink
+ *                         continues if eyes are active.
+ *   ACTIVE                Mouth off; eyes bright white; blinking resumes.
+ *   EYE:{r},{g},{b}       Set both eyes to RGB colour; blinking resumes.
+ *   OFF                   All 82 pixels off immediately; blinking suspended.
  */
 
 #include <FastLED.h>
@@ -114,7 +116,7 @@ const EmotionColor EMOTION_COLORS[EMO_COUNT] PROGMEM = {
 CRGB leds[NUM_LEDS];
 
 // ---------------------------------------------------------------------------
-// State
+// Animation state
 // ---------------------------------------------------------------------------
 
 enum AnimMode : uint8_t {
@@ -137,6 +139,45 @@ float        idlePhase   = 0.0f;              // 0.0 – TWO_PI
 uint32_t     lastMs      = 0;
 
 // ---------------------------------------------------------------------------
+// Eye blink state machine
+// ---------------------------------------------------------------------------
+//
+// Rex blinks at random human-like intervals (2–8 s) with a 100–400 ms closed
+// duration.  10 % of blinks are double-blinks: eyes reopen briefly (200–400 ms)
+// then close again for a second blink before returning to normal.
+//
+// Three non-blocking states driven by millis():
+//
+//   BLINK_OPEN        — eyes showing eyeColor; waiting for next blink interval
+//   BLINK_CLOSED      — eyes dark for blinkDuration ms
+//   BLINK_DOUBLE_WAIT — eyes restored; short pause before the second blink
+//
+// eyeColor tracks the *intended* eye colour so a blink always restores to the
+// current colour even if an EYE: command arrives mid-blink.
+//
+// eyesActive = false suspends all blinking.  Set false by OFF and SPEAK_STOP;
+// set true by EYE: (non-black) and ACTIVE.  The eyes remain physically visible
+// in leds[] when blinking is suspended — only new blink triggers are blocked.
+//
+// Set BLINK_ENABLED = false to freeze eyes open for debugging.
+
+bool BLINK_ENABLED = true;
+
+enum BlinkState : uint8_t {
+    BLINK_OPEN,
+    BLINK_CLOSED,
+    BLINK_DOUBLE_WAIT,
+};
+
+CRGB       eyeColor      = CRGB::Black;  // intended colour; restored after blink
+bool       eyesActive    = false;        // false → blink triggers suspended
+BlinkState blinkState    = BLINK_OPEN;
+bool       isSecondBlink = false;        // true during the 2nd leg of a double-blink
+uint32_t   blinkTimer    = 0;           // millis() at start of current blink state
+uint32_t   blinkInterval = 4000;        // ms to wait before next blink (overwritten in setup)
+uint32_t   blinkDuration = 0;           // ms eyes stay closed / paused between double blinks
+
+// ---------------------------------------------------------------------------
 // Serial
 // ---------------------------------------------------------------------------
 
@@ -153,9 +194,35 @@ inline uint8_t clampByte(int v) {
     return (uint8_t)v;
 }
 
-inline void setEyes(uint8_t r, uint8_t g, uint8_t b) {
-    leds[0] = CRGB(r, g, b);
-    leds[1] = CRGB(r, g, b);
+// setEyes — store the intended colour and write to the LED buffer.
+//
+// If a blink is in progress (BLINK_CLOSED), only eyeColor is updated; leds[]
+// stays dark so the blink isn't interrupted.  tickBlink() restores eyeColor to
+// leds[] when the blink ends.
+//
+// Transitioning from inactive (eyesActive was false) to active resets the blink
+// timer so Rex doesn't blink the instant his eyes come on.
+//
+// NOTE: does NOT call FastLED.show() — the caller is responsible.
+void setEyes(uint8_t r, uint8_t g, uint8_t b) {
+    bool wasActive = eyesActive;
+
+    eyeColor   = CRGB(r, g, b);
+    eyesActive = ((r | g | b) != 0);
+
+    // Update leds[] only when eyes are not mid-blink.
+    if (blinkState != BLINK_CLOSED) {
+        leds[0] = eyeColor;
+        leds[1] = eyeColor;
+    }
+    // When eyes become active for the first time (or return from an off state),
+    // start a fresh blink cycle — avoids an immediate blink right after enable.
+    if (eyesActive && !wasActive) {
+        blinkTimer    = millis();
+        blinkInterval = 2000UL + (uint32_t)random(6001);
+        blinkState    = BLINK_OPEN;
+        isSecondBlink = false;
+    }
 }
 
 inline void mouthOff() {
@@ -171,6 +238,70 @@ static uint8_t parseEmotion(const char *s) {
 }
 
 // ---------------------------------------------------------------------------
+// Eye blink tick — call every loop()
+// ---------------------------------------------------------------------------
+//
+// Only calls FastLED.show() when the blink state changes (i.e. rarely), so it
+// does not interfere with tickSpeak()'s continuous animation rate.  tickSpeak()
+// only writes mouth pixels (index 2+) and never touches leds[0]/leds[1], so
+// both functions share leds[] safely without coordination.
+
+void tickBlink() {
+    if (!BLINK_ENABLED || !eyesActive) return;
+
+    uint32_t now = millis();
+
+    switch (blinkState) {
+
+        case BLINK_OPEN:
+            // Wait for the interval then snap eyes off to start the blink.
+            if (now - blinkTimer >= blinkInterval) {
+                leds[0]       = CRGB::Black;
+                leds[1]       = CRGB::Black;
+                FastLED.show();
+                blinkTimer    = now;
+                blinkDuration = 100UL + (uint32_t)random(301);   // 100–400 ms closed
+                blinkState    = BLINK_CLOSED;
+            }
+            break;
+
+        case BLINK_CLOSED:
+            // Hold closed, then restore eye colour.
+            if (now - blinkTimer >= blinkDuration) {
+                leds[0]    = eyeColor;
+                leds[1]    = eyeColor;
+                FastLED.show();
+                blinkTimer = now;
+
+                if (!isSecondBlink && (random(10) == 0)) {
+                    // 10 % chance: double-blink — brief open pause, then blink again.
+                    blinkDuration = 200UL + (uint32_t)random(201);  // 200–400 ms pause
+                    blinkState    = BLINK_DOUBLE_WAIT;
+                } else {
+                    // Normal recovery: reset for next independent blink.
+                    isSecondBlink = false;
+                    blinkInterval = 2000UL + (uint32_t)random(6001);  // 2–8 s
+                    blinkState    = BLINK_OPEN;
+                }
+            }
+            break;
+
+        case BLINK_DOUBLE_WAIT:
+            // Eyes are open; wait the inter-blink pause, then close again.
+            if (now - blinkTimer >= blinkDuration) {
+                leds[0]       = CRGB::Black;
+                leds[1]       = CRGB::Black;
+                FastLED.show();
+                isSecondBlink = true;                              // prevent triple-blink
+                blinkTimer    = now;
+                blinkDuration = 100UL + (uint32_t)random(301);   // 100–400 ms closed
+                blinkState    = BLINK_CLOSED;
+            }
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Command dispatch
 // ---------------------------------------------------------------------------
 
@@ -182,9 +313,12 @@ void handleCommand(char *cmd) {
         return;
     }
 
-    // SPEAK_STOP
+    // SPEAK_STOP — mouth off; eyes unchanged in leds[] but blink suspended
+    // until the next EYE: or ACTIVE re-enables it.
     if (strcmp(cmd, "SPEAK_STOP") == 0) {
-        animMode = ANIM_OFF;
+        animMode   = ANIM_OFF;
+        eyesActive = false;
+        blinkState = BLINK_OPEN;   // reset so next activation starts cleanly
         mouthOff();
         FastLED.show();
         return;
@@ -193,16 +327,16 @@ void handleCommand(char *cmd) {
     // SPEAK:{emotion}
     if (strncmp(cmd, "SPEAK:", 6) == 0) {
         uint8_t emo = parseEmotion(cmd + 6);
-        // Read colour from PROGMEM
         EmotionColor ec;
         memcpy_P(&ec, &EMOTION_COLORS[emo], sizeof(EmotionColor));
         speakColor = ec;
         speakPhase = 0.0f;
         animMode   = ANIM_SPEAK;
+        // Eyes not touched — blink continues at current eyeColor/eyesActive state.
         return;
     }
 
-    // IDLE — mouth off, eyes slow blue breathing
+    // IDLE — mouth off; eyes remain at last EYE: colour; blink continues.
     if (strcmp(cmd, "IDLE") == 0) {
         animMode  = ANIM_IDLE;
         idlePhase = 0.0f;
@@ -211,7 +345,7 @@ void handleCommand(char *cmd) {
         return;
     }
 
-    // ACTIVE — mouth off, eyes bright white, ready for speaking
+    // ACTIVE — mouth off; eyes bright white; blink resumes.
     if (strcmp(cmd, "ACTIVE") == 0) {
         animMode = ANIM_ACTIVE;
         mouthOff();
@@ -220,7 +354,7 @@ void handleCommand(char *cmd) {
         return;
     }
 
-    // EYE:{r},{g},{b}
+    // EYE:{r},{g},{b} — set eye colour; blink resumes.
     if (strncmp(cmd, "EYE:", 4) == 0) {
         int r, g, b;
         if (sscanf(cmd + 4, "%d,%d,%d", &r, &g, &b) == 3) {
@@ -230,9 +364,13 @@ void handleCommand(char *cmd) {
         return;
     }
 
-    // OFF — everything off
+    // OFF — all pixels off; blink suspended until EYE: or ACTIVE.
     if (strcmp(cmd, "OFF") == 0) {
-        animMode = ANIM_OFF;
+        animMode      = ANIM_OFF;
+        eyeColor      = CRGB::Black;
+        eyesActive    = false;
+        blinkState    = BLINK_OPEN;
+        isSecondBlink = false;
         FastLED.clear();
         FastLED.show();
         return;
@@ -256,6 +394,9 @@ void handleCommand(char *cmd) {
 // WINDOW= 1.70  total pulse width in zone units (enter 0.30 before, exit 1.40 after peak)
 //
 // An ambient floor (0.12) keeps the mouth dimly lit at all times while speaking.
+//
+// NOTE: only writes to mouth pixels (index MOUTH_START and above).
+// Eye pixels leds[0] and leds[1] are left alone so tickBlink() owns them.
 
 #define SPEAK_LEAD    0.30f
 #define SPEAK_WINDOW  1.70f
@@ -302,15 +443,14 @@ void tickSpeak(float dt) {
 // Idle animation
 // ---------------------------------------------------------------------------
 //
-// Eyes: solid — left untouched so the EYE:{r,g,b} command from the Pi holds.
+// Eyes: solid — left untouched so the EYE:{r,g,b} command from the Pi holds
+//       and tickBlink() continues to own leds[0]/leds[1].
 // Mouth: completely off.  mouthOff() already cleared all pixels on IDLE entry;
 //        tickIdle() does not touch mouth pixels, so they stay dark.
 
 void tickIdle(float dt) {
     (void)dt;
-    // Eyes are not touched — they remain solid at whatever EYE:{r,g,b} set.
-    // Mouth is already off from mouthOff() called in the IDLE command handler.
-    // Nothing to do; no FastLED.show() needed since nothing changed.
+    // Nothing to do — eyes and mouth managed by setEyes/tickBlink and mouthOff.
 }
 
 // ---------------------------------------------------------------------------
@@ -340,13 +480,22 @@ void setup() {
     FastLED.clear();
     FastLED.show();
 
+    // Seed PRNG from floating analog pin for varied blink timing across reboots.
+    randomSeed(analogRead(A0));
+
     Serial.begin(BAUD_RATE);
-    serialPos = 0;
-    lastMs    = millis();
+    serialPos     = 0;
+    lastMs        = millis();
+
+    // Initialise blink state machine — first blink fires somewhere in 2–8 s.
+    blinkTimer    = millis();
+    blinkInterval = 2000UL + (uint32_t)random(6001);
+    blinkState    = BLINK_OPEN;
+    isSecondBlink = false;
 }
 
 void loop() {
-    // Serial command reader — buffer until newline, then dispatch
+    // Serial command reader — buffer until newline, then dispatch.
     while (Serial.available()) {
         char c = (char)Serial.read();
         if (c == '\n' || c == '\r') {
@@ -358,8 +507,9 @@ void loop() {
         } else if (serialPos < SERIAL_BUF - 1) {
             serialBuf[serialPos++] = c;
         }
-        // If buffer overflows, discard characters until next newline
+        // If buffer overflows, discard characters until next newline.
     }
 
-    tickAnimation();
+    tickAnimation();   // mouth animation (speak wave, idle)
+    tickBlink();       // eye blink state machine (all modes)
 }
