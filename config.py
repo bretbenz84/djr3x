@@ -60,8 +60,13 @@ MAX_HISTORY_TURNS   = 6      # number of user/assistant pairs kept in context
 # Serial — Pololu Maestro Mini
 # ---------------------------------------------------------------------------
 
-MAESTRO_PORT = _optional("MAESTRO_PORT", "/dev/ttyACM0")
-MAESTRO_BAUD = 9600          # Pololu default; must match Maestro USB settings
+MAESTRO_PORT          = _optional("MAESTRO_PORT", "/dev/ttyACM0")
+MAESTRO_BAUD          = 9600          # Pololu default; must match Maestro USB settings
+MAESTRO_STARTUP_DELAY = int(_optional("MAESTRO_STARTUP_DELAY", "2"))  # seconds to wait after port opens before sending commands
+
+# Serial connection retry settings (applies to Maestro and both Nano ports)
+SERIAL_RETRY_ATTEMPTS = 5    # max open attempts before giving up
+SERIAL_RETRY_DELAY    = 2.0  # seconds between retry attempts
 
 # ---------------------------------------------------------------------------
 # Serial — Arduino Nano LED controller(s)

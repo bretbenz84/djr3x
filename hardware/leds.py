@@ -219,17 +219,36 @@ class LEDController:
 # ---------------------------------------------------------------------------
 
 def _open_serial(port: str, baud: int, label: str) -> serial.Serial | None:
-    """Try to open a serial port; return None (with a warning) on failure."""
-    try:
-        s = serial.Serial(port, baud, timeout=1.0)
-        log.info("LEDs: opened %s Nano on %s at %d baud", label, port, baud)
-        return s
-    except serial.SerialException as exc:
-        log.warning(
-            "LEDs: could not open %s Nano on %s — %s  (hardware missing?)",
-            label, port, exc,
-        )
-        return None
+    """Try to open a serial port, retrying up to SERIAL_RETRY_ATTEMPTS times.
+
+    Returns None (with a warning) if all attempts fail so the controller can
+    continue without that Nano.
+    """
+    for attempt in range(1, config.SERIAL_RETRY_ATTEMPTS + 1):
+        try:
+            log.info(
+                "LEDs: opening %s Nano on %s at %d baud (attempt %d/%d)",
+                label, port, baud, attempt, config.SERIAL_RETRY_ATTEMPTS,
+            )
+            s = serial.Serial(port, baud, timeout=1.0)
+            log.info("LEDs: %s Nano opened on attempt %d", label, attempt)
+            return s
+        except serial.SerialException as exc:
+            log.warning(
+                "LEDs: could not open %s Nano on %s (attempt %d/%d) — %s",
+                label, port, attempt, config.SERIAL_RETRY_ATTEMPTS, exc,
+            )
+            if attempt < config.SERIAL_RETRY_ATTEMPTS:
+                log.info(
+                    "LEDs: retrying %s Nano in %.0f s …",
+                    label, config.SERIAL_RETRY_DELAY,
+                )
+                time.sleep(config.SERIAL_RETRY_DELAY)
+    log.warning(
+        "LEDs: %s Nano on %s unavailable after %d attempts — hardware missing?",
+        label, port, config.SERIAL_RETRY_ATTEMPTS,
+    )
+    return None
 
 
 def _write(port: serial.Serial, cmd: str, label: str) -> None:

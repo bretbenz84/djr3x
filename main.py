@@ -130,9 +130,13 @@ def main() -> None:
     _setup_logging()
     log.info("DJ-R3X controller starting up …")
 
-    # 0. Allow USB audio devices to fully enumerate after boot
-    log.info("Waiting for audio devices to initialize...")
-    time.sleep(1)
+    # 0. Allow USB serial devices (Maestro ACM, Nano USBs) and audio devices
+    #    to fully enumerate after boot.  Multiple USB devices connecting
+    #    simultaneously on the Pi can take 3-5 s; the retry logic in
+    #    ServoController and LEDController will handle stragglers, but starting
+    #    with a generous wait reduces the number of retries needed in practice.
+    log.info("Waiting 5 s for USB serial and audio devices to enumerate …")
+    time.sleep(5)
 
     # 1. Construct state machine (probes serial ports, opens hardware)
     sm = StateMachine()

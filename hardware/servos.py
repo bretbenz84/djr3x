@@ -125,13 +125,7 @@ class ServoController:
         # commands to ch 4/5/7 while an arm animation is running.
         self._arm_idle_pause = threading.Event()
 
-        log.info("Opening Maestro serial port %s @ %d baud",
-                 config.MAESTRO_PORT, config.MAESTRO_BAUD)
-        self._serial = serial.Serial(
-            config.MAESTRO_PORT,
-            config.MAESTRO_BAUD,
-            timeout=1,
-        )
+        self._serial = self._open_maestro_serial()
 
         # Apply per-channel acceleration, then snap channels to their slumped
         # starting positions at speed=0 (instant, no visible movement).
@@ -140,6 +134,48 @@ class ServoController:
         self._apply_acceleration()
         self._set_initial_positions()
         self._apply_speed(config.SERVO_DEFAULT_SPEED)
+
+    # ------------------------------------------------------------------
+    # Serial open with retry
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _open_maestro_serial() -> serial.Serial:
+        """Open the Maestro serial port, retrying up to SERIAL_RETRY_ATTEMPTS times.
+
+        Raises serial.SerialException if all attempts fail.
+        After a successful open, waits MAESTRO_STARTUP_DELAY seconds so the
+        Maestro has time to initialise its USB stack before receiving commands.
+        """
+        port = config.MAESTRO_PORT
+        baud = config.MAESTRO_BAUD
+        for attempt in range(1, config.SERIAL_RETRY_ATTEMPTS + 1):
+            try:
+                log.info(
+                    "Opening Maestro serial port %s @ %d baud (attempt %d/%d)",
+                    port, baud, attempt, config.SERIAL_RETRY_ATTEMPTS,
+                )
+                ser = serial.Serial(port, baud, timeout=1)
+                log.info(
+                    "Maestro port opened on attempt %d — waiting %d s for initialisation",
+                    attempt, config.MAESTRO_STARTUP_DELAY,
+                )
+                time.sleep(config.MAESTRO_STARTUP_DELAY)
+                return ser
+            except serial.SerialException as exc:
+                log.warning(
+                    "Maestro serial open failed (attempt %d/%d): %s",
+                    attempt, config.SERIAL_RETRY_ATTEMPTS, exc,
+                )
+                if attempt < config.SERIAL_RETRY_ATTEMPTS:
+                    log.info(
+                        "Retrying Maestro in %.0f s …", config.SERIAL_RETRY_DELAY
+                    )
+                    time.sleep(config.SERIAL_RETRY_DELAY)
+        raise serial.SerialException(
+            f"Could not open Maestro port {port} after "
+            f"{config.SERIAL_RETRY_ATTEMPTS} attempts"
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
