@@ -303,31 +303,14 @@ void tickSpeak(float dt) {
 // ---------------------------------------------------------------------------
 //
 // Eyes: solid — left untouched so the EYE:{r,g,b} command from the Pi holds.
-//
-// Mouth: slow sinusoidal pulse on zone-0 only (the 4 centre pixels).
-//   All other mouth pixels are forced off every frame so no stale values
-//   can accumulate from a previous SPEAK animation.
-//   Period ≈ 4 s.  Brightness range: 6 %–28 % (dim warm amber).
+// Mouth: completely off.  mouthOff() already cleared all pixels on IDLE entry;
+//        tickIdle() does not touch mouth pixels, so they stay dark.
 
 void tickIdle(float dt) {
-    idlePhase += dt * (TWO_PI / 4.0f);   // 4-second period
-    if (idlePhase >= TWO_PI) idlePhase -= TWO_PI;
-
-    float s          = (sin(idlePhase) + 1.0f) * 0.5f;   // 0.0 – 1.0
-    float brightness = 0.06f + s * 0.22f;                 // 0.06 – 0.28
-    uint8_t b        = (uint8_t)(brightness * 255.0f);
-
-    // Zone 0 (4 centre pixels): slow amber pulse.  Everything else: off.
-    for (uint8_t i = 0; i < NUM_MOUTH; i++) {
-        if (pgm_read_byte(&PIXEL_ZONE[i]) == 0) {
-            leds[i + MOUTH_START] = CRGB(b, b >> 2, 0);   // warm amber
-        } else {
-            leds[i + MOUTH_START] = CRGB::Black;
-        }
-    }
-
+    (void)dt;
     // Eyes are not touched — they remain solid at whatever EYE:{r,g,b} set.
-    FastLED.show();
+    // Mouth is already off from mouthOff() called in the IDLE command handler.
+    // Nothing to do; no FastLED.show() needed since nothing changed.
 }
 
 // ---------------------------------------------------------------------------
