@@ -75,7 +75,7 @@ SERIAL_RETRY_DELAY    = 2.0  # seconds between retry attempts
 # Serial — Arduino Nano LED controller(s)
 # ---------------------------------------------------------------------------
 
-NANO_CHEST_PORT = _optional("NANO_CHEST_PORT", "/dev/ttyUSB0")
+NANO_CHEST_PORT = _optional("NANO_CHEST_PORT") or None   # None if unset → skip entirely
 NANO_HEAD_PORT  = _optional("NANO_HEAD_PORT",  "/dev/ttyUSB1")
 LED_NANO_BAUD   = 115200
 

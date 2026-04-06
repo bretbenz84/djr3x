@@ -228,12 +228,16 @@ class LEDController:
 # Module-level helpers
 # ---------------------------------------------------------------------------
 
-def _open_serial(port: str, baud: int, label: str) -> serial.Serial | None:
+def _open_serial(port: str | None, baud: int, label: str) -> serial.Serial | None:
     """Try to open a serial port, retrying up to SERIAL_RETRY_ATTEMPTS times.
 
-    Returns None (with a warning) if all attempts fail so the controller can
-    continue without that Nano.
+    Returns None immediately (no retry) if port is None — caller has not
+    configured this Nano.  Returns None (with a warning) if all attempts fail.
     """
+    if port is None:
+        log.info("LEDs: %s Nano not configured — skipping", label)
+        return None
+
     for attempt in range(1, config.SERIAL_RETRY_ATTEMPTS + 1):
         try:
             log.info(
