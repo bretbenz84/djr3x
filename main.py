@@ -7,10 +7,11 @@ Start order
   2. StateMachine constructed — all hardware opened, serial ports probed.
   3. Startup banner printed showing which hardware was detected.
   4. SIGINT / SIGTERM handlers registered → sm.request_shutdown().
-  5. Startup animation played (blocking, ~2.7 s) before idle thread starts.
-  6. sm.start() — loads wake word models, starts background threads.
-  7. Startup chime played (blocking) through music output path.
-  8. sm.run() — blocks until SHUTDOWN state plays out and OS halts.
+  5. light_speed.mp3 played (blocking) through music path — mouth LEDs dark.
+  6. Startup animation played (blocking, ~2.7 s) before idle thread starts.
+  7. sm.start() — loads wake word models, starts background threads.
+  8. Startup chime played (blocking) through music output path.
+  9. sm.run() — blocks until SHUTDOWN state plays out and OS halts.
 
 Run
 ---
@@ -147,18 +148,24 @@ def main() -> None:
     # 3. Signal handlers — after sm exists so the closure is valid
     _register_signals(sm)
 
-    # 4. Startup animation — must run before sm.start() starts the servo
+    # 4. Startup music — plays through music path (no mouth LEDs) and blocks
+    #    until the clip finishes.  AudioPlayer is ready at this point (created
+    #    inside StateMachine.__init__); sm.start() is not required for music.
+    #    Gracefully skipped if assets/audio/light_speed.mp3 is missing.
+    sm.play_startup_music()
+
+    # 5. Startup animation — must run before sm.start() starts the servo
     #    idle thread (animation moves arm channels; idle thread would fight it)
     sm.play_startup_animation()
 
-    # 5. Warmup models and start all background threads
+    # 6. Warmup models and start all background threads
     sm.start()
 
-    # 6. Startup chime — after sm.start() so the AudioPlayer OutputStream is
+    # 7. Startup chime — after sm.start() so the AudioPlayer OutputStream is
     #    running, before sm.run() so it plays before entering IDLE/wake-word
     sm.play_startup_chime()
 
-    # 7. Run — blocks until SHUTDOWN state halts the OS or an exception escapes
+    # 8. Run — blocks until SHUTDOWN state halts the OS or an exception escapes
     sm.run()
 
 

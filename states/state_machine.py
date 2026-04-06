@@ -241,6 +241,23 @@ class StateMachine:
         self._animations.wait(timeout=10.0)
         log.info("Startup animation complete.")
 
+    def play_startup_music(self) -> None:
+        """Play the startup music clip through the music output path and block
+        until it finishes.  Must be called after the AudioPlayer is initialised
+        (i.e. after StateMachine.__init__) but before play_startup_animation().
+        No-ops if the file is missing."""
+        path = config.STARTUP_MUSIC_PATH
+        if not path.exists():
+            log.warning("Startup music not found at %s — skipping.", path)
+            return
+        log.info("Playing startup music (%s) …", path)
+        self._player.play_music(path, loop=False)
+        finished = self._player.wait_for_music(timeout=120.0)
+        if finished:
+            log.info("Startup music complete.")
+        else:
+            log.warning("Startup music timed out — continuing.")
+
     def play_startup_chime(self) -> None:
         """Play the startup chime through the music output path and block
         until it finishes.  Must be called after start() so the AudioPlayer
