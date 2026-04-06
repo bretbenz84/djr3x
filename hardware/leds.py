@@ -53,7 +53,7 @@ import config
 log = logging.getLogger(__name__)
 
 # Mouth brightness polling interval (seconds).  ~30 Hz is smooth without
-# flooding the Nano's 9600-baud serial buffer.
+# flooding the Nano's 115200-baud serial buffer.
 _MOUTH_POLL_INTERVAL: float = 1 / 30
 
 

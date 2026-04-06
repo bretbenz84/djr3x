@@ -69,7 +69,7 @@ MAESTRO_BAUD = 9600          # Pololu default; must match Maestro USB settings
 
 NANO_CHEST_PORT = _optional("NANO_CHEST_PORT", "/dev/ttyUSB0")
 NANO_HEAD_PORT  = _optional("NANO_HEAD_PORT",  "/dev/ttyUSB1")
-LED_NANO_BAUD   = 9600
+LED_NANO_BAUD   = 115200
 
 # ---------------------------------------------------------------------------
 # Servo channel definitions (Pololu Maestro, 0-based channel numbers)

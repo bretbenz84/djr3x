@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(arduino-cli version:*)",
+      "Bash(arduino-cli board:*)",
+      "Bash(arduino-cli core:*)",
+      "Bash(arduino-cli compile:*)"
+    ]
+  }
+}

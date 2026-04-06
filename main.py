@@ -132,7 +132,7 @@ def main() -> None:
 
     # 0. Allow USB audio devices to fully enumerate after boot
     log.info("Waiting for audio devices to initialize...")
-    time.sleep(3)
+    time.sleep(1)
 
     # 1. Construct state machine (probes serial ports, opens hardware)
     sm = StateMachine()
