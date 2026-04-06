@@ -299,22 +299,34 @@ void tickSpeak(float dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Idle eye-breathing animation
+// Idle animation
 // ---------------------------------------------------------------------------
 //
-// Smooth sinusoidal brightness on both eyes.  Mouth is not touched.
-// Period ≈ 3 s.  Range: 5 %–40 % of full blue so eyes are never fully dark.
+// Eyes: solid — left untouched so the EYE:{r,g,b} command from the Pi holds.
+//
+// Mouth: slow sinusoidal pulse on zone-0 only (the 4 centre pixels).
+//   All other mouth pixels are forced off every frame so no stale values
+//   can accumulate from a previous SPEAK animation.
+//   Period ≈ 4 s.  Brightness range: 6 %–28 % (dim warm amber).
 
 void tickIdle(float dt) {
-    idlePhase += dt * (TWO_PI / 3.0f);
+    idlePhase += dt * (TWO_PI / 4.0f);   // 4-second period
     if (idlePhase >= TWO_PI) idlePhase -= TWO_PI;
 
     float s          = (sin(idlePhase) + 1.0f) * 0.5f;   // 0.0 – 1.0
-    float brightness = 0.05f + s * 0.35f;                 // 0.05 – 0.40
+    float brightness = 0.06f + s * 0.22f;                 // 0.06 – 0.28
     uint8_t b        = (uint8_t)(brightness * 255.0f);
 
-    // Soft blue: full blue channel, slight green tint
-    setEyes(0, b / 6, b);
+    // Zone 0 (4 centre pixels): slow amber pulse.  Everything else: off.
+    for (uint8_t i = 0; i < NUM_MOUTH; i++) {
+        if (pgm_read_byte(&PIXEL_ZONE[i]) == 0) {
+            leds[i + MOUTH_START] = CRGB(b, b >> 2, 0);   // warm amber
+        } else {
+            leds[i + MOUTH_START] = CRGB::Black;
+        }
+    }
+
+    // Eyes are not touched — they remain solid at whatever EYE:{r,g,b} set.
     FastLED.show();
 }
 

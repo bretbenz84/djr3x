@@ -5,9 +5,8 @@
 - Pololu Maestro Mini — servo control via serial
 - Arduino Nanos — LED control via serial commands
 - Custom mouth PCB — lights up with speech audio level
-- USB microphone (bringing from work tomorrow)
+- USB microphone
 - Speakers connected via 3.5mm jack through stereo amp
-- Two audio sources mixed via passive resistor mixer (speech + music)
 
 ## Environment
 - OS: Debian GNU/Linux 13 (Trixie)
