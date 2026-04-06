@@ -422,12 +422,17 @@ class StateMachine:
                 prompt = random.choice(_ARE_YOU_THERE_PHRASES)
                 log.info("No speech on first listen — prompting: %r", prompt)
                 self._leds.set_head_effect(config.LED_CMD_ACTIVE)
-                servo_stop = self._begin_speech()
+                servo_stop = None
                 try:
+                    servo_stop = self._begin_speech(emotion="neutral")
                     self._synthesizer.speak(prompt)
+                except Exception:
+                    log.exception("Error speaking 'are you there' prompt")
                 finally:
-                    self._end_speech(servo_stop)
-                self._player.wait_for_speech()
+                    if servo_stop is not None:
+                        self._end_speech(servo_stop)
+                    else:
+                        self._wake_word.suppressed = False
 
                 # Second-chance listen
                 self._leds.set_head_effect(config.LED_CMD_LISTENING)
@@ -446,12 +451,17 @@ class StateMachine:
                     goodbye = random.choice(_GOODBYE_PHRASES)
                     log.info("Still no speech — saying goodbye: %r", goodbye)
                     self._leds.set_head_effect(config.LED_CMD_ACTIVE)
-                    servo_stop = self._begin_speech()
+                    servo_stop = None
                     try:
+                        servo_stop = self._begin_speech(emotion="neutral")
                         self._synthesizer.speak(goodbye)
+                    except Exception:
+                        log.exception("Error speaking goodbye phrase")
                     finally:
-                        self._end_speech(servo_stop)
-                    self._player.wait_for_speech()
+                        if servo_stop is not None:
+                            self._end_speech(servo_stop)
+                        else:
+                            self._wake_word.suppressed = False
                     self._play_return_to_idle_chime()
                     self._transition_to(State.IDLE)
                     return
@@ -527,13 +537,17 @@ class StateMachine:
         # so speech-reactive servo movement works normally.
         phrase = random.choice(_SHUTDOWN_PHRASES)
         log.info("Shutdown speech: %r", phrase)
-        servo_stop = self._begin_speech(emotion="neutral")
+        servo_stop = None
         try:
+            servo_stop = self._begin_speech(emotion="neutral")
             self._synthesizer.speak(phrase)
         except Exception:
             log.exception("Shutdown speech: TTS error — continuing to shutdown")
         finally:
-            self._end_speech(servo_stop)
+            if servo_stop is not None:
+                self._end_speech(servo_stop)
+            else:
+                self._wake_word.suppressed = False
 
         # Stop servo idle thread before the animation so arm channels are free.
         if self._servos is not None:
@@ -674,12 +688,26 @@ class StateMachine:
 
         - Suppresses wake word so Rex doesn't trigger on his own voice.
         - Sets servo emotion so speak_move() uses the right position range.
-        - Starts the mouth brightness thread (LEDController).
+        - Arms the mouth brightness thread (deferred until first audio chunk).
         - Launches a short-lived servo-speak worker thread.
 
         Returns the stop Event for the servo-speak worker; caller must set it
         when speech ends.
+
+        IMPORTANT: call this as close as possible to the synthesizer.speak()
+        call — ideally after any upstream API calls (LLM streaming) so that
+        the mouth-trigger thread doesn't sit idle for 1-2 s waiting for TTS
+        to start.  The _audio_started event is explicitly cleared here so the
+        trigger always waits for THIS segment's audio, not stale state from
+        the previous utterance.
         """
+        # Clear stale _audio_started from the previous speech segment.  Without
+        # this, wait_for_audio_start() returns immediately (the event is still
+        # set from the previous utterance) and mouth LEDs fire before any audio
+        # is queued.  _speech_worker also clears it when it picks up the first
+        # chunk, but that races with the trigger thread started below.
+        self._player.clear_audio_started()
+
         self._wake_word.suppressed = True
 
         if self._servos is not None:
@@ -758,27 +786,36 @@ class StateMachine:
         The emotion for servo speech range is derived from the action so that
         e.g. a greeting with action="excited" has the head moving in the
         excited range *during* the reply.
+
+        _begin_speech() is called immediately before each speak call so
+        servo setup and the mouth-trigger thread arm as late as possible —
+        after any pre-speak logic and right before audio is queued.
         """
         emotion = _action_to_emotion(cmd.action)
-        servo_stop = self._begin_speech(emotion=emotion)
-
+        servo_stop = None
         try:
             if cmd.audio:
                 audio_path = config.ASSETS_DIR / "audio" / cmd.audio
                 if audio_path.exists():
+                    servo_stop = self._begin_speech(emotion=emotion)
                     self._player.play_file(audio_path)
                 else:
                     log.warning(
                         "Pre-rendered audio not found: %s — falling back to TTS",
                         cmd.audio,
                     )
+                    servo_stop = self._begin_speech(emotion=emotion)
                     self._synthesizer.speak(cmd.response)
             else:
+                servo_stop = self._begin_speech(emotion=emotion)
                 self._synthesizer.speak(cmd.response)
         except Exception:
             log.exception("Error speaking command response")
         finally:
-            self._end_speech(servo_stop)
+            if servo_stop is not None:
+                self._end_speech(servo_stop)
+            else:
+                self._wake_word.suppressed = False
 
         return self._dispatch_action(cmd.action)
 
@@ -787,15 +824,26 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def _speak_llm(self, text: str, image: str | None = None, t0: float | None = None) -> State | None:
-        """Stream text (and optional vision frame) through ChatGPT → ElevenLabs."""
-        servo_stop = self._begin_speech(emotion="neutral")
+        """Stream text (and optional vision frame) through ChatGPT → ElevenLabs.
+
+        _begin_speech() is called AFTER chat_stream() obtains the token
+        generator so that servo setup and the mouth-trigger thread are armed
+        as late as possible — right before speak_stream() hands tokens to
+        ElevenLabs and audio starts flowing.
+        """
+        servo_stop = None
         try:
             tokens = self._llm.chat_stream(text, image=image, t0=t0)
+            servo_stop = self._begin_speech(emotion="neutral")
             self._synthesizer.speak_stream(tokens, t0=t0)
         except Exception:
             log.exception("LLM/TTS error for: %.60s", text)
         finally:
-            self._end_speech(servo_stop)
+            if servo_stop is not None:
+                self._end_speech(servo_stop)
+            else:
+                # Exception before _begin_speech — ensure wake word not stuck suppressed.
+                self._wake_word.suppressed = False
         return None
 
     # ------------------------------------------------------------------
