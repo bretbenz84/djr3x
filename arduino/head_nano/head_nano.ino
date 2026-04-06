@@ -4,8 +4,8 @@
  * Hardware
  * --------
  *   82 WS2812B NeoPixels on D6 (FastLED)
- *   Pixels 0–79  : mouth (80-pixel trapezoid PCB)
- *   Pixels 80–81 : left and right eyes
+ *   Pixels 0–1   : left and right eyes
+ *   Pixels 2–81  : mouth (80-pixel trapezoid PCB)
  *
  * Mouth layout — 10 rows × 8 cols, serpentine wiring
  * ---------------------------------------------------
@@ -13,9 +13,9 @@
  *   Odd  rows (1,3,5,7,9) wire right→left.
  *   Physical center of the array is at grid position (row=4.5, col=3.5).
  *
- *   Centre cluster (zone 0): pixels 35, 36, 43, 44
- *     35 = row4 col3   36 = row4 col4
- *     43 = row5 col4*  44 = row5 col3*   (* serpentine reversal)
+ *   Centre cluster (zone 0): pixels 37, 38, 45, 46 (mouth offset +2)
+ *     37 = row4 col3   38 = row4 col4
+ *     45 = row5 col4*  46 = row5 col3*   (* serpentine reversal)
  *
  *   Zones by Euclidean distance from (4.5, 3.5):
  *     Zone 0  dist < 1.0   — centre cluster        ( 4 pixels)
@@ -44,11 +44,12 @@
 // Pin / layout constants
 // ---------------------------------------------------------------------------
 
-#define DATA_PIN   6
-#define NUM_MOUTH  80
-#define NUM_EYES   2
-#define NUM_LEDS   (NUM_MOUTH + NUM_EYES)
-#define NUM_ZONES  5
+#define DATA_PIN    6
+#define NUM_EYES    2
+#define NUM_MOUTH   80
+#define NUM_LEDS    (NUM_EYES + NUM_MOUTH)   // 82 total; eyes first, mouth second
+#define MOUTH_START NUM_EYES                 // mouth pixels begin at index 2
+#define NUM_ZONES   5
 
 #define BAUD_RATE  115200
 #define SERIAL_BUF 64
@@ -153,12 +154,12 @@ inline uint8_t clampByte(int v) {
 }
 
 inline void setEyes(uint8_t r, uint8_t g, uint8_t b) {
-    leds[NUM_MOUTH]     = CRGB(r, g, b);
-    leds[NUM_MOUTH + 1] = CRGB(r, g, b);
+    leds[0] = CRGB(r, g, b);
+    leds[1] = CRGB(r, g, b);
 }
 
 inline void mouthOff() {
-    for (uint8_t i = 0; i < NUM_MOUTH; i++) leds[i] = CRGB::Black;
+    for (uint8_t i = MOUTH_START; i < NUM_LEDS; i++) leds[i] = CRGB::Black;
 }
 
 static uint8_t parseEmotion(const char *s) {
@@ -271,6 +272,8 @@ void tickSpeak(float dt) {
 
     for (uint8_t i = 0; i < NUM_MOUTH; i++) {
         float zone = (float)pgm_read_byte(&PIXEL_ZONE[i]);
+        // Mouth pixels start at index MOUTH_START (2); zone table is 0-indexed
+        uint8_t ledIdx = i + MOUTH_START;
         float diff = speakPhase - zone;
 
         // Wrap so waves look continuous when front passes zone 4 → zone 0
@@ -286,7 +289,7 @@ void tickSpeak(float dt) {
         if (brightness > 1.0f) brightness = 1.0f;
 
         uint8_t sc = (uint8_t)(brightness * 255.0f);
-        leds[i] = CRGB(
+        leds[ledIdx] = CRGB(
             scale8(speakColor.r, sc),
             scale8(speakColor.g, sc),
             scale8(speakColor.b, sc)
