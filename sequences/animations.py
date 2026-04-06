@@ -348,14 +348,14 @@ class AnimationPlayer:
         self._launch(STARTUP, blocking=False)
 
     def play_shutdown(self) -> None:
-        """Play the shutdown (power-down) animation and block until complete.
+        """Start the shutdown (power-down) animation in a background thread
+        and return immediately.
 
         Designed to be called *after* stopping the ServoController idle
         thread (ServoController.stop()) and *before* closing hardware.
-        Returns only when the full sequence has played out, guaranteeing
-        that hardware can be safely closed immediately after.
+        Call wait() after to block until the sequence has played out.
         """
-        self._launch(SHUTDOWN, blocking=True)
+        self._launch(SHUTDOWN, blocking=False)
 
     def play_wake_greeting_arms(self) -> None:
         """Start the excited arm-wave greeting in a background thread and return immediately.

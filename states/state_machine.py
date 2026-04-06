@@ -574,8 +574,26 @@ class StateMachine:
         if self._servos is not None:
             self._servos.stop()
 
-        # Theatrical power-down sequence (blocking — 2.2 s).
-        self._animations.play_shutdown()
+        # Start shutdown music and servo animation concurrently, then wait for
+        # both to finish before tearing down hardware.
+        _shutdown_music_path = config.SHUTDOWN_MUSIC_PATH
+        if _shutdown_music_path.exists():
+            log.info("Playing shutdown music (%s) …", _shutdown_music_path)
+            self._player.play_music(_shutdown_music_path, loop=False)
+        else:
+            log.warning("Shutdown music not found at %s — skipping.", _shutdown_music_path)
+
+        self._animations.play_shutdown()   # non-blocking; runs in daemon thread
+
+        anim_done = self._animations.wait(timeout=15.0)
+        if not anim_done:
+            log.warning("Shutdown animation timed out — continuing.")
+
+        if _shutdown_music_path.exists():
+            music_done = self._player.wait_for_music(timeout=60.0)
+            if not music_done:
+                log.warning("Shutdown music timed out — continuing.")
+                self._player.stop_music()
 
         # Shutdown animation IS the final servo state — do not call home() here,
         # it would override the slumped pose with neutral positions.

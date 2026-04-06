@@ -17,8 +17,9 @@ PROJECT_ROOT       = Path(__file__).parent.resolve()
 ASSETS_DIR         = PROJECT_ROOT / "assets"
 AUDIO_CACHE_DIR    = ASSETS_DIR / "audio"
 MODELS_DIR         = ASSETS_DIR / "models"
-STARTUP_CHIME_PATH  = ASSETS_DIR / "audio" / "startup_chime.mp3"
-STARTUP_MUSIC_PATH  = ASSETS_DIR / "audio" / "light_speed.mp3"
+STARTUP_CHIME_PATH   = ASSETS_DIR / "audio" / "startup_chime.mp3"
+STARTUP_MUSIC_PATH   = ASSETS_DIR / "audio" / "light_speed.mp3"
+SHUTDOWN_MUSIC_PATH  = ASSETS_DIR / "audio" / "hyperdrive_down.mp3"
 
 # ---------------------------------------------------------------------------
 # Load .env
