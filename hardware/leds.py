@@ -15,7 +15,7 @@ Thread model
     start_mouth(), stop_mouth(), start(), stop().
 
   Mouth brightness thread (_mouth_thread)
-    Reads player.rms at ~30 Hz and sends BRIGHT:<n> to the head Nano only
+    Reads player.rms at ~20 Hz and sends SPEAK_LEVEL:<n> to the head Nano only
     while speech is active.  Created by start_mouth(), torn down by
     stop_mouth() / stop().
 
@@ -152,11 +152,20 @@ class LEDController:
         self._send_head(config.LED_CMD_EYE_COLOR.format(r, g, b))
 
     # ------------------------------------------------------------------
-    # Mouth brightness
+    # Mouth speaking animation
     # ------------------------------------------------------------------
 
+    def set_mouth_emotion(self, emotion: str) -> None:
+        """Send SPEAK:{emotion} to the head Nano to set the mouth colour.
+
+        Call once before start_mouth() so the Arduino knows the emotion
+        colour before SPEAK_LEVEL commands begin flowing.  Valid values:
+        neutral, happy, excited, sad, angry.
+        """
+        self._send_head(config.LED_CMD_SPEAK.format(emotion))
+
     def start_mouth(self) -> None:
-        """Start the RMS → brightness thread.  No-op if already running."""
+        """Start the RMS → SPEAK_LEVEL thread.  No-op if already running."""
         if self._mouth_thread is not None and self._mouth_thread.is_alive():
             return
         self._mouth_stop.clear()
@@ -168,11 +177,12 @@ class LEDController:
         self._mouth_thread.start()
 
     def stop_mouth(self) -> None:
-        """Stop the mouth brightness thread and wait for it to exit."""
+        """Stop the mouth level thread and send SPEAK_STOP to the head Nano."""
         self._mouth_stop.set()
         if self._mouth_thread is not None:
             self._mouth_thread.join(timeout=1.0)
             self._mouth_thread = None
+        self._send_head(config.LED_CMD_SPEAK_STOP)
 
     # ------------------------------------------------------------------
     # Internal — send helpers
@@ -197,15 +207,11 @@ class LEDController:
     # ------------------------------------------------------------------
 
     def _mouth_worker(self) -> None:
-        """Poll player.rms and send BRIGHT:<n> to the head Nano at ~30 Hz."""
+        """Poll player.rms and send SPEAK_LEVEL:<n> to the head Nano at ~20 Hz."""
         while not self._mouth_stop.is_set():
-            brightness = int(round(self._player.rms))
-            brightness = _clamp(brightness)
-            self._send_head(config.LED_CMD_BRIGHTNESS.format(brightness))
+            level = _clamp(int(round(self._player.rms)))
+            self._send_head(config.LED_CMD_SPEAK_LEVEL.format(level))
             time.sleep(_MOUTH_POLL_INTERVAL)
-
-        # When stopped, send zero brightness so mouth doesn't freeze lit
-        self._send_head(config.LED_CMD_BRIGHTNESS.format(0))
 
 
 # ---------------------------------------------------------------------------

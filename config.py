@@ -352,9 +352,10 @@ ENABLE_OS_SHUTDOWN: bool = _optional("ENABLE_OS_SHUTDOWN", "").lower() in ("1", 
 LED_CMD_IDLE      = "IDLE\n"      # slow breathing pulse
 LED_CMD_ACTIVE    = "ACTIVE\n"    # full-brightness steady
 LED_CMD_LISTENING = "LISTEN\n"    # color shift indicating attention
-LED_CMD_SPEAKING  = "SPEAK\n"     # driven per-frame by audio level
 LED_CMD_OFF       = "OFF\n"
 
 # Parameterised commands — format() before sending
-LED_CMD_BRIGHTNESS = "BRIGHT:{}\n"      # 0–255 integer
-LED_CMD_EYE_COLOR  = "EYE:{},{},{}\n"   # R,G,B integers 0–255
+LED_CMD_SPEAK       = "SPEAK:{}\n"            # emotion string (neutral/happy/excited/sad/angry)
+LED_CMD_SPEAK_LEVEL = "SPEAK_LEVEL:{}\n"      # 0–255 audio intensity; sent at ~20 Hz during speech
+LED_CMD_SPEAK_STOP  = "SPEAK_STOP\n"          # mouth off after speech ends
+LED_CMD_EYE_COLOR   = "EYE:{},{},{}\n"        # R,G,B integers 0–255

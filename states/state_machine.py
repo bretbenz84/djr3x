@@ -421,7 +421,7 @@ class StateMachine:
                 # First listen — prompt with "are you there?"
                 prompt = random.choice(_ARE_YOU_THERE_PHRASES)
                 log.info("No speech on first listen — prompting: %r", prompt)
-                self._leds.set_head_effect(config.LED_CMD_SPEAKING)
+                self._leds.set_head_effect(config.LED_CMD_ACTIVE)
                 servo_stop = self._begin_speech()
                 try:
                     self._synthesizer.speak(prompt)
@@ -445,7 +445,7 @@ class StateMachine:
                 if not text:   # None (timeout) or "" (Whisper got nothing)
                     goodbye = random.choice(_GOODBYE_PHRASES)
                     log.info("Still no speech — saying goodbye: %r", goodbye)
-                    self._leds.set_head_effect(config.LED_CMD_SPEAKING)
+                    self._leds.set_head_effect(config.LED_CMD_ACTIVE)
                     servo_stop = self._begin_speech()
                     try:
                         self._synthesizer.speak(goodbye)
@@ -468,8 +468,8 @@ class StateMachine:
             log.info("Transcribed: %r", text)
 
             # --- Speaking indicator ---
-            self._leds.set_head_effect(config.LED_CMD_SPEAKING)
-            self._leds.set_chest_effect(config.LED_CMD_SPEAKING)
+            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+            self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
 
             # --- Parse and respond ---
             _elapsed = f" [+{time.monotonic() - self._pipeline_t0:.1f}s]"
@@ -691,6 +691,7 @@ class StateMachine:
             )
             self._servos.set_position(config.SERVO_ARM_LEFT, 7100)
 
+        self._leds.set_mouth_emotion(emotion)
         self._leds.start_mouth()
 
         stop_event = threading.Event()
