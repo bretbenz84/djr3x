@@ -8,9 +8,10 @@ Start order
   3. Startup banner printed showing which hardware was detected.
   4. SIGINT / SIGTERM handlers registered → sm.request_shutdown().
   5. light_speed.mp3 + servo animation run concurrently; both complete before continuing.
-  6. sm.start() — loads wake word models, starts background threads.
-  7. Startup chime played (blocking) through music output path.
-  8. sm.run() — blocks until SHUTDOWN state plays out and OS halts.
+  6. Roger Control.mp3 plays through speech path with mouth LEDs and servo animation.
+  7. sm.start() — loads wake word models, starts background threads.
+  8. Startup chime played (blocking) through music output path.
+  9. sm.run() — blocks until SHUTDOWN state plays out and OS halts.
 
 Run
 ---
@@ -152,14 +153,19 @@ def main() -> None:
     #    idle thread is not fighting the animation's arm movements.
     sm.play_startup_animation()
 
-    # 5. Warmup models and start all background threads
+    # 5. Spoken intro through speech path — mouth LEDs and servo speak animation
+    #    are active.  Must run before sm.start() so background threads don't
+    #    compete for hardware.  Skipped gracefully if file is missing.
+    sm.play_startup_intro()
+
+    # 6. Warmup models and start all background threads
     sm.start()
 
-    # 6. Startup chime — after sm.start() so the AudioPlayer OutputStream is
+    # 7. Startup chime — after sm.start() so the AudioPlayer OutputStream is
     #    running, before sm.run() so it plays before entering IDLE/wake-word
     sm.play_startup_chime()
 
-    # 7. Run — blocks until SHUTDOWN state halts the OS or an exception escapes
+    # 8. Run — blocks until SHUTDOWN state halts the OS or an exception escapes
     sm.run()
 
 

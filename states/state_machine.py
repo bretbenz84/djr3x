@@ -264,6 +264,34 @@ class StateMachine:
                 log.warning("Startup music timed out — continuing.")
                 self._player.stop_music()
 
+    def play_startup_intro(self) -> None:
+        """Play the spoken intro clip through the speech path with full
+        mouth-LED and servo speech animation.
+
+        Must be called *after* play_startup_animation() (so servos are idle)
+        and *before* start() (so the wake-word and idle threads are not yet
+        competing for hardware).  Gracefully skipped if the file is missing.
+        """
+        path = config.STARTUP_INTRO_PATH
+        if not path.exists():
+            log.warning("Startup intro not found at %s — skipping.", path)
+            return
+
+        log.info("Playing startup intro (%s) …", path)
+        servo_stop = None
+        try:
+            servo_stop = self._begin_speech(emotion="neutral")
+            self._player.play_file(path)
+            self._player.wait_for_speech(timeout=30.0)
+        except Exception:
+            log.exception("Startup intro: playback error — continuing")
+        finally:
+            if servo_stop is not None:
+                self._end_speech(servo_stop)
+            else:
+                self._wake_word.suppressed = False
+        log.info("Startup intro complete.")
+
     def play_startup_chime(self) -> None:
         """Play the startup chime through the music output path and block
         until it finishes.  Must be called after start() so the AudioPlayer
