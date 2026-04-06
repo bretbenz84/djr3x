@@ -231,32 +231,38 @@ class StateMachine:
         self._wake_event.set()   # unblock _run_idle() if it's waiting
 
     def play_startup_animation(self) -> None:
-        """Play the startup (boot) animation and block until it completes.
+        """Start startup music and the boot animation concurrently, then block
+        until both finish.
 
-        Must be called *before* start() so the servo idle thread is not
-        running yet — startup moves all channels including arms.
+        light_speed.mp3 (STARTUP_MUSIC_PATH) begins playing through the music
+        path (no mouth LEDs) at the same time as the servo animation.  If the
+        music file is missing it is skipped silently.  Must be called *before*
+        start() so the servo idle thread is not running yet.
         """
-        log.info("Playing startup animation …")
-        self._animations.play_startup()
-        self._animations.wait(timeout=10.0)
-        log.info("Startup animation complete.")
-
-    def play_startup_music(self) -> None:
-        """Play the startup music clip through the music output path and block
-        until it finishes.  Must be called after the AudioPlayer is initialised
-        (i.e. after StateMachine.__init__) but before play_startup_animation().
-        No-ops if the file is missing."""
-        path = config.STARTUP_MUSIC_PATH
-        if not path.exists():
-            log.warning("Startup music not found at %s — skipping.", path)
-            return
-        log.info("Playing startup music (%s) …", path)
-        self._player.play_music(path, loop=False)
-        finished = self._player.wait_for_music(timeout=120.0)
-        if finished:
-            log.info("Startup music complete.")
+        _music_path = config.STARTUP_MUSIC_PATH
+        if _music_path.exists():
+            log.info("Playing startup music (%s) …", _music_path)
+            self._player.play_music(_music_path, loop=False)
         else:
-            log.warning("Startup music timed out — continuing.")
+            log.warning("Startup music not found at %s — skipping.", _music_path)
+            _music_path = None  # sentinel: skip wait below
+
+        log.info("Playing startup animation …")
+        self._animations.play_startup()   # non-blocking
+
+        anim_done = self._animations.wait(timeout=10.0)
+        if not anim_done:
+            log.warning("Startup animation timed out — continuing.")
+        else:
+            log.info("Startup animation complete.")
+
+        if _music_path is not None:
+            music_done = self._player.wait_for_music(timeout=120.0)
+            if music_done:
+                log.info("Startup music complete.")
+            else:
+                log.warning("Startup music timed out — continuing.")
+                self._player.stop_music()
 
     def play_startup_chime(self) -> None:
         """Play the startup chime through the music output path and block
