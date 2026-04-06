@@ -210,6 +210,10 @@ class LEDController:
         """Poll player.rms and send SPEAK_LEVEL:<n> to the head Nano at ~20 Hz."""
         while not self._mouth_stop.is_set():
             level = _clamp(int(round(self._player.rms)))
+            # Clamp sub-threshold values to zero so transient near-silence
+            # during breath pauses doesn't produce ambient pre-glow on the Nano.
+            if level < config.MOUTH_LED_MIN_RMS:
+                level = 0
             self._send_head(config.LED_CMD_SPEAK_LEVEL.format(level))
             time.sleep(_MOUTH_POLL_INTERVAL)
 

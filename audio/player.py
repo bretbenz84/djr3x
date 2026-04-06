@@ -34,10 +34,13 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 import numpy as np
 import sounddevice as sd
@@ -84,6 +87,11 @@ class AudioPlayer:
 
     def __init__(self) -> None:
         self._rms: float = 0.0           # smoothed 0.0–255.0; read by leds.py
+
+        # Fired when the first audio samples of a new speech segment actually
+        # reach the output device.  Used by LEDController.start_mouth() so the
+        # mouth doesn't pre-glow before sound comes out of the speakers.
+        self._audio_started: threading.Event = threading.Event()
 
         # --- speech stream state ---
         self._speech_queue: queue.SimpleQueue[np.ndarray | _EndMarker] = (
@@ -177,6 +185,7 @@ class AudioPlayer:
         self._speech_buf = None
         self._speech_buf_pos = 0
         self._rms = 0.0
+        self._audio_started.clear()
         self._speech_active.set()   # unblock any wait_for_speech() caller
 
         # put an EndMarker so the callback raises CallbackStop and closes
@@ -256,6 +265,16 @@ class AudioPlayer:
         Returns 0.0 when no speech stream is open."""
         return self._rms
 
+    def wait_for_audio_start(self, timeout: float = 5.0) -> bool:
+        """Block until the first audio samples of the current speech segment
+        actually reach the output device — i.e. the OutputStream callback has
+        fired with non-silent data at least once.
+
+        Returns True if audio started within timeout, False otherwise.
+        Call this before starting mouth LEDs to avoid pre-glow.
+        """
+        return self._audio_started.wait(timeout=timeout)
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -293,6 +312,7 @@ class AudioPlayer:
             # First audio chunk — prime the buffer, then open the stream.
             self._speech_buf = item
             self._speech_buf_pos = 0
+            self._audio_started.clear()   # arm the event; callback sets it on first samples
 
             finished = threading.Event()
             with sd.OutputStream(
@@ -368,6 +388,11 @@ class AudioPlayer:
             rms_raw = float(np.sqrt(np.mean(chunk_f32 ** 2)))
             # int16 max = 32767; scale to 0-1, apply gain, map to 0-255
             brightness = min(255.0, (rms_raw / 32767.0) * config.MOUTH_LED_GAIN * 255.0)
+            # Signal on the first non-silent callback so mouth LEDs can start
+            # at the exact moment audio reaches the output device.
+            if not self._audio_started.is_set():
+                log.info("First audio chunk playing — mouth LED start unlocked")
+                self._audio_started.set()
         else:
             brightness = 0.0
 

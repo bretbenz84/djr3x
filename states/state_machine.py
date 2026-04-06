@@ -691,8 +691,30 @@ class StateMachine:
             )
             self._servos.set_position(config.SERVO_ARM_LEFT, 7100)
 
-        self._leds.set_mouth_emotion(emotion)
-        self._leds.start_mouth()
+        # Delay mouth LED start until the first audio samples actually reach the
+        # output device — prevents the Arduino from pre-glowing before sound
+        # comes out of the speakers.  set_mouth_emotion() is also deferred so
+        # the SPEAK:{emotion} command doesn't trigger the Nano's speak state
+        # early.  Both calls happen in a short-lived daemon thread that wakes
+        # the moment player._audio_started fires.
+        _emotion_for_closure = emotion
+
+        def _trigger_mouth() -> None:
+            started = self._player.wait_for_audio_start(timeout=5.0)
+            if started:
+                self._leds.set_mouth_emotion(_emotion_for_closure)
+                self._leds.start_mouth()
+            else:
+                log.warning(
+                    "_begin_speech: audio never started within 5 s — "
+                    "mouth LEDs suppressed"
+                )
+
+        threading.Thread(
+            target=_trigger_mouth,
+            daemon=True,
+            name="djr3x-mouth-trigger",
+        ).start()
 
         stop_event = threading.Event()
         threading.Thread(

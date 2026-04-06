@@ -229,6 +229,10 @@ MAX_RECORD_SECONDS           = 12.0 # hard cap on a single utterance
 MOUTH_LED_SMOOTHING = 0.25   # exponential smoothing factor (0=frozen, 1=raw)
 MOUTH_LED_GAIN      = 3.0    # multiplier applied to normalised RMS before
                              # mapping to 0–255 brightness
+MOUTH_LED_MIN_RMS   = float(_optional("MOUTH_LED_MIN_RMS", "8.0"))
+                             # SPEAK_LEVEL:0 is sent for RMS values below this
+                             # threshold to prevent ambient pre-glow when audio
+                             # hasn't truly started yet
 
 # ---------------------------------------------------------------------------
 # Speech — wake word (OpenWakeWord)
