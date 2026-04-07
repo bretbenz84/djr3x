@@ -4,7 +4,9 @@
       "Bash(arduino-cli version:*)",
       "Bash(arduino-cli board:*)",
       "Bash(arduino-cli core:*)",
-      "Bash(arduino-cli compile:*)"
+      "Bash(arduino-cli compile:*)",
+      "Bash(ls /home/bbenziger/djr3x/*.py)",
+      "Bash(venv/bin/python -c \"from vision.face_db import FaceDB; db = FaceDB\\('/tmp/test_face.db'\\); print\\('OK'\\); db.close\\(\\)\")"
     ]
   }
 }
