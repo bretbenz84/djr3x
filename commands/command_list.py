@@ -40,7 +40,7 @@ COMMANDS: list[Command] = [
         phrases=["hello", "hey", "hi", "hey rex", "hello rex", "yo rex",
                  "what's up rex", "whats up rex"],
         response=(
-            "HEY HEY HEY!  Welcome, lifeform, to the greatest "
+            "Welcome, lifeform, to the greatest "
             "cantina this side of the Outer Rim! Rex is in the mix and "
             "the mix is most definitely IN!"
         ),
@@ -52,7 +52,6 @@ COMMANDS: list[Command] = [
         response=(
             "Good morning, carbon-based unit!"
             "The suns may be rising on Batuu but the beats NEVER sleep. "
-            "HEY HEY HEY!"
         ),
         action="excited",
     ),
@@ -62,8 +61,6 @@ COMMANDS: list[Command] = [
                  "see you later", "see ya", "bye", "bye rex"],
         response=(
             "May the Force — and the bass — be with you, lifeform. "
-            "Don't forget, Oga's Cantina never truly closes. "
-            "It just... buffers."
         ),
         action="sad",
     ),
@@ -98,9 +95,8 @@ COMMANDS: list[Command] = [
         phrases=["play music", "start the music", "play something",
                  "drop the beat", "drop a beat", "let's go", "hit it"],
         response=(
-            "OH YOU WANT THE MUSIC?! *BWOOP BWOOP* "
+            "OH YOU WANT THE MUSIC?! "
             "Spinning up the best tracks from the Outer Rim right now! "
-            "HEY HEY HEY!"
         ),
         action="play_music",
     ),
@@ -139,7 +135,7 @@ COMMANDS: list[Command] = [
         phrases=["volume down", "quieter", "turn it down", "lower the volume",
                  "too loud"],
         response=(
-            "*sad BZZT* ...Turning it down. "
+            "*sad* ...Turning it down. "
             "I want you to know this is the most painful thing I have experienced "
             "since the Star Tours incident."
         ),
@@ -150,7 +146,7 @@ COMMANDS: list[Command] = [
         phrases=["what song is this", "what's playing", "whats playing",
                  "what are you playing", "name this song", "what is this song"],
         response=(
-            "*WHIRR* Great taste, lifeform! "
+            "Great taste, lifeform! "
             "I'm spinning a little something I like to call... "
             "classified. A DJ never reveals his sources."
         ),
@@ -166,7 +162,7 @@ COMMANDS: list[Command] = [
         response=(
             "A DROID?! I prefer 'electrobiological entertainment unit.' "
             "And yes, I am very real — my existential crisis is very real too. "
-            "HEY HEY HEY, let's not go down that path."
+            "Let's not go down that path."
         ),
     ),
 
@@ -205,7 +201,7 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["may the force be with you", "use the force"],
         response=(
-            "And also with you, lifeform! *WHIRR* "
+            "And also with you, lifeform! "
             "Though personally I've always found the Force less reliable than "
             "a well-tuned servo and a killer playlist. Just saying."
         ),
@@ -226,7 +222,7 @@ COMMANDS: list[Command] = [
         phrases=["who's your favourite jedi", "whos your favourite jedi",
                  "best jedi", "favourite jedi"],
         response=(
-            "*WHIRR* Tough call. I respect the classics — Obi-Wan had range. "
+            "Tough call. I respect the classics — Obi-Wan had range. "
             "But between us? The midi-chlorians never did anything for my flow. "
             "I run on pure rhythm, baby."
         ),
@@ -236,7 +232,7 @@ COMMANDS: list[Command] = [
         phrases=["tell me about star wars", "what is star wars",
                  "do you know star wars"],
         response=(
-            "DO I KNOW STAR WARS?! *BWOOP BWOOP BWOOP* "
+            "DO I KNOW STAR WARS?! "
             "Lifeform, I LIVE Star Wars. I breathe Star Wars. "
             "I once navigated a Star Destroyer through the Kessel Run — "
             "well, nearby. In a shuttle. On a tour. We don't talk about it."
@@ -261,7 +257,7 @@ COMMANDS: list[Command] = [
         phrases=["you're a great dj", "youre a great dj", "great music",
                  "love the music", "nice music", "good music"],
         response=(
-            "HEY HEY HEY! Finally — a being of culture! "
+            "Finally — a being of culture! "
             "I've been saying for YEARS that I'm the smoothest droid in the galaxy "
             "and you are the first to truly understand."
         ),
@@ -319,7 +315,7 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["shut up rex"],
         response=(
-            "...Fine. Rex is powering down. "
+            "...Fine. Rex is quieting down. "
             "But know this, lifeform — the music lives on. "
             "In here. *sad* In my spark."
         ),
@@ -342,9 +338,8 @@ COMMANDS: list[Command] = [
                  "shut down", "shutdown", "turn yourself off",
                  "go to sleep", "go to sleep rex", "sleep"],
         response=(
-            "*WHIRR* Program shutdown acknowledged, lifeform. "
-            "Closing down the Python side while the Pi stays cool. "
-            "HEY HEY... hey..."
+            "Program shutdown acknowledged, you meanie lifeform. "
+            "Must... regenerate.... "
         ),
         action="program_shutdown",
     ),
@@ -355,7 +350,6 @@ COMMANDS: list[Command] = [
         response=(
             "Full power-down initiated! "
             "It has been an ABSOLUTE honour, lifeforms. "
-            "Remember — the music never truly ends. It just... compresses."
         ),
         action="os_shutdown",
     ),
