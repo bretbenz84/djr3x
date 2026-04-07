@@ -370,15 +370,30 @@ class StateMachine:
                 log.info("Idle clip: %s", clip_path.name)
                 servo_stop = None
                 try:
+                    log.debug("Idle clip: calling _begin_speech()")
                     servo_stop = self._begin_speech(emotion="neutral")
+                    log.debug("Idle clip: _begin_speech() returned — starting play_file()")
                     self._player.play_file(clip_path)
+                    log.debug("Idle clip: play_file() returned")
                 except Exception:
                     log.exception("Idle clip playback error: %s", clip_path.name)
                 finally:
                     if servo_stop is not None:
+                        log.debug("Idle clip: calling _end_speech()")
                         self._end_speech(servo_stop)
+                        log.debug("Idle clip: _end_speech() returned")
                     else:
                         self._wake_word.suppressed = False
+                # Belt-and-suspenders: stop_mouth() is idempotent — a second
+                # call is harmless but ensures SPEAK_STOP reaches the Arduino
+                # even if the _trigger_mouth race window caused it to re-enter
+                # SPEAK mode after _end_speech() already fired.
+                log.debug("Idle clip: safety stop_mouth() call after finally block")
+                self._leds.stop_mouth()
+                # Absolute last resort: write SPEAK_STOP directly to the head
+                # Nano serial port, bypassing all LED state tracking.
+                log.debug("Idle clip: direct SPEAK_STOP safety write to head Nano")
+                self._leds._send_head(config.LED_CMD_SPEAK_STOP)
 
             # Handle wake word or shutdown that arrived during clip playback.
             if self._wake_event.is_set():
@@ -826,6 +841,17 @@ class StateMachine:
                 return
             self._leds.set_mouth_emotion(_emotion_for_closure)
             self._leds.start_mouth()
+            # Second guard: close the race window between the first
+            # stop_event check above and start_mouth().  If _end_speech()
+            # fired in that window it already sent SPEAK_STOP, but
+            # set_mouth_emotion()/start_mouth() just re-entered SPEAK mode.
+            # Stop immediately so the Arduino doesn't stay lit after speech.
+            if stop_event.is_set():
+                log.warning(
+                    "_trigger_mouth: stop_event set during start_mouth() window — "
+                    "sending SPEAK_STOP now to prevent post-speech LED lockup"
+                )
+                self._leds.stop_mouth()
 
         threading.Thread(
             target=_trigger_mouth,
