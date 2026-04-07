@@ -1,7 +1,7 @@
 # DJ-R3X Controller
 
-sAn interactive animatronic controller for a DJ-R3X (Rex) build, running on Raspberry Pi 4.
-Rex responds to voice commands, engages in AI-powered conversation, reacts to music,
+An interactive animatronic controller for a DJ-R3X (Rex) build, running on Raspberry Pi 4.  
+Rex responds to voice commands, engages in AI-powered conversation, reacts to music,  
 and uses computer vision to greet and interact with people.
 
 ## Hardware
@@ -61,6 +61,7 @@ and uses computer vision to greet and interact with people.
 - Mouth brightness driven by speech RMS — music never triggers mouth LEDs
 
 ### State Machine
+
 | State | Behavior |
 |-------|----------|
 | IDLE | Slow idle servo movements, music clips, wake word listening |
@@ -81,6 +82,8 @@ and uses computer vision to greet and interact with people.
 | Vision | OpenCV + GPT-4o |
 
 ## Project Structure
+
+```bash
 djr3x/
 ├── main.py                 # Entry point
 ├── config.py               # All constants and environment variables
@@ -108,11 +111,13 @@ djr3x/
 ├── vision/
 │   └── camera.py           # OpenCV webcam capture
 └── assets/
-├── audio/              # Cached responses, music, chime
-└── models/             # Wake word .onnx models
+    ├── audio/              # Cached responses, music, chime
+    └── models/             # Wake word .onnx models
+```
 
 ## Environment Variables (.env)
 
+```bash
 # OpenAI
 OPENAI_API_KEY=your_key_here
 
@@ -182,6 +187,6 @@ journalctl -u djr3x -f
 - [x] Startup and shutdown animations
 - [x] Idle music playback
 - [x] Mouth LED RMS sync (hardware/leds.py ready, Arduino sketch pending)
-- [ ] Arduino Nano sketches for mouth and chest LEDs
+- [x] Arduino Nano sketches for mouth and chest LEDs
 - [ ] udev rules for fixed USB device names
-- [ ] Physical hardware fully installed in Rex body
+- [x] Physical hardware fully installed in Rex body
