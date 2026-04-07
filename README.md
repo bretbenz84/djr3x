@@ -1,7 +1,7 @@
 # DJ-R3X Controller
 
-An interactive animatronic controller for a DJ-R3X (Rex) build, running on Raspberry Pi 4.
-Rex responds to voice commands, engages in AI-powered conversation, reacts to music,
+An interactive animatronic controller for a DJ-R3X (Rex) build, running on Raspberry Pi 4.  
+Rex responds to voice commands, engages in AI-powered conversation, reacts to music,  
 and uses computer vision to greet and interact with people.
 
 ## Hardware
@@ -61,6 +61,7 @@ and uses computer vision to greet and interact with people.
 - Mouth brightness driven by speech RMS — music never triggers mouth LEDs
 
 ### State Machine
+
 | State | Behavior |
 |-------|----------|
 | IDLE | Slow idle servo movements, music clips, wake word listening |
@@ -81,6 +82,8 @@ and uses computer vision to greet and interact with people.
 | Vision | OpenCV + GPT-4o |
 
 ## Project Structure
+
+```bash
 djr3x/
 ├── main.py                 # Entry point
 ├── config.py               # All constants and environment variables
@@ -108,11 +111,13 @@ djr3x/
 ├── vision/
 │   └── camera.py           # OpenCV webcam capture
 └── assets/
-├── audio/              # Cached responses, music, chime
-└── models/             # Wake word .onnx models
+    ├── audio/              # Cached responses, music, chime
+    └── models/             # Wake word .onnx models
+```
 
 ## Environment Variables (.env)
 
+```bash
 # OpenAI
 OPENAI_API_KEY=your_key_here
 
@@ -148,6 +153,43 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+### Run manually
+```bash
+cd ~/djr3x
+source venv/bin/activate
+python3 main.py
+```
+
+### Run as a service
+```bash
+sudo systemctl enable djr3x
+sudo systemctl start djr3x
+```
+
+### Monitor logs
+```bash
+journalctl -u djr3x -f
+```
+
+## Current Status
+
+- [x] Wake word detection (dual model)
+- [x] Whisper transcription with hallucination filtering
+- [x] Command parser (exact + fuzzy matching)
+- [x] ChatGPT streaming responses with Rex personality
+- [x] ElevenLabs voice synthesis
+- [x] Computer vision — intent based photo capture
+- [x] Personalized wake greeting (roasts people 40% of the time)
+- [x] Servo idle animations (neck, headlift, visor, arms)
+- [x] Speech reactive servo movement
+- [x] Emotion states (excited, sad, neutral)
+- [x] Startup and shutdown animations
+- [x] Idle music playback
+- [x] Mouth LED RMS sync (hardware/leds.py ready, Arduino sketch pending)
+- [x] Arduino Nano sketches for mouth and chest LEDs
+- [ ] udev rules for fixed USB device names
+- [x] Physical hardware fully installed in Rex body```
 
 ### Run manually
 ```bash
