@@ -333,9 +333,12 @@ class StateMachine:
         """Enter IDLE: set LEDs/servos to rest, then wait for a wake word."""
         log.info("→ IDLE")
 
+        # Send EYE first so the head Nano has eyeColor set before IDLE arrives.
+        # The IDLE handler activates the blink system only when eyeColor is
+        # non-black, so this order guarantees blinking starts on IDLE entry.
+        self._leds.set_eye_color(0, 80, 255)          # calm blue
         self._leds.set_chest_effect(config.LED_CMD_IDLE)
         self._leds.set_head_effect(config.LED_CMD_IDLE)
-        self._leds.set_eye_color(0, 80, 255)          # calm blue
 
         if self._servos is not None:
             self._servos.set_emotion("neutral")

@@ -32,8 +32,8 @@
  *                         Send as often as needed; non-blocking.
  *   SPEAK_STOP            Mouth off immediately; eyes unchanged; blinking
  *                         suspended until next EYE: or ACTIVE command.
- *   IDLE                  Mouth off; eyes remain at last EYE: colour; blink
- *                         continues if eyes are active.
+ *   IDLE                  Mouth off; eyes breathe slowly at last EYE: colour;
+ *                         blink system activates (or stays active) immediately.
  *   ACTIVE                Mouth off; eyes bright white; blinking resumes.
  *   EYE:{r},{g},{b}       Set both eyes to RGB colour; blinking resumes.
  *   OFF                   All 82 pixels off immediately; blinking suspended.
@@ -136,6 +136,13 @@ float        speakPhase  = 0.0f;              // wave front 0.0 – NUM_ZONES
 // Idle breathing state
 float        idlePhase   = 0.0f;              // 0.0 – TWO_PI
 
+// Eye brightness scale for idle breathing (0.0–1.0).
+// tickIdle() updates this continuously.  Non-idle modes reset it to 1.0 via
+// setEyes() so full colour is restored.  tickBlink() reads this to restore
+// the correct mid-breath level after a blink, and saves it at blink-start.
+float        eyeBrightness      = 1.0f;
+float        blinkSavedBrightness = 1.0f;     // captured at blink-start
+
 uint32_t     lastMs      = 0;
 
 // ---------------------------------------------------------------------------
@@ -207,8 +214,9 @@ inline uint8_t clampByte(int v) {
 void setEyes(uint8_t r, uint8_t g, uint8_t b) {
     bool wasActive = eyesActive;
 
-    eyeColor   = CRGB(r, g, b);
-    eyesActive = ((r | g | b) != 0);
+    eyeColor      = CRGB(r, g, b);
+    eyeBrightness = 1.0f;   // non-idle modes always use full brightness
+    eyesActive    = ((r | g | b) != 0);
 
     // Update leds[] only when eyes are not mid-blink.
     if (blinkState != BLINK_CLOSED) {
@@ -255,7 +263,10 @@ void tickBlink() {
 
         case BLINK_OPEN:
             // Wait for the interval then snap eyes off to start the blink.
+            // Capture the current breathing brightness so we restore to the
+            // same mid-breath level rather than jumping to full eyeColor.
             if (now - blinkTimer >= blinkInterval) {
+                blinkSavedBrightness = eyeBrightness;
                 leds[0]       = CRGB::Black;
                 leds[1]       = CRGB::Black;
                 FastLED.show();
@@ -266,10 +277,13 @@ void tickBlink() {
             break;
 
         case BLINK_CLOSED:
-            // Hold closed, then restore eye colour.
+            // Hold closed, then restore eye colour at the saved breathing level.
             if (now - blinkTimer >= blinkDuration) {
-                leds[0]    = eyeColor;
-                leds[1]    = eyeColor;
+                uint8_t sc = (uint8_t)(blinkSavedBrightness * 255.0f);
+                leds[0]    = CRGB(scale8(eyeColor.r, sc),
+                                  scale8(eyeColor.g, sc),
+                                  scale8(eyeColor.b, sc));
+                leds[1]    = leds[0];
                 FastLED.show();
                 blinkTimer = now;
 
@@ -288,7 +302,9 @@ void tickBlink() {
 
         case BLINK_DOUBLE_WAIT:
             // Eyes are open; wait the inter-blink pause, then close again.
+            // Re-capture brightness for the second blink.
             if (now - blinkTimer >= blinkDuration) {
+                blinkSavedBrightness = eyeBrightness;
                 leds[0]       = CRGB::Black;
                 leds[1]       = CRGB::Black;
                 FastLED.show();
@@ -336,10 +352,20 @@ void handleCommand(char *cmd) {
         return;
     }
 
-    // IDLE — mouth off; eyes remain at last EYE: colour; blink continues.
+    // IDLE — mouth off; eyes breathe slowly; blink system active.
     if (strcmp(cmd, "IDLE") == 0) {
-        animMode  = ANIM_IDLE;
-        idlePhase = 0.0f;
+        animMode      = ANIM_IDLE;
+        idlePhase     = 0.0f;
+        eyeBrightness = 1.0f;   // tickIdle will update from here on first tick
+        // Activate blink system if it was suspended (e.g. after SPEAK_STOP).
+        // Only start if eyeColor is non-black — no point blinking dark eyes.
+        if (!eyesActive && (eyeColor.r | eyeColor.g | eyeColor.b)) {
+            eyesActive    = true;
+            blinkTimer    = millis();
+            blinkInterval = 2000UL + (uint32_t)random(6001);
+            blinkState    = BLINK_OPEN;
+            isSecondBlink = false;
+        }
         mouthOff();
         FastLED.show();
         return;
@@ -440,17 +466,34 @@ void tickSpeak(float dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Idle animation
+// Idle animation — slow eye breathing
 // ---------------------------------------------------------------------------
 //
-// Eyes: solid — left untouched so the EYE:{r,g,b} command from the Pi holds
-//       and tickBlink() continues to own leds[0]/leds[1].
-// Mouth: completely off.  mouthOff() already cleared all pixels on IDLE entry;
-//        tickIdle() does not touch mouth pixels, so they stay dark.
+// Eyes pulse gently between 30 % and 100 % of eyeColor using a sine wave
+// (period ≈ 7.8 s at 0.8 rad/s).  eyeBrightness is updated every tick so
+// tickBlink() can save the mid-breath level at blink-start and restore to
+// it exactly after the blink ends, avoiding a jarring brightness jump.
+//
+// leds[] is NOT written during BLINK_CLOSED — tickBlink() owns the eye
+// pixels while the eyes are dark, and will restore them with the saved level.
+// Mouth pixels are left alone (already cleared by mouthOff() on IDLE entry).
 
 void tickIdle(float dt) {
-    (void)dt;
-    // Nothing to do — eyes and mouth managed by setEyes/tickBlink and mouthOff.
+    idlePhase += 0.8f * dt;
+    if (idlePhase >= TWO_PI) idlePhase -= TWO_PI;
+
+    // Brightness: 0.30 at trough → 1.00 at peak
+    eyeBrightness = 0.30f + 0.35f * (1.0f + sinf(idlePhase));
+
+    // Let tickBlink() own leds[] while eyes are closed.
+    if (blinkState == BLINK_CLOSED) return;
+
+    uint8_t sc = (uint8_t)(eyeBrightness * 255.0f);
+    leds[0] = CRGB(scale8(eyeColor.r, sc),
+                   scale8(eyeColor.g, sc),
+                   scale8(eyeColor.b, sc));
+    leds[1] = leds[0];
+    FastLED.show();
 }
 
 // ---------------------------------------------------------------------------
