@@ -182,6 +182,6 @@ journalctl -u djr3x -f
 - [x] Startup and shutdown animations
 - [x] Idle music playback
 - [x] Mouth LED RMS sync (hardware/leds.py ready, Arduino sketch pending)
-- [ ] Arduino Nano sketches for mouth and chest LEDs
+- [x] Arduino Nano sketches for mouth and chest LEDs
 - [ ] udev rules for fixed USB device names
-- [ ] Physical hardware fully installed in Rex body
+- [x] Physical hardware fully installed in Rex body
