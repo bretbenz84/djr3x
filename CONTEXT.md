@@ -67,3 +67,44 @@
 - Whisper API (whisper-1) for speech transcription — replaces Vosk
 - Same silence gating logic for recording, audio sent as WAV to OpenAI
 - WHISPER_LANGUAGE=en skips language detection for ~200ms speedup
+
+## Current Status
+
+### Completed
+- [x] Wake word detection (4 models: Dee-Jay_Rex, Hey_DJ_Rex, Hey_rex, Yo_robot)
+- [x] Whisper API transcription with hallucination filtering
+- [x] Command parser (exact + fuzzy + prefix matching, 0.82 threshold)
+- [x] ChatGPT gpt-4o-mini streaming responses with Rex roaster personality
+- [x] ElevenLabs voice synthesis with volume gain
+- [x] Computer vision - intent based photo capture with gpt-4o
+- [x] Personalized wake greeting - alternating hi-there and GPT-4o roast
+- [x] Face recognition database (dlib ResNet, SQLite)
+- [x] Known person greetings with visit counter and roast tiers
+- [x] Name enrollment with natural language extraction
+- [x] Rename and forget me voice commands
+- [x] Cancel/nevermind command returns to IDLE
+- [x] Servo idle animations (neck, headlift, visor, arms)
+- [x] Speech reactive servo movement with emotion states
+- [x] Startup animation with neck looking around
+- [x] Shutdown animation with slumped pose
+- [x] Startup audio: light_speed.mp3 + Roger Control.mp3 intro
+- [x] Shutdown audio: hyperdrive_down.mp3 concurrent with animation
+- [x] Idle music playback with mouth LED and servo sync
+- [x] Mouth LED emotion-based center-out pulse animation
+- [x] Eye LEDs with natural random blink timing
+- [x] systemd service with boot retry logic
+- [x] PipeWire audio on Debian Trixie
+- [x] ReSpeaker Lite mic with stereo mixdown
+
+### Hardware Connected
+- [x] Pololu Maestro Mini 18 (/dev/ttyACM0)
+- [x] Arduino Uno head LEDs (/dev/ttyACM2) - 82 NeoPixels
+- [ ] Arduino chest LEDs (not yet configured)
+- [ ] ELP camera (ordered, not yet arrived)
+
+### Pending
+- [ ] Face enrollment fix - frame capture timing
+- [ ] Head tracking with ELP camera
+- [ ] Conversation memory per person
+- [ ] Chest Nano Arduino sketch
+- [ ] udev rules for fixed USB device names

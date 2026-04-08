@@ -170,6 +170,11 @@ class StateMachine:
         # Cleared whenever we return to IDLE.
         self._last_known_person_id: int | None = None
 
+        # The camera frame captured at wake word time — reused for enrollment
+        # so the enrollment thread has a frame from when the face was definitely
+        # in front of the camera.  Cleared whenever we return to IDLE.
+        self._last_wake_frame: str | None = None
+
         # Greeting toggle — alternates between canned ("Hi There.mp3") and
         # personalized (GPT-4o + camera) on successive wake word activations.
         # False → canned first, then flips to True for personalized, and so on.
@@ -702,6 +707,7 @@ class StateMachine:
             self._shutdown_event.set()
         if new_state == State.IDLE:
             self._last_known_person_id = None
+            self._last_wake_frame = None
             # Global mouth safety: guarantee mouth is off whenever Rex returns
             # to IDLE, regardless of what the LED state machine thinks.
             self._leds.stop_mouth()
@@ -740,6 +746,8 @@ class StateMachine:
         frame: str | None = None
         if self._camera.is_available():
             frame = self._camera.capture_frame()
+            if frame:
+                self._last_wake_frame = frame   # save for enrollment fallback
 
         # ------------------------------------------------------------------
         # Try face recognition
@@ -1028,18 +1036,65 @@ class StateMachine:
 
         self._leds.set_head_effect(config.LED_CMD_ACTIVE)
 
+        # Capture a fresh frame NOW — the person just said their name and is
+        # almost certainly still facing the camera.  This is our best shot at
+        # a clean face encoding.  Captured before the thread starts so it is
+        # available immediately (no camera access inside the thread).
+        enroll_frame: str | None = None
+        if self._camera.is_available():
+            enroll_frame = self._camera.capture_frame()
+            if enroll_frame:
+                log.info("Enrollment: captured fresh frame (%d b64 bytes)", len(enroll_frame))
+            else:
+                log.warning("Enrollment: camera returned no frame at name-capture time")
+
+        # Snapshot the wake frame so the closure doesn't hold a mutable ref.
+        wake_frame: str | None = self._last_wake_frame
+
         # Background enrollment: encoding takes 2-4 s on Pi 4 — run it
         # concurrently with the welcome TTS so the delay is completely hidden.
         def _enroll() -> None:
-            enc = self._face_recognizer.encode_face(frame)
+            # Try frames in priority order:
+            #   1. Fresh frame captured right after name was spoken (best)
+            #   2. Wake-word frame stored when Rex first woke up (fallback)
+            #   3. One final live capture from the camera (last resort)
+            candidates = [
+                ("fresh-frame", enroll_frame),
+                ("wake-frame",  wake_frame),
+            ]
+            enc = None
+            for label, f in candidates:
+                if not f:
+                    log.debug("Enrollment: skipping %s (no frame)", label)
+                    continue
+                log.info("Enrollment: attempting encode on %s (%d b64 bytes)", label, len(f))
+                enc = self._face_recognizer.encode_face(f)
+                if enc is not None:
+                    log.info("Enrollment: face detected in %s — proceeding with storage", label)
+                    break
+                log.warning("Enrollment: no face detected in %s", label)
+
+            if enc is None and self._camera.is_available():
+                log.info("Enrollment: both cached frames failed — capturing one final live frame")
+                final_f = self._camera.capture_frame()
+                if final_f:
+                    log.info("Enrollment: final live frame captured (%d b64 bytes)", len(final_f))
+                    enc = self._face_recognizer.encode_face(final_f)
+                    if enc is None:
+                        log.warning("Enrollment: no face detected in final live frame")
+                else:
+                    log.warning("Enrollment: camera returned no frame on final attempt")
+
             if enc is not None:
                 try:
                     self._face_db.add_person(name, enc)
-                    log.info("Enrollment complete: %r stored", name)
+                    log.info("Enrollment complete: %r stored in FaceDB", name)
                 except Exception:
-                    log.exception("Wake greeting: FaceDB enrollment error for %r", name)
+                    log.exception("Enrollment: FaceDB error storing %r", name)
             else:
-                log.warning("Wake greeting: no face encoding produced for %r — not stored", name)
+                log.warning(
+                    "Enrollment: all attempts failed to detect a face — %r NOT stored", name
+                )
 
         threading.Thread(target=_enroll, daemon=True, name="djr3x-enroll").start()
 

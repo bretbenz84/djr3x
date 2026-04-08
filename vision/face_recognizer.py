@@ -137,10 +137,17 @@ class FaceRecognizer:
         # upsample=0 means no upsampling — fastest setting for Pi 4.
         # Use upsample=1 only if small/distant faces are being missed and
         # latency budget allows (~4× slower on Pi 4).
+        log.info(
+            "FaceRecognizer: encode_face — frame shape %s, running HOG detector",
+            rgb.shape,
+        )
         rects = self._detector(rgb, 0)
         rect = self._largest_rect(rects)
         if rect is None:
-            log.debug("FaceRecognizer: no face detected in frame")
+            log.info(
+                "FaceRecognizer: no face detected in frame (shape=%s, %d rect(s) from detector)",
+                rgb.shape, len(rects),
+            )
             return None
 
         shape = self._shape_predictor(rgb, rect)
