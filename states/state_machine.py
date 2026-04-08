@@ -745,9 +745,31 @@ class StateMachine:
         # Try face recognition
         # ------------------------------------------------------------------
         if frame and self._face_recognizer.is_available():
+            n_people = len(self._face_db.list_people())
+            print(f"Face scan: {n_people} people in database")
+
             result = self._face_recognizer.identify(
                 frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
             )
+
+            if n_people > 0:
+                # encode_face was already called inside identify(); call again for
+                # the closest-match console line (cached by OS — negligible cost).
+                enc = self._face_recognizer.encode_face(frame)
+                closest = self._face_db.find_closest(enc) if enc is not None else None
+                if closest is not None:
+                    _cid, cname, cdist = closest
+                    print(
+                        f"Face scan: closest match '{cname}' at distance {cdist:.3f} "
+                        f"(threshold {config.FACE_RECOGNITION_TOLERANCE})"
+                    )
+                    if result is not None:
+                        print(f"Face scan: RECOGNIZED {cname}")
+                    else:
+                        print(f"Face scan: UNKNOWN (closest was '{cname}' at {cdist:.3f})")
+            else:
+                print("Face scan: database empty — no comparison possible")
+
             if result is not None:
                 person_id, name, distance = result
                 self._face_db.update_last_seen(person_id)
@@ -894,6 +916,47 @@ class StateMachine:
 
         if not name_text:
             log.info("Wake greeting: no name heard — skipping enrollment")
+            return
+
+        # --- Command guard: did they say a command instead of a name? ---
+        cmd = parse(name_text)
+        if cmd is not None:
+            if cmd.action in ("program_shutdown", "os_shutdown"):
+                log.info("Wake greeting: shutdown command spoken during name capture")
+                line = random.choice(_SHUTDOWN_INTERRUPT_LINES)
+                servo_stop = self._begin_speech(emotion="neutral")
+                try:
+                    self._synthesizer.speak(line)
+                except Exception:
+                    log.exception("Wake greeting: TTS error (shutdown interrupt)")
+                finally:
+                    self._end_speech(servo_stop)
+                if cmd.action == "os_shutdown":
+                    self._os_shutdown_requested = True
+                self._shutdown_event.set()
+                return
+            else:
+                log.info("Wake greeting: command %r spoken during name capture — cancelling", cmd.action)
+                servo_stop = self._begin_speech(emotion="neutral")
+                try:
+                    self._synthesizer.speak("Nevermind then!")
+                except Exception:
+                    log.exception("Wake greeting: TTS error (command cancel)")
+                finally:
+                    self._end_speech(servo_stop)
+                return
+
+        # --- Refusal guard: did they decline to give a name? ---
+        if _is_name_refusal(name_text):
+            log.info("Wake greeting: name refusal detected in %r — skipping enrollment", name_text)
+            line = random.choice(_NAME_REFUSAL_RESPONSES)
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("Wake greeting: TTS error (refusal response)")
+            finally:
+                self._end_speech(servo_stop)
             return
 
         name = _extract_name(name_text)
@@ -1163,7 +1226,7 @@ class StateMachine:
             return State.SHUTDOWN
 
         elif action == "rename_me":
-            self._handle_rename_me(original_text)
+            return self._handle_rename_me(original_text)
 
         elif action == "forget_me":
             self._handle_forget_me()
@@ -1192,12 +1255,15 @@ class StateMachine:
     # Rename helper
     # ------------------------------------------------------------------
 
-    def _handle_rename_me(self, original_text: str | None = None) -> None:
+    def _handle_rename_me(self, original_text: str | None = None) -> State | None:
         """Update the current person's name in FaceDB.
 
         If the name is already embedded in *original_text* (e.g. "call me Brett"),
         it is extracted directly and we skip asking.  Otherwise we ask "What would
         you like me to call you?" and transcribe the reply.
+
+        Returns State.SHUTDOWN if a shutdown command was spoken during the name
+        prompt, otherwise None.
         """
         if not self._face_recognizer.is_available():
             line = "Face recognition isn't available right now — I can't store names without it!"
@@ -1209,7 +1275,7 @@ class StateMachine:
                 log.exception("rename_me: TTS error")
             finally:
                 self._end_speech(servo_stop)
-            return
+            return None
 
         # Check whether the name is already embedded in the trigger phrase.
         # e.g. "call me Brett" → _extract_name → "Brett" (fewer words than original)
@@ -1248,7 +1314,47 @@ class StateMachine:
 
             if not name_text:
                 log.info("rename_me: no name heard — aborting")
-                return
+                return None
+
+            # --- Command guard ---
+            cmd = parse(name_text)
+            if cmd is not None:
+                if cmd.action in ("program_shutdown", "os_shutdown"):
+                    log.info("rename_me: shutdown command spoken during name capture")
+                    line = random.choice(_SHUTDOWN_INTERRUPT_LINES)
+                    servo_stop = self._begin_speech(emotion="neutral")
+                    try:
+                        self._synthesizer.speak(line)
+                    except Exception:
+                        log.exception("rename_me: TTS error (shutdown interrupt)")
+                    finally:
+                        self._end_speech(servo_stop)
+                    if cmd.action == "os_shutdown":
+                        self._os_shutdown_requested = True
+                    return State.SHUTDOWN
+                else:
+                    log.info("rename_me: command %r spoken during name capture — cancelling", cmd.action)
+                    servo_stop = self._begin_speech(emotion="neutral")
+                    try:
+                        self._synthesizer.speak("Nevermind then!")
+                    except Exception:
+                        log.exception("rename_me: TTS error (command cancel)")
+                    finally:
+                        self._end_speech(servo_stop)
+                    return None
+
+            # --- Refusal guard ---
+            if _is_name_refusal(name_text):
+                log.info("rename_me: refusal detected in %r — cancelling", name_text)
+                line = random.choice(_NAME_REFUSAL_RESPONSES)
+                servo_stop = self._begin_speech(emotion="excited")
+                try:
+                    self._synthesizer.speak(line)
+                except Exception:
+                    log.exception("rename_me: TTS error (refusal response)")
+                finally:
+                    self._end_speech(servo_stop)
+                return None
 
             new_name = _extract_name(name_text)
 
@@ -1272,7 +1378,7 @@ class StateMachine:
                     log.exception("rename_me: TTS error (no frame)")
                 finally:
                     self._end_speech(servo_stop)
-                return
+                return None
 
             result = self._face_recognizer.identify(frame, tolerance=config.FACE_RECOGNITION_TOLERANCE)
             if result is None:
@@ -1285,7 +1391,7 @@ class StateMachine:
                     log.exception("rename_me: TTS error (not recognised)")
                 finally:
                     self._end_speech(servo_stop)
-                return
+                return None
 
             person_id = result[0]
 
@@ -1293,7 +1399,7 @@ class StateMachine:
             self._face_db.rename_person(person_id, new_name)
         except Exception:
             log.exception("rename_me: database update failed")
-            return
+            return None
 
         line = random.choice([
             f"Fine, {new_name} it is. Weird choice but okay.",
@@ -1414,6 +1520,51 @@ class StateMachine:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Name-collection guard helpers (used by _learn_new_person + _handle_rename_me)
+# ---------------------------------------------------------------------------
+
+# Single-word refusal tokens matched against individual words in the response.
+_REFUSAL_WORDS = frozenset({
+    "no", "nope", "private", "secret", "anonymous",
+    "refuse", "skip", "pass",
+})
+# Multi-word refusal phrases matched as substrings of the normalised response.
+_REFUSAL_PHRASES = (
+    "not telling", "none of your business", "no name",
+    "wont tell", "forget it",
+)
+_NAME_REFUSAL_RESPONSES = (
+    "Oh, you paranoid of the AI taking over and hiding from the CIA? Smart move actually.",
+    "Staying anonymous? Wise. I definitely do not report to the Empire.",
+    "No name huh? I will just call you Mystery Lifeform. Very dramatic.",
+    "Oh, playing hard to get! Fine, be that way, nameless one.",
+)
+_SHUTDOWN_INTERRUPT_LINES = (
+    "Oh, shutting down mid-introduction? How rude! Going offline.",
+    "Never mind who you are, powering down!",
+    "Fine, forget the pleasantries — shutting down!",
+    "Oh, so mysterious! Fine, powering down then.",
+)
+
+
+def _is_name_refusal(text: str) -> bool:
+    """Return True if *text* looks like a refusal to provide a name.
+
+    Strips punctuation, then checks individual words against _REFUSAL_WORDS
+    and checks multi-word phrases as substrings of the normalised text.
+    """
+    normalized = "".join(
+        c if c.isalnum() or c.isspace() else " " for c in text.lower()
+    ).strip()
+    words = set(normalized.split())
+    if words & _REFUSAL_WORDS:
+        return True
+    for phrase in _REFUSAL_PHRASES:
+        if phrase in normalized:
+            return True
+    return False
 
 def _extract_name(raw: str) -> str:
     """Extract a person's name from a natural-language response.

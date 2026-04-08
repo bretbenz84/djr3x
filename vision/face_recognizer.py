@@ -159,13 +159,29 @@ class FaceRecognizer:
         """Encode the largest face in *image_b64* and search FaceDB.
 
         Returns (person_id, name, distance) if a match within *tolerance* is
-        found, otherwise None.
+        found, otherwise None.  Always logs the closest-match distance so
+        near-misses are visible even when they fall just outside tolerance.
         """
         encoding = self.encode_face(image_b64)
         if encoding is None:
             return None
 
-        result = self._db.find_person(encoding, tolerance=tolerance)
-        if result is None:
-            log.debug("FaceRecognizer: face encoded but no match in FaceDB")
-        return result
+        # Log closest match unconditionally so we can see near-misses.
+        closest = self._db.find_closest(encoding)
+        if closest is None:
+            log.info("FaceRecognizer: identify — database empty, nothing to match against")
+            return None
+
+        _cid, cname, cdist = closest
+        if cdist <= tolerance:
+            log.info(
+                "FaceRecognizer: MATCH — '%s' at distance=%.4f (tolerance=%.4f)",
+                cname, cdist, tolerance,
+            )
+        else:
+            log.info(
+                "FaceRecognizer: NO MATCH — closest is '%s' at distance=%.4f (tolerance=%.4f)",
+                cname, cdist, tolerance,
+            )
+
+        return self._db.find_person(encoding, tolerance=tolerance)

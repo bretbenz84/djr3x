@@ -16,6 +16,7 @@ Typical usage:
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -52,11 +53,14 @@ class FaceDB:
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self._path = Path(db_path) if db_path else Path(config.FACE_DB_PATH)
+        abs_path = self._path.resolve()
+        existed = os.path.exists(abs_path)
+        log.info("FaceDB: path = %s (exists=%s)", abs_path, existed)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
-        log.info("FaceDB: opened %s", self._path)
+        self._log_startup_stats()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -66,6 +70,25 @@ class FaceDB:
         with self._conn:
             self._conn.execute(_CREATE_PEOPLE)
             self._conn.execute(_CREATE_ENCODINGS)
+
+    def _log_startup_stats(self) -> None:
+        """Log people/encoding counts so we can confirm the DB persisted correctly."""
+        try:
+            n_people = self._conn.execute("SELECT COUNT(*) FROM people").fetchone()[0]
+            n_enc    = self._conn.execute("SELECT COUNT(*) FROM face_encodings").fetchone()[0]
+            if n_people:
+                rows = self._conn.execute(
+                    "SELECT id, name, visit_count FROM people ORDER BY id"
+                ).fetchall()
+                names = ", ".join(f"'{r['name']}' (id={r['id']}, visits={r['visit_count']})" for r in rows)
+                log.info(
+                    "FaceDB: loaded — %d person(s), %d encoding(s): %s",
+                    n_people, n_enc, names,
+                )
+            else:
+                log.info("FaceDB: loaded — empty (0 people, 0 encodings)")
+        except Exception:
+            log.exception("FaceDB: startup stats query failed")
 
     @staticmethod
     def _enc_to_blob(encoding: np.ndarray) -> bytes:
@@ -88,27 +111,32 @@ class FaceDB:
 
     def add_person(self, name: str, encoding: np.ndarray) -> int:
         """Insert a new person and their first encoding. Returns the new person_id."""
+        enc_norm = float(np.linalg.norm(encoding))
         with self._conn:
             cur = self._conn.execute(
                 "INSERT INTO people (name) VALUES (?)", (name,)
             )
             person_id: int = cur.lastrowid  # type: ignore[assignment]
+            blob = self._enc_to_blob(encoding)
             self._conn.execute(
                 "INSERT INTO face_encodings (person_id, encoding) VALUES (?, ?)",
-                (person_id, self._enc_to_blob(encoding)),
+                (person_id, blob),
             )
-        log.info("FaceDB: added person '%s' (id=%d)", name, person_id)
+        log.info(
+            "FaceDB: added person '%s' (id=%d) — encoding dim=%d norm=%.4f blob=%d bytes",
+            name, person_id, len(encoding), enc_norm, len(blob),
+        )
         return person_id
 
-    def find_person(
+    def find_closest(
         self,
         encoding: np.ndarray,
-        tolerance: float = 0.6,
     ) -> Optional[tuple[int, str, float]]:
-        """Compare *encoding* against every stored encoding using Euclidean distance.
+        """Return (person_id, name, distance) for the closest stored encoding,
+        regardless of tolerance.  Returns None only if the database is empty.
 
-        Returns (person_id, name, distance) for the closest match within
-        *tolerance*, or None if no match is close enough.
+        Use this when you want the distance for diagnostic purposes even if the
+        match would be rejected by find_person().
         """
         candidates = self._all_encodings()
         if not candidates:
@@ -124,25 +152,39 @@ class FaceDB:
                 best_distance = dist
                 best_person_id = person_id
 
-        if best_person_id is None or best_distance > tolerance:
-            log.debug(
-                "FaceDB: no match (best distance=%.4f, tolerance=%.4f)",
-                best_distance,
-                tolerance,
-            )
-            return None
-
         row = self._conn.execute(
             "SELECT name FROM people WHERE id = ?", (best_person_id,)
         ).fetchone()
-        name: str = row["name"]
+        return best_person_id, row["name"], best_distance
+
+    def find_person(
+        self,
+        encoding: np.ndarray,
+        tolerance: float = 0.6,
+    ) -> Optional[tuple[int, str, float]]:
+        """Compare *encoding* against every stored encoding using Euclidean distance.
+
+        Returns (person_id, name, distance) for the closest match within
+        *tolerance*, or None if no match is close enough.
+        """
+        closest = self.find_closest(encoding)
+        if closest is None:
+            log.debug("FaceDB: find_person — database is empty")
+            return None
+
+        person_id, name, distance = closest
+        if distance > tolerance:
+            log.info(
+                "FaceDB: no match — closest is '%s' (id=%d) at distance=%.4f (tolerance=%.4f)",
+                name, person_id, distance, tolerance,
+            )
+            return None
+
         log.info(
-            "FaceDB: recognised '%s' (id=%d, distance=%.4f)",
-            name,
-            best_person_id,
-            best_distance,
+            "FaceDB: recognised '%s' (id=%d, distance=%.4f, tolerance=%.4f)",
+            name, person_id, distance, tolerance,
         )
-        return best_person_id, name, best_distance
+        return person_id, name, distance
 
     def update_last_seen(self, person_id: int) -> None:
         """Stamp last_seen to now and increment visit_count."""
