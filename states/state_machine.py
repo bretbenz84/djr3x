@@ -971,12 +971,21 @@ class StateMachine:
         log.info("Wake greeting: enrolling new person as %r", name)
 
         self._leds.set_head_effect(config.LED_CMD_ACTIVE)
-        encoding = self._face_recognizer.encode_face(frame)
-        if encoding is not None:
-            try:
-                self._face_db.add_person(name, encoding)
-            except Exception:
-                log.exception("Wake greeting: FaceDB enrollment error for %r", name)
+
+        # Background enrollment: encoding takes 2-4 s on Pi 4 — run it
+        # concurrently with the welcome TTS so the delay is completely hidden.
+        def _enroll() -> None:
+            enc = self._face_recognizer.encode_face(frame)
+            if enc is not None:
+                try:
+                    self._face_db.add_person(name, enc)
+                    log.info("Enrollment complete: %r stored", name)
+                except Exception:
+                    log.exception("Wake greeting: FaceDB enrollment error for %r", name)
+            else:
+                log.warning("Wake greeting: no face encoding produced for %r — not stored", name)
+
+        threading.Thread(target=_enroll, daemon=True, name="djr3x-enroll").start()
 
         welcome = random.choice([
             f"*BWOOP* {name}! Great — now I have to remember you. I'll add you to my files.",
