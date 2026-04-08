@@ -896,9 +896,7 @@ class StateMachine:
             log.info("Wake greeting: no name heard — skipping enrollment")
             return
 
-        # Use the first word (or first two words) as the name; strip punctuation
-        # that Whisper sometimes appends (e.g. "Bret." or "Bret Benziger!").
-        name = " ".join(name_text.strip().rstrip(".,!?").strip().split()[:2]).title()
+        name = _extract_name(name_text)
         log.info("Wake greeting: enrolling new person as %r", name)
 
         self._leds.set_head_effect(config.LED_CMD_ACTIVE)
@@ -1167,6 +1165,9 @@ class StateMachine:
         elif action == "rename_me":
             self._handle_rename_me()
 
+        elif action == "forget_me":
+            self._handle_forget_me()
+
         elif action == "play_music":
             self._play_music_track()
 
@@ -1244,7 +1245,7 @@ class StateMachine:
             log.info("rename_me: no name heard — aborting")
             return
 
-        new_name = " ".join(name_text.strip().rstrip(".,!?").strip().split()[:2]).title()
+        new_name = _extract_name(name_text)
         log.info("rename_me: requested name %r", new_name)
 
         # If we already recognised this person during their greeting, use that
@@ -1303,6 +1304,85 @@ class StateMachine:
             self._end_speech(servo_stop)
 
     # ------------------------------------------------------------------
+    # Forget-me helper
+    # ------------------------------------------------------------------
+
+    def _handle_forget_me(self) -> None:
+        """Ask for confirmation then delete the current person from FaceDB.
+
+        Only acts when a known person was recognised this session
+        (self._last_known_person_id is not None).
+        """
+        if self._last_known_person_id is None:
+            line = "I don't actually know who you are — you're safe. For now."
+            log.info("forget_me: no known person this session — aborting")
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("forget_me: TTS error (unknown person)")
+            finally:
+                self._end_speech(servo_stop)
+            return
+
+        person_id = self._last_known_person_id
+
+        # Confirmation prompt.
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(
+                "Are you sure you want me to forget you? "
+                "I mean, you are pretty forgettable. Say yes to confirm."
+            )
+        except Exception:
+            log.exception("forget_me: TTS error (confirmation prompt)")
+        finally:
+            self._end_speech(servo_stop)
+
+        # Listen for yes / no.
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._wake_word.pause()
+        try:
+            response = self._transcriber.transcribe(
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT
+            )
+        except Exception:
+            log.exception("forget_me: transcription error")
+            response = None
+        finally:
+            self._wake_word.resume()
+
+        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+
+        if not response:
+            log.info("forget_me: no response heard — cancelling")
+            return
+
+        if any(w in response.lower() for w in ("yes", "yeah", "sure", "confirm")):
+            try:
+                self._face_db.delete_person(person_id)
+            except Exception:
+                log.exception("forget_me: FaceDB delete failed")
+                return
+            self._last_known_person_id = None
+            log.info("forget_me: deleted person id=%d", person_id)
+            line = (
+                "Done. You are erased. Like you were never here. "
+                "Which honestly might be an improvement."
+            )
+        else:
+            log.info("forget_me: user declined — no change")
+            line = "Smart choice. You need me to remember you. Admit it."
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("forget_me: TTS error (result)")
+        finally:
+            self._end_speech(servo_stop)
+
+    # ------------------------------------------------------------------
     # Music helpers
     # ------------------------------------------------------------------
 
@@ -1327,6 +1407,42 @@ class StateMachine:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+def _extract_name(raw: str) -> str:
+    """Extract a person's name from a natural-language response.
+
+    Strips common 'my name is…' / 'call me…' prefixes so that a reply like
+    'my name is Bret Benziger' yields 'Bret Benziger' rather than the full
+    phrase.  Prefixes are checked longest-first to avoid a shorter prefix
+    stealing a match.  Falls back to the first two words of the cleaned text
+    if no prefix matched.
+    """
+    # Longest prefixes first to prevent a short one masking a long one.
+    _PREFIXES = (
+        "you can call me",
+        "they call me",
+        "people call me",
+        "the name is",
+        "my name is",
+        "my name's",
+        "just call me",
+        "call me",
+        "name is",
+        "i am",
+        "i'm",
+        "im",
+        "it's",
+        "its",
+        "just",
+    )
+    text = raw.strip().rstrip(".,!?").strip().lower()
+    for prefix in _PREFIXES:
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip().rstrip(".,!?").strip()
+            break
+    # At most two words: first name + optional last name.
+    return " ".join(text.split()[:2]).title()
+
 
 def _try_init(cls, label: str):
     """Construct cls(); return None with a warning on any exception.

@@ -290,6 +290,13 @@ COMMANDS: list[Command] = [
         action="rename_me",
     ),
 
+    Command(
+        phrases=["forget me", "forget who i am", "permanently forget me",
+                 "delete me", "remove me from your memory", "forget my face"],
+        response="",   # not spoken — action=forget_me is handled by the state machine
+        action="forget_me",
+    ),
+
     # -----------------------------------------------------------------------
     # Vision — these are forwarded to the LLM with a live camera frame;
     # the response field is never spoken (action="vision" bypasses TTS).
