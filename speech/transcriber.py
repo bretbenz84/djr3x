@@ -379,8 +379,14 @@ def _filter_hallucination(text: str, allow_short: bool = False) -> str:
         return ""
 
     words = text.split()
-    if not allow_short and len(words) < config.WHISPER_MIN_WORDS:
-        log.info("Whisper result too short (%d word(s)), filtered: %r", len(words), text)
-        return ""
+    if len(words) < config.WHISPER_MIN_WORDS:
+        # Single-word whitelisted commands are always valid regardless of
+        # allow_short — covers 'shutdown', 'yes', 'hi', etc.
+        if len(words) == 1 and words[0].lower() in config.SINGLE_WORD_COMMANDS:
+            log.debug("Whisper single-word command whitelisted: %r", text)
+            return text
+        if not allow_short:
+            log.info("Whisper result too short (%d word(s)), filtered: %r", len(words), text)
+            return ""
 
     return text

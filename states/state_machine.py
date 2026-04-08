@@ -906,7 +906,8 @@ class StateMachine:
         self._wake_word.pause()
         try:
             name_text = self._transcriber.transcribe(
-                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
+                allow_short=True,   # single-word names like 'Brett' must not be filtered
             )
         except Exception:
             log.exception("Wake greeting: transcription error during name capture")
