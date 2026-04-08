@@ -349,7 +349,9 @@ WAKE_GOODBYE_TIMEOUT     = 4.0   # seconds to wait after "are you there?" before
 
 CAMERA_DEVICE_INDEX  = int(_optional("CAMERA_DEVICE_INDEX", "0"))
 VISION_JPEG_QUALITY  = int(_optional("VISION_JPEG_QUALITY", "85"))
-FACE_DB_PATH         = Path(_optional("FACE_DB_PATH", str(ASSETS_DIR / "face_db.sqlite")))
+FACE_DB_PATH              = Path(_optional("FACE_DB_PATH", str(ASSETS_DIR / "face_db.sqlite")))
+DLIB_SHAPE_PREDICTOR_PATH = Path(_optional("DLIB_SHAPE_PREDICTOR_PATH", str(MODELS_DIR / "shape_predictor_68_face_landmarks.dat")))
+DLIB_FACE_MODEL_PATH      = Path(_optional("DLIB_FACE_MODEL_PATH",      str(MODELS_DIR / "dlib_face_recognition_resnet_model_v1.dat")))
 
 # Set to True only on the production Pi so the "shutdown" voice command and
 # the physical shutdown button actually halt the OS.  Leave False during
