@@ -60,6 +60,8 @@ from speech.synthesizer import Synthesizer
 from speech.transcriber import Transcriber
 from speech.wake_word import WakeWordDetector
 from vision.camera import Camera
+from vision.face_db import FaceDB
+from vision.face_recognizer import FaceRecognizer
 
 log = logging.getLogger(__name__)
 
@@ -144,6 +146,8 @@ class StateMachine:
 
         # Vision
         self._camera = Camera()
+        self._face_db = FaceDB()
+        self._face_recognizer = FaceRecognizer(self._face_db)
 
         # State control
         self._state: State = State.IDLE
@@ -195,6 +199,8 @@ class StateMachine:
 
         self._camera.warmup()
         self._camera.start()
+
+        self._face_recognizer.warmup()
 
         log.info("StateMachine: all subsystems ready.")
 
@@ -315,14 +321,15 @@ class StateMachine:
             for p in (config.WAKE_WORD_MODEL_1, config.WAKE_WORD_MODEL_2)
         )
         return {
-            "servos":       self._servos is not None,
-            "chest_leds":   self._leds._chest is not None,
-            "head_leds":    self._leds._head is not None,
-            "transcriber":  self._transcriber.is_available(),
-            "wake_word":    self._wake_word.is_available(),
-            "wake_models":  wake_models,       # int: 0, 1, or 2
-            "music_tracks": len(self._music_tracks),
-            "camera":       self._camera.is_available(),
+            "servos":            self._servos is not None,
+            "chest_leds":        self._leds._chest is not None,
+            "head_leds":         self._leds._head is not None,
+            "transcriber":       self._transcriber.is_available(),
+            "wake_word":         self._wake_word.is_available(),
+            "wake_models":       wake_models,       # int: 0, 1, or 2
+            "music_tracks":      len(self._music_tracks),
+            "camera":            self._camera.is_available(),
+            "face_recognition":  self._face_recognizer.is_available(),
         }
 
     # ------------------------------------------------------------------
@@ -694,18 +701,82 @@ class StateMachine:
     def _play_wake_greeting(self) -> None:
         """Greet the user on wake word.
 
-        Alternates strictly between two greeting modes on successive activations:
-          toggle=False → canned greeting ("Hi There.mp3")
-          toggle=True  → personalized greeting (camera capture + GPT-4o)
+        Priority:
+          1. Face recognition available + camera available:
+             - KNOWN person  → personalised known-person greeting (no toggle consumed)
+             - UNKNOWN person → existing alternating canned/personalized path, then
+                               offer to learn their name
+          2. No face recognition → existing alternating canned/personalized path as before
 
-        The toggle flips after every activation regardless of which path ran.
-        If the personalized path fails for any reason, falls back to the canned
-        greeting without consuming the toggle (next activation retries canned).
-
-        Always completes (audio finishes) before returning so the caller can
-        open the mic immediately afterwards.
+        Always completes (audio finishes and any name-learning exchange is done)
+        before returning so the caller can open the mic immediately afterwards.
         """
-        do_personalized = self._greeting_toggle and self._camera.is_available()
+        frame: str | None = None
+        if self._camera.is_available():
+            frame = self._camera.capture_frame()
+
+        # ------------------------------------------------------------------
+        # Try face recognition
+        # ------------------------------------------------------------------
+        if frame and self._face_recognizer.is_available():
+            result = self._face_recognizer.identify(
+                frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+            )
+            if result is not None:
+                person_id, name, distance = result
+                self._face_db.update_last_seen(person_id)
+                person = self._face_db.get_person(person_id)
+                visit_count = person["visit_count"] if person else 1
+                self._play_known_person_greeting(name, visit_count)
+                return
+
+            # Unknown face — fall through to the existing alternating path,
+            # then offer to learn the person's name.
+            log.info("Wake greeting: face detected but unknown — running standard greeting")
+            self._play_alternating_greeting(frame)
+            self._learn_new_person(frame)
+            return
+
+        # ------------------------------------------------------------------
+        # No face recognition (or no camera frame) — existing alternating path
+        # ------------------------------------------------------------------
+        self._play_alternating_greeting(frame)
+
+    def _play_known_person_greeting(self, name: str, visit_count: int) -> None:
+        """Speak a personalised greeting for a recognised returning visitor."""
+        if visit_count <= 1:
+            # First return visit after being enrolled
+            line = random.choice([
+                f"Hey {name}, great to see you again!",
+                f"*BWOOP* {name}! You came back — I knew you would!",
+                f"Well well well, {name} returns! The cantina is better already.",
+                f"Oh! {name}! Glad you made it back to Oga's!",
+            ])
+        elif visit_count < 5:
+            line = random.choice([
+                f"Hey {name}! Back again — you're becoming a regular!",
+                f"*WHIRR* {name}! Good to see a familiar face!",
+                f"Look who it is! {name}, welcome back to the cantina!",
+            ])
+        else:
+            line = random.choice([
+                f"*BWOOP* {name}! My favorite regular is here!",
+                f"{name}! Visit number {visit_count} — you practically live here!",
+                f"HEY! {name}! You're basically part of the crew at this point!",
+            ])
+
+        log.info("Wake greeting: known person '%s' (visit #%d) → %r", name, visit_count, line)
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("Wake greeting: known-person TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+    def _play_alternating_greeting(self, frame: str | None) -> None:
+        """Alternates between canned and personalized greetings, unchanged from before."""
+        do_personalized = self._greeting_toggle and self._camera.is_available() and frame
         self._greeting_toggle = not self._greeting_toggle
 
         if do_personalized:
@@ -714,7 +785,6 @@ class StateMachine:
             greeting_result: list[str | None] = [None]
 
             def _generate_personalized() -> None:
-                frame = self._camera.capture_frame()
                 if frame:
                     greeting_result[0] = self._greeter.generate(frame)
 
@@ -727,10 +797,8 @@ class StateMachine:
 
             servo_stop = self._begin_speech(emotion="excited")
             try:
-                # Play holding clip while camera capture + GPT-4o calls run in background.
                 if _HOLDING_CLIP.exists():
                     self._player.play_file(_HOLDING_CLIP)
-                # Clip done (or missing) — wait silently if greeting isn't ready yet.
                 greeter_thread.join(timeout=15.0)
                 if greeting_result[0]:
                     try:
@@ -747,7 +815,7 @@ class StateMachine:
                 return
             log.info("Wake greeting: personalized path failed — falling back to canned")
 
-        # Simple canned greeting — audio file or short TTS line.
+        # Canned greeting
         _CANNED_AUDIO = config.ASSETS_DIR / "audio" / "Hi There.mp3"
         _CANNED_TTS = [
             "Hey hey hey!",
@@ -765,6 +833,64 @@ class StateMachine:
                 self._synthesizer.speak(random.choice(_CANNED_TTS))
         except Exception:
             log.exception("Wake greeting: canned greeting error")
+        finally:
+            self._end_speech(servo_stop)
+
+    def _learn_new_person(self, frame: str) -> None:
+        """After greeting an unknown face, ask for their name and enroll them.
+
+        Speaks "What's your name?", listens once with the transcriber, then
+        either stores the encoding + name and says a welcome line, or skips
+        silently if no name was heard.  Mic is paused around the transcribe
+        call just like the main ACTIVE loop does.
+        """
+        log.info("Wake greeting: asking unknown person their name")
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak("I don't think we've met — what's your name?")
+        except Exception:
+            log.exception("Wake greeting: name-ask TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._wake_word.pause()
+        try:
+            name_text = self._transcriber.transcribe(
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT
+            )
+        except Exception:
+            log.exception("Wake greeting: transcription error during name capture")
+            name_text = None
+        finally:
+            self._wake_word.resume()
+
+        if not name_text:
+            log.info("Wake greeting: no name heard — skipping enrollment")
+            return
+
+        # Use the first word (or first two words) as the name.
+        name = " ".join(name_text.strip().split()[:2]).title()
+        log.info("Wake greeting: enrolling new person as %r", name)
+
+        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+        encoding = self._face_recognizer.encode_face(frame)
+        if encoding is not None:
+            try:
+                self._face_db.add_person(name, encoding)
+            except Exception:
+                log.exception("Wake greeting: FaceDB enrollment error for %r", name)
+
+        welcome = random.choice([
+            f"Nice to meet you, {name}! I'll remember that face!",
+            f"*BWOOP* {name}! Welcome to Oga's — I won't forget you!",
+            f"Great to meet you, {name}! Come back anytime!",
+        ])
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(welcome)
+        except Exception:
+            log.exception("Wake greeting: welcome TTS error")
         finally:
             self._end_speech(servo_stop)
 

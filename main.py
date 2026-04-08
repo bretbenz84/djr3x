@@ -99,6 +99,8 @@ def _print_banner(status: dict) -> None:
         thin,
         f"  Wake word          {_hw(status['wake_word'])}   {wake_detail}",
         f"  Transcriber        {_hw(status['transcriber'])}   Whisper",
+        f"  Camera             {_hw(status['camera'])}",
+        f"  Face recognition   {_hw(status['face_recognition'])}",
         f"  Music library      {'READY    ' if music else 'EMPTY    '}   {music_detail}",
         thin,
         f"  HEY HEY HEY!  Rex is {'online' if any([status['servos'], status['chest_leds'], status['head_leds']]) else 'online (no hardware)'}.",
