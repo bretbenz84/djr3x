@@ -331,6 +331,11 @@ void handleCommand(char *cmd) {
 
     // SPEAK_STOP — mouth off; eyes unchanged in leds[] but blink suspended
     // until the next EYE: or ACTIVE re-enables it.
+    //
+    // Intentionally idempotent: mouthOff() + FastLED.show() run unconditionally
+    // even if animMode is already ANIM_OFF.  The Pi may send this command multiple
+    // times as a reliability measure; redundant calls are harmless and guarantee
+    // the mouth pixels reach the off state.
     if (strcmp(cmd, "SPEAK_STOP") == 0) {
         animMode   = ANIM_OFF;
         eyesActive = false;

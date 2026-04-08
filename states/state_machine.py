@@ -702,6 +702,10 @@ class StateMachine:
             self._shutdown_event.set()
         if new_state == State.IDLE:
             self._last_known_person_id = None
+            # Global mouth safety: guarantee mouth is off whenever Rex returns
+            # to IDLE, regardless of what the LED state machine thinks.
+            self._leds.stop_mouth()
+            self._leds._send_head(config.LED_CMD_SPEAK_STOP)
         self._state = new_state
 
     # ------------------------------------------------------------------

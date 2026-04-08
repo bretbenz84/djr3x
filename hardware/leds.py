@@ -87,8 +87,9 @@ class LEDController:
         )
 
         # Mouth brightness thread state
-        self._mouth_stop  = threading.Event()
+        self._mouth_stop   = threading.Event()
         self._mouth_thread: threading.Thread | None = None
+        self._mouth_active: bool = False   # True while mouth is in SPEAK mode
 
         # Serialise writes from the main thread and mouth thread.
         # Each Nano gets its own lock so chest writes never block head writes.
@@ -168,6 +169,7 @@ class LEDController:
         """Start the RMS → SPEAK_LEVEL thread.  No-op if already running."""
         if self._mouth_thread is not None and self._mouth_thread.is_alive():
             return
+        self._mouth_active = True
         self._mouth_stop.clear()
         self._mouth_thread = threading.Thread(
             target=self._mouth_worker,
@@ -177,7 +179,12 @@ class LEDController:
         self._mouth_thread.start()
 
     def stop_mouth(self) -> None:
-        """Stop the mouth level thread and send SPEAK_STOP to the head Nano."""
+        """Stop the mouth level thread and send SPEAK_STOP to the head Nano.
+
+        Sends SPEAK_STOP three times with 50 ms gaps to survive occasional
+        serial drops.  Also schedules a 2-second watchdog that re-sends
+        SPEAK_STOP if the mouth is still not in SPEAK mode (last resort).
+        """
         self._mouth_stop.set()
         if self._mouth_thread is not None:
             self._mouth_thread.join(timeout=1.0)
@@ -187,8 +194,17 @@ class LEDController:
                     "possible serial hang; SPEAK_STOP may arrive out of order"
                 )
             self._mouth_thread = None
-        log.debug("Mouth: sending SPEAK_STOP to head Nano")
-        self._send_head(config.LED_CMD_SPEAK_STOP)
+        self._mouth_active = False
+        log.debug("Mouth: sending SPEAK_STOP × 3 to head Nano")
+        for _ in range(3):
+            self._send_head(config.LED_CMD_SPEAK_STOP)
+            time.sleep(0.05)
+        # Watchdog: 2 s from now, re-send SPEAK_STOP if mouth is still off.
+        threading.Thread(
+            target=self._mouth_watchdog,
+            daemon=True,
+            name="djr3x-mouth-watchdog",
+        ).start()
 
     # ------------------------------------------------------------------
     # Internal — send helpers
@@ -209,7 +225,7 @@ class LEDController:
             _write(self._head, cmd, label="head")
 
     # ------------------------------------------------------------------
-    # Internal — mouth brightness worker thread
+    # Internal — mouth brightness worker thread + watchdog
     # ------------------------------------------------------------------
 
     def _mouth_worker(self) -> None:
@@ -222,6 +238,17 @@ class LEDController:
                 level = 0
             self._send_head(config.LED_CMD_SPEAK_LEVEL.format(level))
             time.sleep(_MOUTH_POLL_INTERVAL)
+
+    def _mouth_watchdog(self) -> None:
+        """Last-resort safety net: 2 s after stop_mouth(), re-send SPEAK_STOP if
+        the mouth is still not active (i.e. no new speech started in the meantime).
+        """
+        time.sleep(2.0)
+        if not self._mouth_active:
+            log.debug("Mouth watchdog: re-sending SPEAK_STOP × 3 (safety net)")
+            for _ in range(3):
+                self._send_head(config.LED_CMD_SPEAK_STOP)
+                time.sleep(0.05)
 
 
 # ---------------------------------------------------------------------------
