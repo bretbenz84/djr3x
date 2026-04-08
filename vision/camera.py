@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 from typing import Optional
 
 import cv2
@@ -45,42 +46,67 @@ class Camera:
     # Setup
     # ------------------------------------------------------------------
 
+    _OPEN_RETRIES = 3
+    _OPEN_RETRY_DELAY = 1.0   # seconds between attempts
+    _WARMUP_DELAY = 0.5       # seconds after open before test frame
+
     def warmup(self) -> None:
         """Open the camera device and verify it can deliver frames.
+
+        Retries up to _OPEN_RETRIES times with _OPEN_RETRY_DELAY second pauses
+        to handle USB cameras that aren't ready at startup.  A _WARMUP_DELAY
+        second pause after a successful open lets the sensor settle before the
+        test frame is read.
 
         Safe to call once at startup.  Sets is_available() based on whether
         the device opened successfully.
         """
-        cap = cv2.VideoCapture(config.CAMERA_DEVICE_INDEX)
-        if not cap.isOpened():
-            log.warning(
-                "Camera: device %d could not be opened — vision disabled",
+        for attempt in range(1, self._OPEN_RETRIES + 1):
+            cap = cv2.VideoCapture(config.CAMERA_DEVICE_INDEX)
+
+            if not cap.isOpened():
+                cap.release()
+                log.warning(
+                    "Camera: device %d could not be opened (attempt %d/%d)%s",
+                    config.CAMERA_DEVICE_INDEX,
+                    attempt,
+                    self._OPEN_RETRIES,
+                    " — retrying" if attempt < self._OPEN_RETRIES else " — vision disabled",
+                )
+                if attempt < self._OPEN_RETRIES:
+                    time.sleep(self._OPEN_RETRY_DELAY)
+                continue
+
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+            # Give the sensor a moment to initialise before reading the test frame.
+            time.sleep(self._WARMUP_DELAY)
+
+            ok, _ = cap.read()
+            if not ok:
+                cap.release()
+                log.warning(
+                    "Camera: device %d opened but returned no frame (attempt %d/%d)%s",
+                    config.CAMERA_DEVICE_INDEX,
+                    attempt,
+                    self._OPEN_RETRIES,
+                    " — retrying" if attempt < self._OPEN_RETRIES else " — vision disabled",
+                )
+                if attempt < self._OPEN_RETRIES:
+                    time.sleep(self._OPEN_RETRY_DELAY)
+                continue
+
+            self._cap = cap
+            self._available = True
+            log.info(
+                "Camera: device %d ready (%dx%d) after %d attempt(s)",
                 config.CAMERA_DEVICE_INDEX,
+                int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                attempt,
             )
-            cap.release()
             return
-
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-        # Read one frame to confirm the device is actually delivering data.
-        ok, _ = cap.read()
-        if not ok:
-            log.warning(
-                "Camera: device %d opened but returned no frame — vision disabled",
-                config.CAMERA_DEVICE_INDEX,
-            )
-            cap.release()
-            return
-
-        self._cap = cap
-        self._available = True
-        log.info(
-            "Camera: device %d ready (%dx%d)",
-            config.CAMERA_DEVICE_INDEX,
-            int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-        )
 
     # ------------------------------------------------------------------
     # Lifecycle
