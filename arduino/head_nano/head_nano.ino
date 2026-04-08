@@ -124,6 +124,7 @@ enum AnimMode : uint8_t {
     ANIM_SPEAK,
     ANIM_IDLE,
     ANIM_ACTIVE,
+    ANIM_SLEEP,
 };
 
 AnimMode animMode = ANIM_OFF;
@@ -414,6 +415,14 @@ void handleCommand(char *cmd) {
         return;
     }
 
+    // SLEEP — mouth pulses red (breathing); eyes unchanged.
+    if (strcmp(cmd, "SLEEP") == 0) {
+        mouthOff();
+        FastLED.show();
+        animMode = ANIM_SLEEP;
+        return;
+    }
+
     // Unknown — ignore silently
 }
 
@@ -516,6 +525,31 @@ void tickIdle(float dt) {
 }
 
 // ---------------------------------------------------------------------------
+// Sleep animation — slow red mouth breathing
+// ---------------------------------------------------------------------------
+//
+// All 80 mouth pixels pulse together from 0 to 127 brightness in a smooth
+// sine wave with an 8000 ms period (one full breath cycle).  Eyes are NOT
+// touched — they are owned by tickIdle() / tickBlink() in SLEEP state.
+//
+// Uses millis() directly (no dt accumulation) so the breath stays locked to
+// wall-clock time regardless of loop jitter.
+
+void tickSleep() {
+    uint32_t now   = millis();
+    // Phase 0.0 → 1.0 over 8000 ms
+    float    phase = (float)(now % 8000UL) / 8000.0f;
+    // Sine envelope: 0 at phase 0, peak at phase 0.5, back to 0 at phase 1
+    float    brightness = 0.5f * (1.0f - cosf(TWO_PI * phase));  // 0.0 – 1.0
+    uint8_t  b = (uint8_t)(brightness * 127.0f);                 // 0 – 127
+
+    for (uint8_t i = MOUTH_START; i < NUM_LEDS; i++) {
+        leds[i] = CRGB(b, 0, 0);   // red only
+    }
+    FastLED.show();
+}
+
+// ---------------------------------------------------------------------------
 // Main animation tick — call every loop()
 // ---------------------------------------------------------------------------
 
@@ -530,6 +564,7 @@ void tickAnimation() {
 
     if (animMode == ANIM_SPEAK) { tickSpeak(dt); return; }
     if (animMode == ANIM_IDLE)  { tickIdle(dt);  return; }
+    if (animMode == ANIM_SLEEP) { tickSleep();   return; }
 }
 
 // ---------------------------------------------------------------------------

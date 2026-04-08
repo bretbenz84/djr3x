@@ -1146,6 +1146,7 @@ class StateMachine:
         self._leds.set_eye_color(0, 0, config.SLEEP_EYE_BRIGHTNESS)
         self._leds.set_chest_effect(config.LED_CMD_IDLE)
         self._leds.set_head_effect(config.LED_CMD_IDLE)
+        self._leds.set_sleep_mode()   # start red breathing mouth animation
 
         # Unsuppress wake word so the sleep model can fire.
         self._wake_word.suppressed = False

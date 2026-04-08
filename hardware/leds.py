@@ -156,6 +156,10 @@ class LEDController:
     # Mouth speaking animation
     # ------------------------------------------------------------------
 
+    def set_sleep_mode(self) -> None:
+        """Start the red breathing mouth animation on the head Nano (SLEEP mode)."""
+        self._send_head("SLEEP\n")
+
     def set_mouth_emotion(self, emotion: str) -> None:
         """Send SPEAK:{emotion} to the head Nano to set the mouth colour.
 
