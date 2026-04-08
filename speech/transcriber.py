@@ -320,6 +320,37 @@ class Transcriber:
 # Hallucination filter
 # ---------------------------------------------------------------------------
 
+_MONTHS = {
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+}
+
+
+def _is_date_hallucination(text: str) -> bool:
+    """Return True if *text* is a bare date pattern Whisper commonly hallucinates.
+
+    Matches:
+      - A lone month name:           "January"
+      - A lone 4-digit year:         "2020"
+      - Month + year:                "January 2020"
+      - Year + month:                "2020 January"
+    """
+    import re
+    stripped = text.strip().rstrip(".")
+    parts = stripped.split()
+    if len(parts) == 1:
+        word = parts[0].lower()
+        return word in _MONTHS or bool(re.fullmatch(r"(19|20)\d{2}", word))
+    if len(parts) == 2:
+        a, b = parts[0].lower(), parts[1].lower()
+        year_re = re.compile(r"(19|20)\d{2}")
+        a_is_month, b_is_month = a in _MONTHS, b in _MONTHS
+        a_is_year = bool(year_re.fullmatch(a))
+        b_is_year = bool(year_re.fullmatch(b))
+        return (a_is_month and b_is_year) or (a_is_year and b_is_month)
+    return False
+
+
 def _filter_hallucination(text: str) -> str:
     """Return text unchanged if it looks like real speech, otherwise "".
 
@@ -327,6 +358,7 @@ def _filter_hallucination(text: str) -> str:
       - empty / whitespace only
       - shorter than WHISPER_MIN_WORDS words
       - contain a known Whisper hallucination substring
+      - a bare month name, year, or 'month year' / 'year month' pattern
     """
     if not text:
         return ""
@@ -337,6 +369,10 @@ def _filter_hallucination(text: str) -> str:
         if phrase in lower:
             log.info("Whisper hallucination filtered: %r (matched %r)", text, phrase)
             return ""
+
+    if _is_date_hallucination(text):
+        log.info("Whisper hallucination filtered (date pattern): %r", text)
+        return ""
 
     words = text.split()
     if len(words) < config.WHISPER_MIN_WORDS:

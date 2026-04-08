@@ -200,8 +200,6 @@ class StateMachine:
         self._camera.warmup()
         self._camera.start()
 
-        self._face_recognizer.warmup()
-
         log.info("StateMachine: all subsystems ready.")
 
     def run(self) -> None:
@@ -256,6 +254,15 @@ class StateMachine:
         log.info("Playing startup animation …")
         self._animations.play_startup()   # non-blocking
 
+        # Load dlib face recognition models concurrently with the animation so
+        # the ~3 s model load on Pi 4 is hidden behind the startup sequence.
+        face_warmup_thread = threading.Thread(
+            target=self._face_recognizer.warmup,
+            daemon=True,
+            name="djr3x-face-warmup",
+        )
+        face_warmup_thread.start()
+
         anim_done = self._animations.wait(timeout=10.0)
         if not anim_done:
             log.warning("Startup animation timed out — continuing.")
@@ -269,6 +276,13 @@ class StateMachine:
             else:
                 log.warning("Startup music timed out — continuing.")
                 self._player.stop_music()
+
+        # Ensure face recognition models are fully loaded before continuing.
+        face_warmup_thread.join(timeout=15.0)
+        if face_warmup_thread.is_alive():
+            log.warning("Face recognizer warmup timed out — recognition may be unavailable.")
+        else:
+            log.info("Face recognizer warmup complete.")
 
     def play_startup_intro(self) -> None:
         """Play the spoken intro clip through the speech path with full
@@ -869,8 +883,9 @@ class StateMachine:
             log.info("Wake greeting: no name heard — skipping enrollment")
             return
 
-        # Use the first word (or first two words) as the name.
-        name = " ".join(name_text.strip().split()[:2]).title()
+        # Use the first word (or first two words) as the name; strip punctuation
+        # that Whisper sometimes appends (e.g. "Bret." or "Bret Benziger!").
+        name = " ".join(name_text.strip().rstrip(".,!?").strip().split()[:2]).title()
         log.info("Wake greeting: enrolling new person as %r", name)
 
         self._leds.set_head_effect(config.LED_CMD_ACTIVE)
@@ -1136,6 +1151,9 @@ class StateMachine:
             self._os_shutdown_requested = True
             return State.SHUTDOWN
 
+        elif action == "rename_me":
+            self._handle_rename_me()
+
         elif action == "play_music":
             self._play_music_track()
 
@@ -1155,6 +1173,117 @@ class StateMachine:
             log.warning("Unknown action: %r", action)
 
         return None
+
+    # ------------------------------------------------------------------
+    # Rename helper
+    # ------------------------------------------------------------------
+
+    def _handle_rename_me(self) -> None:
+        """Ask for a name from the transcript context, then look up the person in
+        FaceDB via a fresh camera frame and update their name.
+
+        The user says something like "call me Bret" or "my name is Bret" — the
+        parser matched a rename_me command but the name itself is in the
+        *following* transcription turn. So we:
+          1. Ask "What would you like me to call you?"
+          2. Transcribe the reply to get the name.
+          3. Capture a fresh frame and run face recognition to find who this is.
+          4. If found: update their name in FaceDB, confirm verbally.
+          5. If not found: apologise and offer to meet them properly.
+        """
+        if not self._face_recognizer.is_available():
+            line = "Face recognition isn't available right now — I can't store names without it!"
+            log.info("rename_me: face recognition unavailable")
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("rename_me: TTS error")
+            finally:
+                self._end_speech(servo_stop)
+            return
+
+        # Ask for the name.
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak("What would you like me to call you?")
+        except Exception:
+            log.exception("rename_me: TTS error asking for name")
+        finally:
+            self._end_speech(servo_stop)
+
+        # Listen for the reply.
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._wake_word.pause()
+        try:
+            name_text = self._transcriber.transcribe(
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT
+            )
+        except Exception:
+            log.exception("rename_me: transcription error")
+            name_text = None
+        finally:
+            self._wake_word.resume()
+
+        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+
+        if not name_text:
+            log.info("rename_me: no name heard — aborting")
+            return
+
+        new_name = " ".join(name_text.strip().rstrip(".,!?").strip().split()[:2]).title()
+        log.info("rename_me: requested name %r", new_name)
+
+        # Capture a fresh frame and identify the person.
+        frame = self._camera.capture_frame() if self._camera.is_available() else None
+        if not frame:
+            line = "I can't see you right now — try again when the camera is working!"
+            log.info("rename_me: no camera frame available")
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("rename_me: TTS error (no frame)")
+            finally:
+                self._end_speech(servo_stop)
+            return
+
+        result = self._face_recognizer.identify(frame, tolerance=config.FACE_RECOGNITION_TOLERANCE)
+        if result is None:
+            line = "I don't think we've met yet! Say the wake word and I'll introduce myself properly."
+            log.info("rename_me: face not recognised — cannot rename")
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("rename_me: TTS error (not recognised)")
+            finally:
+                self._end_speech(servo_stop)
+            return
+
+        person_id, old_name, _dist = result
+        try:
+            with self._face_db._conn:
+                self._face_db._conn.execute(
+                    "UPDATE people SET name = ? WHERE id = ?", (new_name, person_id)
+                )
+            log.info("rename_me: renamed person id=%d '%s' → '%s'", person_id, old_name, new_name)
+        except Exception:
+            log.exception("rename_me: database update failed")
+            return
+
+        line = random.choice([
+            f"Got it — I'll call you {new_name} from now on!",
+            f"*BWOOP* {new_name}! Love it. Memory banks updated!",
+            f"Done! You're {new_name} in my records. Nice to officially meet you!",
+        ])
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("rename_me: TTS error (confirmation)")
+        finally:
+            self._end_speech(servo_stop)
 
     # ------------------------------------------------------------------
     # Music helpers

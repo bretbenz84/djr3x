@@ -288,6 +288,16 @@ COMMANDS: list[Command] = [
     ),
 
     # -----------------------------------------------------------------------
+    # Face recognition — identity management
+    # -----------------------------------------------------------------------
+
+    Command(
+        phrases=["call me", "my name is", "rename me", "my name's"],
+        response="",   # not spoken — action=rename_me is handled by the state machine
+        action="rename_me",
+    ),
+
+    # -----------------------------------------------------------------------
     # Vision — these are forwarded to the LLM with a live camera frame;
     # the response field is never spoken (action="vision" bypasses TTS).
     # They live here so the fuzzy parser catches close matches reliably.
