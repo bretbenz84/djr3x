@@ -359,6 +359,15 @@ void handleCommand(char *cmd) {
 
     // IDLE — mouth off; eyes breathe slowly; blink system active.
     if (strcmp(cmd, "IDLE") == 0) {
+        // Clear mouth pixels FIRST — before touching any other state — so that
+        // pixels 2-81 (MOUTH_START … NUM_LEDS-1) are guaranteed black the
+        // instant this command is processed, regardless of what animMode was
+        // previously.  A single stale non-black value in the buffer (e.g. from
+        // tickSpeak's ambient floor) would otherwise survive until the next
+        // FastLED.show() writes it out.
+        mouthOff();
+        FastLED.show();
+
         animMode      = ANIM_IDLE;
         idlePhase     = 0.0f;
         eyeBrightness = 1.0f;   // tickIdle will update from here on first tick
@@ -371,8 +380,6 @@ void handleCommand(char *cmd) {
             blinkState    = BLINK_OPEN;
             isSecondBlink = false;
         }
-        mouthOff();
-        FastLED.show();
         return;
     }
 
@@ -481,7 +488,12 @@ void tickSpeak(float dt) {
 //
 // leds[] is NOT written during BLINK_CLOSED — tickBlink() owns the eye
 // pixels while the eyes are dark, and will restore them with the saved level.
-// Mouth pixels are left alone (already cleared by mouthOff() on IDLE entry).
+//
+// IMPORTANT — mouth pixels (indices 2-81 / MOUTH_START … NUM_LEDS-1):
+//   tickIdle() intentionally writes ONLY leds[0] and leds[1] (the two eyes).
+//   Mouth pixels are cleared by mouthOff() in the IDLE command handler and
+//   are never modified here.  Any future edit that writes a mouth pixel
+//   inside tickIdle() is a bug.
 
 void tickIdle(float dt) {
     idlePhase += 0.8f * dt;
@@ -493,11 +505,13 @@ void tickIdle(float dt) {
     // Let tickBlink() own leds[] while eyes are closed.
     if (blinkState == BLINK_CLOSED) return;
 
+    // Only eye pixels — mouth pixels are never written here.
     uint8_t sc = (uint8_t)(eyeBrightness * 255.0f);
     leds[0] = CRGB(scale8(eyeColor.r, sc),
                    scale8(eyeColor.g, sc),
                    scale8(eyeColor.b, sc));
     leds[1] = leds[0];
+    // leds[2] … leds[NUM_LEDS-1] (mouth) are intentionally NOT modified.
     FastLED.show();
 }
 
@@ -525,10 +539,23 @@ void tickAnimation() {
 void setup() {
     FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
     FastLED.setBrightness(255);
+
+    // WS2812B pixels can latch random data on power-on before the first show().
+    // A brief delay lets the supply voltage stabilise so the reset pulse is
+    // clean, then we explicitly zero every pixel — including pixel 2 (MOUTH_START)
+    // which is the first mouth pixel and the most likely to stay lit from glitch.
+    delay(50);
+    FastLED.clear();   // fill leds[] with CRGB::Black
+    FastLED.show();    // push zeros to every pixel on the strip
+    // Belt-and-suspenders: zero the buffer a second time and show again.
+    // The first show() resets any latched state; the second guarantees all
+    // 82 pixels — especially the mouth — start in a known-off state.
     FastLED.clear();
     FastLED.show();
 
     // Seed PRNG from floating analog pin for varied blink timing across reboots.
+    // NOTE: analogRead() is called AFTER both show() calls so it cannot
+    // interfere with the WS2812B data line timing.
     randomSeed(analogRead(A0));
 
     Serial.begin(BAUD_RATE);
