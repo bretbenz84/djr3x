@@ -283,6 +283,7 @@ WHISPER_MIN_WORDS = 2
 # legitimately one word.
 SINGLE_WORD_COMMANDS: frozenset[str] = frozenset({
     "shutdown", "quit", "stop",
+    "cancel", "nevermind",
     "yes", "no", "yeah", "nope", "sure", "ok", "okay",
     "bye", "hello", "hi", "help",
 })

@@ -321,6 +321,22 @@ COMMANDS: list[Command] = [
     ),
 
     # -----------------------------------------------------------------------
+    # Cancel / dismiss — silently return to IDLE; roast line spoken by
+    # _dispatch_action rather than the response field so it can be random.
+    # -----------------------------------------------------------------------
+
+    Command(
+        phrases=[
+            "cancel", "cancel that", "nevermind", "never mind",
+            "forget it", "forget about it", "i was talking to someone else",
+            "start over", "lets start over", "stop listening",
+            "go away", "not you", "ignore that",
+        ],
+        response="",   # not spoken — action=cancel speaks a random roast line
+        action="cancel",
+    ),
+
+    # -----------------------------------------------------------------------
     # Shutdown / sleep
     # -----------------------------------------------------------------------
 

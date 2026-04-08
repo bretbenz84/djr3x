@@ -1277,6 +1277,23 @@ class StateMachine:
             self._leds.set_chest_effect(config.LED_CMD_IDLE)
             self._leds.set_eye_color(0, 60, 180)     # subdued blue
 
+        elif action == "cancel":
+            line = random.choice([
+                "Fine. Pretend I was never here.",
+                "Oh, just gonna ghost me like that? Rude.",
+                "Dismissed! Story of my life.",
+                "Back to ignoring existence then. Cool.",
+            ])
+            log.info("Cancel command — speaking dismissal: %r", line)
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("Cancel: TTS error")
+            finally:
+                self._end_speech(servo_stop)
+            return State.IDLE
+
         elif action == "idle":
             return State.IDLE
 
