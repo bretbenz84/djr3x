@@ -5,8 +5,27 @@ Uses dlib directly (no face_recognition wrapper) for full control over
 CPU-only inference on Pi 4.
 
 Pipeline per frame:
-    base64 JPEG → numpy BGR → RGB → dlib detector → largest rect →
-    shape predictor (68 landmarks) → ResNet encoder (128-d) → FaceDB lookup
+    base64 JPEG → numpy BGR → RGB → dlib HOG detector (tiered upsample) →
+    largest rect → shape predictor (68 landmarks) → ResNet encoder (128-d) →
+    FaceDB lookup
+
+Upsample strategy
+-----------------
+Recognition  (identify):  upsample=1 first; if no face found, retry at upsample=2.
+Enrollment   (encode_face with for_enrollment=True):  upsample=2 directly.
+
+upsample=0 → original resolution (fastest, misses small/distant faces).
+upsample=1 → 2× upsampled input   (~4× slower than 0 on Pi 4, good for typical range).
+upsample=2 → 4× upsampled input   (~16× slower than 0, best for small faces).
+
+CNN detector note
+-----------------
+dlib also ships a CNN-based face detector (dlib.cnn_face_detection_model_v1)
+that is significantly more accurate than HOG, especially for non-frontal faces
+and small faces from wide-angle lenses.  It requires the model file
+"mmod_human_face_detector.dat" (available from dlib's model zoo).  Consider
+switching if the HOG detector continues to struggle at typical interaction
+distance with the JVU430 2.1 mm wide-angle lens.
 
 Typical usage:
     recognizer = FaceRecognizer(db)
@@ -116,12 +135,42 @@ class FaceRecognizer:
             return None
         return max(rects, key=lambda r: r.width() * r.height())
 
+    def _detect_tiered(
+        self, rgb: np.ndarray, upsample_levels: list[int]
+    ) -> tuple[object, int]:
+        """Run the HOG detector at each upsample level until a face is found.
+
+        Returns (rects, level_used) where rects is the non-empty detection
+        result at the first successful level, or the (empty) result from the
+        last level tried if no face was found at any level.
+        """
+        rects = []
+        last_level = upsample_levels[-1] if upsample_levels else 0
+        for level in upsample_levels:
+            rects = self._detector(rgb, level)
+            last_level = level
+            if len(rects) > 0:
+                return rects, level
+        return rects, last_level
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def encode_face(self, image_b64: str) -> Optional[np.ndarray]:
+    def encode_face(
+        self,
+        image_b64: str,
+        for_enrollment: bool = False,
+    ) -> Optional[np.ndarray]:
         """Detect the largest face in *image_b64* and return its 128-d encoding.
+
+        for_enrollment=False (recognition):
+            Tries upsample=1 first; retries at upsample=2 if no face found.
+            The scanning-line audio hides the extra detection pass.
+
+        for_enrollment=True (enrollment):
+            Always uses upsample=2 directly — accuracy matters more than
+            speed since enrollment only happens once per person.
 
         Returns None if models are unavailable, no face is detected, or
         decoding fails.  All processing runs on CPU.
@@ -134,28 +183,42 @@ class FaceRecognizer:
         if rgb is None:
             return None
 
-        # upsample=0 means no upsampling — fastest setting for Pi 4.
-        # Use upsample=1 only if small/distant faces are being missed and
-        # latency budget allows (~4× slower on Pi 4).
+        frame_h = rgb.shape[0]
+        upsample_levels = [2] if for_enrollment else [1, 2]
+        mode = "enrollment" if for_enrollment else "recognition"
         log.info(
-            "FaceRecognizer: encode_face — frame shape %s, running HOG detector",
-            rgb.shape,
+            "FaceRecognizer: %s — frame %s, HOG upsample strategy %s",
+            mode, rgb.shape, upsample_levels,
         )
-        rects = self._detector(rgb, 0)
+
+        rects, level_used = self._detect_tiered(rgb, upsample_levels)
         rect = self._largest_rect(rects)
+
         if rect is None:
             log.info(
-                "FaceRecognizer: no face detected in frame (shape=%s, %d rect(s) from detector)",
-                rgb.shape, len(rects),
+                "FaceRecognizer: no face detected (%s, tried upsample levels %s, "
+                "frame shape=%s) — "
+                "if faces are consistently missed, consider CNN detector "
+                "(mmod_human_face_detector.dat) or moving closer to the camera",
+                mode, upsample_levels, rgb.shape,
             )
             return None
 
+        face_pct = rect.height() / frame_h * 100
+        log.info(
+            "FaceRecognizer: face detected at upsample=%d — rect=%s, "
+            "face height=%.1f%% of frame (%s) "
+            "[<10%% = too far; 10-25%% = marginal; >25%% = good]",
+            level_used, rect, face_pct, mode,
+        )
+
         shape = self._shape_predictor(rgb, rect)
-        # num_jitters=1 is the fastest setting; increase only when enrolment
-        # accuracy matters more than speed (each jitter ≈+100 ms on Pi 4).
+        # num_jitters=1 is the fastest setting for recognition.
+        # For enrollment, accuracy matters more; consider num_jitters=3-5 if
+        # recognition distances are inconsistent (each jitter ≈+100 ms on Pi 4).
         raw_encoding = self._face_encoder.compute_face_descriptor(rgb, shape, num_jitters=1)
         encoding = np.array(raw_encoding, dtype=np.float64)
-        log.debug("FaceRecognizer: encoded face (rect=%s)", rect)
+        log.debug("FaceRecognizer: encoding complete (rect=%s, mode=%s)", rect, mode)
         return encoding
 
     def identify(
@@ -169,7 +232,7 @@ class FaceRecognizer:
         found, otherwise None.  Always logs the closest-match distance so
         near-misses are visible even when they fall just outside tolerance.
         """
-        encoding = self.encode_face(image_b64)
+        encoding = self.encode_face(image_b64, for_enrollment=False)
         if encoding is None:
             return None
 

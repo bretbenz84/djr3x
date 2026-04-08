@@ -1068,7 +1068,7 @@ class StateMachine:
                     log.debug("Enrollment: skipping %s (no frame)", label)
                     continue
                 log.info("Enrollment: attempting encode on %s (%d b64 bytes)", label, len(f))
-                enc = self._face_recognizer.encode_face(f)
+                enc = self._face_recognizer.encode_face(f, for_enrollment=True)
                 if enc is not None:
                     log.info("Enrollment: face detected in %s — proceeding with storage", label)
                     break
@@ -1079,7 +1079,7 @@ class StateMachine:
                 final_f = self._camera.capture_frame()
                 if final_f:
                     log.info("Enrollment: final live frame captured (%d b64 bytes)", len(final_f))
-                    enc = self._face_recognizer.encode_face(final_f)
+                    enc = self._face_recognizer.encode_face(final_f, for_enrollment=True)
                     if enc is None:
                         log.warning("Enrollment: no face detected in final live frame")
                 else:
