@@ -742,50 +742,67 @@ class StateMachine:
             frame = self._camera.capture_frame()
 
         # ------------------------------------------------------------------
-        # Try face recognition — hidden behind a scanning audio line
+        # Try face recognition
         # ------------------------------------------------------------------
         if frame and self._face_recognizer.is_available():
             n_people = len(self._face_db.list_people())
             print(f"Face scan: {n_people} people in database")
 
-            # Run dlib face recognition in a background thread so the 2-4 s
-            # processing time is hidden behind the scanning audio line below.
-            face_result: list = [None]
-
-            def _identify() -> None:
-                face_result[0] = self._face_recognizer.identify(
-                    frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
-                )
-
-            face_thread = threading.Thread(
-                target=_identify, daemon=True, name="djr3x-face-identify"
-            )
-            face_thread.start()
-
-            # Play scanning line immediately — _begin_speech() also raises the arm
-            # so the animation runs concurrently with both TTS and face recognition.
-            scanning_line = random.choice([
+            _SCANNING_LINES = [
                 "Hmmmmm... interesting. Lifeform identity scan complete.",
                 "Scanning... scanning... oh. It is you.",
                 "Identity scan in progress... beep boop... scan complete.",
                 "Hold still... analyzing lifeform... done.",
                 "Running biometric scan... fascinating specimen.",
-            ])
-            log.info("Wake greeting: playing scanning line — %r", scanning_line)
-            servo_stop = self._begin_speech(emotion="excited")
-            try:
-                self._synthesizer.speak(scanning_line)
-            except Exception:
-                log.exception("Wake greeting: scanning line TTS error")
-            finally:
-                self._end_speech(servo_stop)
+            ]
 
-            # Wait for face recognition to finish (almost certainly done by now).
-            face_thread.join()
-            result = face_result[0]
+            if n_people == 0:
+                # Empty database — definitely heading to enrollment.  Hide the
+                # 2-4 s dlib latency behind the scanning audio line by running
+                # face recognition and TTS concurrently.
+                face_result: list = [None]
 
-            # Console status — identify() already logged the distance via find_closest().
-            if n_people > 0:
+                def _identify_empty() -> None:
+                    face_result[0] = self._face_recognizer.identify(
+                        frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+                    )
+
+                face_thread = threading.Thread(
+                    target=_identify_empty, daemon=True, name="djr3x-face-identify"
+                )
+                face_thread.start()
+
+                scanning_line = random.choice(_SCANNING_LINES)
+                log.info("Wake greeting: empty DB — playing scanning line concurrently — %r", scanning_line)
+                servo_stop = self._begin_speech(emotion="excited")
+                try:
+                    self._synthesizer.speak(scanning_line)
+                except Exception:
+                    log.exception("Wake greeting: scanning line TTS error")
+                finally:
+                    self._end_speech(servo_stop)
+
+                face_thread.join()
+                result = face_result[0]
+                print("Face scan: database empty — no comparison possible")
+
+            else:
+                # Database has known people — run recognition without any scanning
+                # line so a recognised person gets an instant greeting.
+                face_result2: list = [None]
+
+                def _identify_known() -> None:
+                    face_result2[0] = self._face_recognizer.identify(
+                        frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+                    )
+
+                face_thread2 = threading.Thread(
+                    target=_identify_known, daemon=True, name="djr3x-face-identify"
+                )
+                face_thread2.start()
+                face_thread2.join()
+                result = face_result2[0]
+
                 if result is not None:
                     _pid, rname, rdist = result
                     print(
@@ -797,8 +814,17 @@ class StateMachine:
                         f"Face scan: UNKNOWN (no match within threshold "
                         f"{config.FACE_RECOGNITION_TOLERANCE} — see logs for closest)"
                     )
-            else:
-                print("Face scan: database empty — no comparison possible")
+                    # Unknown person in a non-empty DB — play scanning line now as
+                    # a natural transition into the enrollment exchange.
+                    scanning_line = random.choice(_SCANNING_LINES)
+                    log.info("Wake greeting: unknown person — playing scanning line — %r", scanning_line)
+                    servo_stop = self._begin_speech(emotion="excited")
+                    try:
+                        self._synthesizer.speak(scanning_line)
+                    except Exception:
+                        log.exception("Wake greeting: scanning line TTS error")
+                    finally:
+                        self._end_speech(servo_stop)
 
             if result is not None:
                 person_id, name, distance = result
