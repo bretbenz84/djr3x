@@ -920,7 +920,14 @@ class StateMachine:
             return
 
         # --- Command guard: did they say a command instead of a name? ---
-        cmd = parse(name_text)
+        # "my name is …" is explicitly a name response — skip the parser so it
+        # never matches the rename_me command and goes straight to extraction.
+        _normalized_response = name_text.strip().lower()
+        _is_name_intro = any(
+            _normalized_response.startswith(p)
+            for p in ("my name is", "my name's", "i am", "i'm", "call me")
+        )
+        cmd = None if _is_name_intro else parse(name_text)
         if cmd is not None:
             if cmd.action in ("program_shutdown", "os_shutdown"):
                 log.info("Wake greeting: shutdown command spoken during name capture")

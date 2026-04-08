@@ -51,11 +51,14 @@ CREATE TABLE IF NOT EXISTS face_encodings (
 class FaceDB:
     """SQLite-backed store for known-person face encodings."""
 
+    # Absolute path to this file's directory → project root → assets/face_db.sqlite.
+    # Using __file__ guarantees the path is the same regardless of working directory.
+    _DEFAULT_PATH: Path = Path(__file__).resolve().parent.parent / "assets" / "face_db.sqlite"
+
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self._path = Path(db_path) if db_path else Path(config.FACE_DB_PATH)
-        abs_path = self._path.resolve()
-        existed = os.path.exists(abs_path)
-        log.info("FaceDB: path = %s (exists=%s)", abs_path, existed)
+        self._path = Path(db_path).resolve() if db_path else self._DEFAULT_PATH
+        existed = self._path.exists()
+        log.info("FaceDB: path = %s (exists=%s)", self._path, existed)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
