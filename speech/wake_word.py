@@ -80,6 +80,7 @@ class WakeWordDetector:
             config.WAKE_WORD_MODEL_2,
             config.WAKE_WORD_MODEL_3,
             config.WAKE_WORD_MODEL_4,
+            config.WAKE_SLEEP_MODEL,   # optional sleep-mode wake word
         )
 
     def is_available(self) -> bool:

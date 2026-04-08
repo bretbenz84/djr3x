@@ -177,6 +177,7 @@ SERVO_STARTUP_SPEED        = 8    # slow speed used during safe-mode homing
 SERVO_HEAD_IDLE_SPEED      = 3    # very slow lazy head drift during idle
 SERVO_VISOR_IDLE_SPEED     = 2    # barely-perceptible visor scanning during idle
 SERVO_NECK_STARTUP_SPEED   = 100  # fast neck speed for startup look-around sweep
+SERVO_SLEEP_SPEED          = 4    # extremely slow collapse into sleep — slower than shutdown
 
 # Safe startup mode: home servos one at a time with a 0.5 s delay between
 # each channel, preceded by a speed command to ensure a slow controlled move.
@@ -262,6 +263,13 @@ WAKE_WORD_MODEL_4 = Path(
 
 WAKE_WORD_THRESHOLD = 0.6    # minimum score (0–1) to count as a detection
 WAKE_WORD_COOLDOWN  = 2.0    # seconds to ignore further detections after one fires
+
+# Optional sleep-mode wake word — only fires when Rex is in SLEEP state.
+# If the file does not exist, sleep mode still works via other triggers.
+WAKE_SLEEP_MODEL = Path(
+    _optional("WAKE_SLEEP_MODEL",
+              str(MODELS_DIR / "wakeuprex.onnx"))
+)
 
 # OpenWakeWord requires exactly 1280 samples (80 ms at 16 kHz) per predict() call.
 WAKE_WORD_CHUNK_SIZE = 1280
@@ -393,3 +401,7 @@ LED_CMD_SPEAK       = "SPEAK:{}\n"            # emotion string (neutral/happy/ex
 LED_CMD_SPEAK_LEVEL = "SPEAK_LEVEL:{}\n"      # 0–255 audio intensity; sent at ~20 Hz during speech
 LED_CMD_SPEAK_STOP  = "SPEAK_STOP\n"          # mouth off after speech ends
 LED_CMD_EYE_COLOR   = "EYE:{},{},{}\n"        # R,G,B integers 0–255
+
+# Eye brightness during SLEEP state (0-255).  Applied as the B channel of a
+# pure-blue EYE command so the breathing animation stays extremely dim.
+SLEEP_EYE_BRIGHTNESS: int = int(_optional("SLEEP_EYE_BRIGHTNESS", "20"))

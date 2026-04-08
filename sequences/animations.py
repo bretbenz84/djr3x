@@ -289,6 +289,131 @@ WAKE_GREETING: list[Step] = [
 ]
 
 
+# --- Sleep ------------------------------------------------------------------
+# Rex exhaustedly collapses into a slumped rest — all channels animate at
+# SERVO_SLEEP_SPEED (extremely slow) over ~7 s.  Runs after the idle thread
+# is stopped so there is no channel competition.
+# Eye color dims to a very faint blue; the final step activates dim breathing.
+
+_EYE_SLEEP = (0, 0, config.SLEEP_EYE_BRIGHTNESS)   # very dim blue during sleep
+
+SLEEP: list[Step] = [
+    # Immediately: set every channel to sleep speed (extremely slow), then
+    # begin the droop — head tilts down slightly, visor starts closing.
+    Step(delay=0.0,
+         speeds={_P: config.SERVO_SLEEP_SPEED,
+                 _L: config.SERVO_SLEEP_SPEED,
+                 _T: config.SERVO_SLEEP_SPEED,
+                 _V: config.SERVO_SLEEP_SPEED,
+                 _AL: config.SERVO_SLEEP_SPEED,
+                 _HL: config.SERVO_SLEEP_SPEED,
+                 _AR: config.SERVO_SLEEP_SPEED,
+                 _HR: config.SERVO_SLEEP_SPEED},
+         servos={_T: 4800, _V: 6000},
+         eyes=(0, 40, 130)),
+
+    # 2.0 s — head drooping more, headlift starting to fall, visor lowering,
+    #          arms beginning to drop under their own (servo) weight.
+    Step(delay=2.0,
+         servos={_T: 5150, _L: 4000, _V: 5400,
+                 _AL: 6050, _AR: 4600, _HR: 4600},
+         eyes=(0, 15, 55)),
+
+    # 2.5 s — nearly fully slumped; headlift well down, visor nearly closed.
+    Step(delay=2.5,
+         servos={_T: 5350, _L: 2500, _V: 4900,
+                 _AL: 6150, _AR: 4200, _HR: 4200},
+         eyes=(0, 5, 25)),
+
+    # 2.0 s — final slumped position; all channels at shutdown/sleep values.
+    #          Eyes drop to sleep dim colour.
+    Step(delay=2.0,
+         servos={_T: config.SERVO_CHANNELS[_T]["max"],
+                 _L: config.SERVO_CHANNELS[_L]["min"],
+                 _V: config.SERVO_CHANNELS[_V]["min"],
+                 _P: config.SERVO_CHANNELS[_P]["neutral"],
+                 _AL: config.SERVO_CHANNELS[_AL]["min"],
+                 _AR: config.SERVO_CHANNELS[_AR]["min"],
+                 _HL: config.SERVO_CHANNELS[_HL]["neutral"],
+                 _HR: config.SERVO_CHANNELS[_HR]["min"]},
+         eyes=_EYE_SLEEP),
+
+    # 0.8 s — activate very dim eye breathing on the head Nano.
+    #          EYE was already set in the previous step; IDLE triggers breathing.
+    Step(delay=0.8,
+         head=config.LED_CMD_IDLE),
+]
+
+
+# --- Wake from sleep --------------------------------------------------------
+# Rex struggles back from slumped to neutral — very slow at first, pauses
+# mid-way as if almost going back to sleep, then commits (~7.5 s total).
+# All channels animated — idle thread is stopped during sleep.
+
+WAKE_FROM_SLEEP: list[Step] = [
+    # Immediately: set extremely slow speed; barely a twitch — tiny headtilt
+    # movement signals Rex is stirring.  Eyes start to brighten.
+    Step(delay=0.0,
+         speeds={_P: config.SERVO_SLEEP_SPEED,
+                 _L: config.SERVO_SLEEP_SPEED,
+                 _T: config.SERVO_SLEEP_SPEED,
+                 _V: config.SERVO_SLEEP_SPEED,
+                 _AL: config.SERVO_SLEEP_SPEED,
+                 _HL: config.SERVO_SLEEP_SPEED,
+                 _AR: config.SERVO_SLEEP_SPEED,
+                 _HR: config.SERVO_SLEEP_SPEED},
+         servos={_T: 5300, _V: 4700},
+         eyes=(0, 8, 45)),
+
+    # 1.8 s — slow stir: headlift barely lifts, visor opens a crack.
+    Step(delay=1.8,
+         servos={_T: 5100, _L: 2500, _V: 4900},
+         eyes=(0, 18, 70)),
+
+    # 1.5 s — PERSONALITY PAUSE: visor flutters open slightly (Rex hesitating).
+    #          Speed bump on visor only so the flutter is perceptible.
+    Step(delay=1.5,
+         speeds={_V: 8},
+         servos={_V: 5200},
+         eyes=(0, 25, 90)),
+
+    # 0.7 s — visor drops back — Rex almost goes back to sleep.
+    Step(delay=0.7,
+         servos={_V: 4900}),
+
+    # 0.8 s — Rex commits; all channels pick up speed.
+    Step(delay=0.8,
+         speeds={_P: 6, _L: 6, _T: 6, _V: 6, _AL: 6, _AR: 6, _HR: 6},
+         servos={_T: 4800, _L: 3600, _V: 5500,
+                 _AR: 4800, _HR: 4800},
+         eyes=(0, 40, 140)),
+
+    # 1.5 s — picking up more speed, rising purposefully.
+    Step(delay=1.5,
+         speeds={_P: 12, _L: 12, _T: 12, _V: 12,
+                 _AL: 12, _HL: 12, _AR: 12, _HR: 12},
+         servos={_T: 4450, _L: 5000, _V: 6200,
+                 _AL: 6000, _AR: 5500, _HR: 5500},
+         eyes=(0, 55, 190)),
+
+    # 1.2 s — fully upright; restore normal speeds and neutral positions.
+    Step(delay=1.2,
+         speeds={_P: config.SERVO_DEFAULT_SPEED,
+                 _L: config.SERVO_DEFAULT_SPEED,
+                 _T: config.SERVO_DEFAULT_SPEED,
+                 _V: config.SERVO_DEFAULT_SPEED,
+                 _AL: config.SERVO_DEFAULT_SPEED,
+                 _HL: config.SERVO_DEFAULT_SPEED,
+                 _AR: config.SERVO_DEFAULT_SPEED,
+                 _HR: config.SERVO_DEFAULT_SPEED},
+         servos={_T: 4320, _L: config.SERVO_CHANNELS[_L]["neutral"],
+                 _P: 6000,  _V: 6500,
+                 _AL: 6720, _AR: 6000, _HL: 6000, _HR: 6000},
+         head=config.LED_CMD_ACTIVE,
+         eyes=_EYE_BLUE),
+]
+
+
 # --- Neutral ----------------------------------------------------------------
 # Smooth return to center — used when resetting emotion state (~0.8 s).
 # Head channels only.
@@ -391,6 +516,24 @@ class AnimationPlayer:
 
         # Non-blocking — returns immediately; animation runs in daemon thread.
         self._launch(WAKE_GREETING, blocking=False)
+
+    def play_sleep(self) -> None:
+        """Start the sleep (exhausted collapse) animation in a background thread.
+
+        Call *after* stopping the ServoController idle thread so all channels
+        are free.  Returns immediately; the animation runs for ~7.5 s total.
+        Call wait() to block until complete before entering sleep state.
+        """
+        self._launch(SLEEP, blocking=False)
+
+    def play_wake_from_sleep(self) -> None:
+        """Start the wake-from-sleep (struggle back to neutral) animation.
+
+        Returns immediately; the animation runs for ~7.5 s total.
+        Rex pauses mid-way for a hesitation personality beat before committing
+        to waking up.  Call wait() to block until the animation finishes.
+        """
+        self._launch(WAKE_FROM_SLEEP, blocking=False)
 
     def play_emotion(self, emotion: str) -> None:
         """Play an emotion animation in the background.

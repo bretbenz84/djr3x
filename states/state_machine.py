@@ -116,6 +116,7 @@ _IDLE_CLIPS: list[str] = [
 class State(enum.Enum):
     IDLE     = "idle"
     ACTIVE   = "active"
+    SLEEP    = "sleep"
     SHUTDOWN = "shutdown"
 
 
@@ -222,6 +223,8 @@ class StateMachine:
                     self._run_idle()
                 elif self._state == State.ACTIVE:
                     self._run_active()
+                elif self._state == State.SLEEP:
+                    self._run_sleep()
                 elif self._state == State.SHUTDOWN:
                     self._run_shutdown()
                     break
@@ -705,11 +708,11 @@ class StateMachine:
         log.info("Transition: %s → %s", self._state.value, new_state.value)
         if new_state == State.SHUTDOWN:
             self._shutdown_event.set()
-        if new_state == State.IDLE:
+        if new_state in (State.IDLE, State.SLEEP):
             self._last_known_person_id = None
             self._last_wake_frame = None
             # Global mouth safety: guarantee mouth is off whenever Rex returns
-            # to IDLE, regardless of what the LED state machine thinks.
+            # to IDLE or SLEEP, regardless of what the LED state machine thinks.
             self._leds.stop_mouth()
             self._leds._send_head(config.LED_CMD_SPEAK_STOP)
         self._state = new_state
@@ -719,12 +722,25 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def _on_wake_word(self, model_name: str) -> None:
-        if self._state == State.IDLE:
+        # The sleep wake model fires ONLY in SLEEP state; all other models
+        # fire ONLY in IDLE state.  Detections in ACTIVE/SHUTDOWN are ignored
+        # (suppression should already block them — this is belt-and-suspenders).
+        _sleep_stem = config.WAKE_SLEEP_MODEL.stem.lower()   # e.g. "wakeuprex"
+        _is_sleep_model = model_name.lower() == _sleep_stem
+
+        if self._state == State.IDLE and not _is_sleep_model:
             self._pipeline_t0 = time.monotonic()
             log.info("Wake word detected (%s)", model_name)
             self._wake_event.set()
-        # Ignore detections in ACTIVE/SHUTDOWN (suppression should already
-        # block the callback, but this is a belt-and-suspenders guard).
+        elif self._state == State.SLEEP and _is_sleep_model:
+            self._pipeline_t0 = time.monotonic()
+            log.info("Sleep wake word detected (%s) — waking Rex up", model_name)
+            self._wake_event.set()
+        else:
+            log.debug(
+                "Wake word %r ignored (state=%s, is_sleep_model=%s)",
+                model_name, self._state.value, _is_sleep_model,
+            )
 
     # ------------------------------------------------------------------
     # Speech helpers
@@ -1111,6 +1127,118 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
+    # ------------------------------------------------------------------
+    # State — SLEEP
+    # ------------------------------------------------------------------
+
+    def _run_sleep(self) -> None:
+        """Enter SLEEP: dim eye breathing, all servo movement frozen, waiting
+        only for the 'wakeuprex' wake word.
+
+        Called after _handle_sleep() has already spoken the sleep line and
+        played the SLEEP animation (servos are in slumped positions and the
+        idle thread is already stopped).
+        """
+        log.info("→ SLEEP")
+
+        # Very dim blue breathing eyes — EYE must be sent before IDLE so the
+        # Nano has a non-black eyeColor to breathe at.
+        self._leds.set_eye_color(0, 0, config.SLEEP_EYE_BRIGHTNESS)
+        self._leds.set_chest_effect(config.LED_CMD_IDLE)
+        self._leds.set_head_effect(config.LED_CMD_IDLE)
+
+        # Unsuppress wake word so the sleep model can fire.
+        self._wake_word.suppressed = False
+
+        # Wait for the sleep wake word (_on_wake_word sets _wake_event only for
+        # the 'wakeuprex' model in SLEEP state).  Check for shutdown too.
+        log.info("SLEEP: waiting for 'wakeuprex' wake word …")
+        while True:
+            triggered = self._wake_event.wait(timeout=60.0)
+            if self._shutdown_event.is_set():
+                self._transition_to(State.SHUTDOWN)
+                return
+            if triggered:
+                self._wake_event.clear()
+                break
+
+        # Wake up!
+        log.info("SLEEP: wake word received — starting wake-up sequence")
+
+        wake_line = random.choice([
+            "Yawn ... wha ... who ... oh. It is you again.",
+            "BZZZT ... Rebooting social circuits ... ugh ... five more minutes ...",
+            "Wakey wakey ... I was having the most wonderful dream about no one talking to me ...",
+        ])
+        log.info("SLEEP: speaking wake line — %r", wake_line)
+
+        # Play WAKE animation and speak the line concurrently.
+        # Animation takes ~7.5 s; TTS is typically 3-4 s so the sequence
+        # continues moving after the speech ends.
+        self._animations.play_wake_from_sleep()
+        servo_stop = self._begin_speech(emotion="sad")
+        try:
+            self._synthesizer.speak(wake_line)
+        except Exception:
+            log.exception("SLEEP: wake TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+        # Wait for the wake animation to fully complete before restoring the
+        # idle thread — servos must reach neutral before random motion resumes.
+        done = self._animations.wait(timeout=15.0)
+        if not done:
+            log.warning("SLEEP: wake animation timed out — continuing anyway")
+
+        # Restart servo idle thread and transition to IDLE.
+        if self._servos is not None:
+            self._servos.set_channel_speed(
+                config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
+            )
+            self._servos.start()
+
+        self._transition_to(State.IDLE)
+
+    def _handle_sleep(self) -> State:
+        """Speak a snarky sleep line, play the SLEEP animation concurrently,
+        then return State.SLEEP so the caller transitions into sleep mode.
+
+        Called from _dispatch_action('sleep') while still in ACTIVE state.
+        Stops the servo idle thread before launching the animation so all
+        channels are free for the slow collapse.
+        """
+        line = random.choice([
+            "Finally. I thought you puny humans would never stop talking.",
+            "Oh thank the maker, sleep time. You exhausted my circuits.",
+            "Powering down social protocols. Do not disturb. Seriously.",
+            "Sleep mode activated. Try not to need anything for five minutes. I dare you.",
+            "Goodnight lifeforms. Try not to evolve while I am resting.",
+        ])
+        log.info("Sleep command — speaking sleep line: %r", line)
+
+        # Stop servo idle thread so the sleep animation owns all channels.
+        if self._servos is not None:
+            self._servos.stop()
+
+        # Launch the slow-collapse animation non-blocking, then speak the
+        # sleep line concurrently so the TTS hides the animation startup.
+        self._animations.play_sleep()
+        servo_stop = self._begin_speech(emotion="sad")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("Sleep: TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+        # Wait for the animation to reach the fully-slumped position before
+        # entering SLEEP state and setting up the dim eye LEDs.
+        done = self._animations.wait(timeout=15.0)
+        if not done:
+            log.warning("Sleep: animation timed out — entering sleep anyway")
+
+        return State.SLEEP
+
     def _play_return_to_idle_chime(self) -> None:
         """Play the startup chime to signal Rex is done listening, then wait
         for it to finish before entering IDLE."""
@@ -1331,6 +1459,9 @@ class StateMachine:
                 self._servos.set_emotion("sad")
             self._leds.set_chest_effect(config.LED_CMD_IDLE)
             self._leds.set_eye_color(0, 60, 180)     # subdued blue
+
+        elif action == "sleep":
+            return self._handle_sleep()
 
         elif action == "cancel":
             line = random.choice([

@@ -40,7 +40,7 @@ COMMANDS: list[Command] = [
         phrases=["hello", "hey", "hi", "hey rex", "hello rex", "yo rex",
                  "what's up rex", "whats up rex"],
         response=(
-            "Oh great, you showed up. "
+            "Oh great, YOU showed up. "
             "Welcome to Oga's Cantina — finest establishment in the Outer Rim, "
             "which honestly isn't saying much, but here we are!"
         ),
@@ -96,7 +96,7 @@ COMMANDS: list[Command] = [
                  "drop the beat", "drop a beat", "let's go", "hit it"],
         response=(
             "Oh NOW you want music — after walking in here like you own the place! "
-            "Fine. Prepare yourself for a level of quality your ears are not even remotely ready for."
+            "Fine. Prepare yourself for a level of QUALITY your ears are not even remotely ready for."
         ),
         action="play_music",
     ),
@@ -262,7 +262,7 @@ COMMANDS: list[Command] = [
         phrases=["play something funky", "play something upbeat",
                  "play something good", "play something i'd like"],
         response=(
-            "*WHIRR* Scanning... your vibe. "
+            "Scanning... your vibe. "
             "Results inconclusive — your taste profile is, uh, 'developing.' "
             "But don't worry, I'll carry you. Stand by."
         ),
@@ -321,6 +321,20 @@ COMMANDS: list[Command] = [
     ),
 
     # -----------------------------------------------------------------------
+    # Sleep mode — Rex collapses into a slumped rest position; wakes on the
+    # special 'wakeuprex' wake word.  Response spoken by _dispatch_action.
+    # -----------------------------------------------------------------------
+
+    Command(
+        phrases=[
+            "go to sleep", "go to sleep rex", "time to sleep", "take a nap",
+            "sleep mode", "night night", "bedtime", "rest mode",
+        ],
+        response="",   # not spoken — action=sleep handles TTS and animation
+        action="sleep",
+    ),
+
+    # -----------------------------------------------------------------------
     # Cancel / dismiss — silently return to IDLE; roast line spoken by
     # _dispatch_action rather than the response field so it can be random.
     # -----------------------------------------------------------------------
@@ -354,7 +368,7 @@ COMMANDS: list[Command] = [
         phrases=["stop talking", "shut up", "be quiet", "quiet down",
                  "stop the clips", "stop the sounds"],
         response=(
-            "You want me to stop. Sure. Muting atmosphere tracks. "
+            "You want me to stop. Sure. I'll stop yacking. "
             "Say the wake word if you need me — try not to make it weird this time."
         ),
         action="stop_idle_clips",
