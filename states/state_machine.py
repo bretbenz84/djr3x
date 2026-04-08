@@ -1143,10 +1143,8 @@ class StateMachine:
 
         # Very dim blue breathing eyes — EYE must be sent before IDLE so the
         # Nano has a non-black eyeColor to breathe at.
-        self._leds.set_eye_color(0, 0, config.SLEEP_EYE_BRIGHTNESS)
         self._leds.set_chest_effect(config.LED_CMD_IDLE)
-        self._leds.set_head_effect(config.LED_CMD_IDLE)
-        self._leds.set_sleep_mode()   # start red breathing mouth animation
+        self._leds.set_sleep_mode()   # eyes off + red breathing mouth animation
 
         # Unsuppress wake word so the sleep model can fire.
         self._wake_word.suppressed = False
@@ -1165,6 +1163,7 @@ class StateMachine:
 
         # Wake up!
         log.info("SLEEP: wake word received — starting wake-up sequence")
+        self._leds.clear_sleep_mode()
 
         wake_line = random.choice([
             "Yawn ... wha ... who ... oh. It is you again.",

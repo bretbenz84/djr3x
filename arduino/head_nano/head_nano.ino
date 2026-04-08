@@ -415,11 +415,17 @@ void handleCommand(char *cmd) {
         return;
     }
 
-    // SLEEP — mouth pulses red (breathing); eyes unchanged.
+    // SLEEP — mouth pulses red (breathing); eyes off; blink suspended.
     if (strcmp(cmd, "SLEEP") == 0) {
+        animMode      = ANIM_SLEEP;
+        eyeColor      = CRGB::Black;
+        eyesActive    = false;
+        blinkState    = BLINK_OPEN;
+        isSecondBlink = false;
+        leds[0]       = CRGB::Black;
+        leds[1]       = CRGB::Black;
         mouthOff();
         FastLED.show();
-        animMode = ANIM_SLEEP;
         return;
     }
 

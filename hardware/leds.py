@@ -90,6 +90,7 @@ class LEDController:
         self._mouth_stop   = threading.Event()
         self._mouth_thread: threading.Thread | None = None
         self._mouth_active: bool = False   # True while mouth is in SPEAK mode
+        self._sleep_active: bool = False   # True while in SLEEP mode; suppresses watchdog
 
         # Serialise writes from the main thread and mouth thread.
         # Each Nano gets its own lock so chest writes never block head writes.
@@ -157,8 +158,17 @@ class LEDController:
     # ------------------------------------------------------------------
 
     def set_sleep_mode(self) -> None:
-        """Start the red breathing mouth animation on the head Nano (SLEEP mode)."""
+        """Start the red breathing mouth animation on the head Nano (SLEEP mode).
+
+        Also sets _sleep_active so the stop_mouth() watchdog does not override
+        the SLEEP animation with a stale SPEAK_STOP.
+        """
+        self._sleep_active = True
         self._send_head("SLEEP\n")
+
+    def clear_sleep_mode(self) -> None:
+        """Clear the sleep-mode flag (call when leaving SLEEP state)."""
+        self._sleep_active = False
 
     def set_mouth_emotion(self, emotion: str) -> None:
         """Send SPEAK:{emotion} to the head Nano to set the mouth colour.
@@ -246,9 +256,10 @@ class LEDController:
     def _mouth_watchdog(self) -> None:
         """Last-resort safety net: 2 s after stop_mouth(), re-send SPEAK_STOP if
         the mouth is still not active (i.e. no new speech started in the meantime).
+        Suppressed when in SLEEP mode so the red breathing animation is not killed.
         """
         time.sleep(2.0)
-        if not self._mouth_active:
+        if not self._mouth_active and not self._sleep_active:
             log.debug("Mouth watchdog: re-sending SPEAK_STOP × 3 (safety net)")
             for _ in range(3):
                 self._send_head(config.LED_CMD_SPEAK_STOP)
