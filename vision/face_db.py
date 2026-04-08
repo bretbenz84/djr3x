@@ -182,6 +182,14 @@ class FaceDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def rename_person(self, person_id: int, new_name: str) -> None:
+        """Update the display name for an existing person."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE people SET name = ? WHERE id = ?", (new_name, person_id)
+            )
+        log.info("FaceDB: renamed person id=%d to '%s'", person_id, new_name)
+
     def delete_person(self, person_id: int) -> None:
         """Remove a person and all their encodings."""
         with self._conn:

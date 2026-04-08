@@ -165,6 +165,11 @@ class StateMachine:
         # automatically the next time the wake word activates Rex.
         self._idle_clips_enabled: bool = True
 
+        # Tracks the person_id of the last face-recognised visitor so that a
+        # "call me X" command can update their name without a second camera scan.
+        # Cleared whenever we return to IDLE.
+        self._last_known_person_id: int | None = None
+
         # Greeting toggle — alternates between canned ("Hi There.mp3") and
         # personalized (GPT-4o + camera) on successive wake word activations.
         # False → canned first, then flips to True for personalized, and so on.
@@ -695,6 +700,8 @@ class StateMachine:
         log.info("Transition: %s → %s", self._state.value, new_state.value)
         if new_state == State.SHUTDOWN:
             self._shutdown_event.set()
+        if new_state == State.IDLE:
+            self._last_known_person_id = None
         self._state = new_state
 
     # ------------------------------------------------------------------
@@ -742,6 +749,7 @@ class StateMachine:
                 self._face_db.update_last_seen(person_id)
                 person = self._face_db.get_person(person_id)
                 visit_count = person["visit_count"] if person else 1
+                self._last_known_person_id = person_id
                 self._play_known_person_greeting(name, visit_count)
                 return
 
@@ -1235,45 +1243,49 @@ class StateMachine:
         new_name = " ".join(name_text.strip().rstrip(".,!?").strip().split()[:2]).title()
         log.info("rename_me: requested name %r", new_name)
 
-        # Capture a fresh frame and identify the person.
-        frame = self._camera.capture_frame() if self._camera.is_available() else None
-        if not frame:
-            line = "I can't see you right now — try again when the camera is working!"
-            log.info("rename_me: no camera frame available")
-            servo_stop = self._begin_speech(emotion="neutral")
-            try:
-                self._synthesizer.speak(line)
-            except Exception:
-                log.exception("rename_me: TTS error (no frame)")
-            finally:
-                self._end_speech(servo_stop)
-            return
+        # If we already recognised this person during their greeting, use that
+        # person_id directly — no need for another camera scan.
+        if self._last_known_person_id is not None:
+            person_id = self._last_known_person_id
+            log.info("rename_me: using cached person_id=%d", person_id)
+        else:
+            # Unknown visitor path — capture a fresh frame and try to identify.
+            frame = self._camera.capture_frame() if self._camera.is_available() else None
+            if not frame:
+                line = "I can't see you right now — try again when the camera is working!"
+                log.info("rename_me: no camera frame available")
+                servo_stop = self._begin_speech(emotion="neutral")
+                try:
+                    self._synthesizer.speak(line)
+                except Exception:
+                    log.exception("rename_me: TTS error (no frame)")
+                finally:
+                    self._end_speech(servo_stop)
+                return
 
-        result = self._face_recognizer.identify(frame, tolerance=config.FACE_RECOGNITION_TOLERANCE)
-        if result is None:
-            line = "I don't think we've met yet! Say the wake word and I'll introduce myself properly."
-            log.info("rename_me: face not recognised — cannot rename")
-            servo_stop = self._begin_speech(emotion="neutral")
-            try:
-                self._synthesizer.speak(line)
-            except Exception:
-                log.exception("rename_me: TTS error (not recognised)")
-            finally:
-                self._end_speech(servo_stop)
-            return
+            result = self._face_recognizer.identify(frame, tolerance=config.FACE_RECOGNITION_TOLERANCE)
+            if result is None:
+                line = "I don't think we've met yet! Say the wake word and I'll introduce myself properly."
+                log.info("rename_me: face not recognised — cannot rename")
+                servo_stop = self._begin_speech(emotion="neutral")
+                try:
+                    self._synthesizer.speak(line)
+                except Exception:
+                    log.exception("rename_me: TTS error (not recognised)")
+                finally:
+                    self._end_speech(servo_stop)
+                return
 
-        person_id, old_name, _dist = result
+            person_id = result[0]
+
         try:
-            with self._face_db._conn:
-                self._face_db._conn.execute(
-                    "UPDATE people SET name = ? WHERE id = ?", (new_name, person_id)
-                )
-            log.info("rename_me: renamed person id=%d '%s' → '%s'", person_id, old_name, new_name)
+            self._face_db.rename_person(person_id, new_name)
         except Exception:
             log.exception("rename_me: database update failed")
             return
 
         line = random.choice([
+            f"Fine, {new_name} it is. Weird choice but okay.",
             f"Got it — {new_name} it is. Memory banks updated. Try to live up to it.",
             f"*BWOOP* {new_name}! Bold name choice. I'll allow it.",
             f"Done. You're {new_name} in my files now — don't make me regret learning that.",
