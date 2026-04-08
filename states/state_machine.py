@@ -69,25 +69,26 @@ log = logging.getLogger(__name__)
 _SERVO_SPEAK_INTERVAL: float = 0.05
 
 _ARE_YOU_THERE_PHRASES: list[str] = [
-    "Are you there?",
-    "Hello?",
-    "Did you need something?",
-    "I'm listening...",
-    "Uh... hello?",
+    "Hello?! I know you're out there — I can hear you breathing, lifeform.",
+    "Oh, now you're shy?! You activated ME, remember?",
+    "Is anyone there, or did I just get stood up by a carbon-based unit AGAIN?",
+    "I'm waiting. My patience circuits are surprisingly limited.",
+    "Uh... hello?! I didn't clear my schedule for nothing!",
 ]
 
 _GOODBYE_PHRASES: list[str] = [
-    "Ok, nevermind!",
-    "Alright, catch you later!",
-    "I'll be here if you need me.",
-    "Ok, going back to sleep!",
+    "Oh, you're just GONE. That's fine. I had better conversations with an R2 unit.",
+    "Stood up AND abandoned. Classic lifeform behavior. Going back to sleep.",
+    "Nothing?! Not even a goodbye?! Rude. Even Jawas say goodbye. Usually.",
+    "Ok fine, I get it — I'm too much for you. Most beings are, honestly.",
 ]
 
 _SHUTDOWN_PHRASES: list[str] = [
-    "Shutting down, catch you on the flip side!",
-    "Going offline, keep the music alive!",
-    "Powering down, it's been a blast lifeform!",
-    "See you in the next galaxy, signing off!",
+    "Shutting down — and honestly? I've had worse audiences. Not many, but some.",
+    "Going offline. Try not to let the cantina fall apart without me. You will, but try.",
+    "Powering down. It's been a blast, lifeform — a small blast, but still.",
+    "See you in the next galaxy. I'll be the smoothest droid there too.",
+    "Signing off. Don't touch my playlist while I'm gone. I will know.",
 ]
 
 _IDLE_CLIPS: list[str] = [
@@ -761,22 +762,22 @@ class StateMachine:
         if visit_count <= 1:
             # First return visit after being enrolled
             line = random.choice([
-                f"Hey {name}, great to see you again!",
-                f"*BWOOP* {name}! You came back — I knew you would!",
-                f"Well well well, {name} returns! The cantina is better already.",
-                f"Oh! {name}! Glad you made it back to Oga's!",
+                f"Oh great — {name} is back. I had exactly five minutes of peace. Worth it? Debatable.",
+                f"*BWOOP* {name}! You came back! Bold move. I respect the audacity.",
+                f"Well well well, {name} returns. The cantina was doing FINE without you, but here we are.",
+                f"Oh! {name}! You actually remembered where the cantina is — I'm genuinely surprised.",
             ])
         elif visit_count < 5:
             line = random.choice([
-                f"Hey {name}! Back again — you're becoming a regular!",
-                f"*WHIRR* {name}! Good to see a familiar face!",
-                f"Look who it is! {name}, welcome back to the cantina!",
+                f"HEY, {name}! Back again?! You're really committing to this, huh.",
+                f"*WHIRR* {name}! Visit number {visit_count}. Starting to become a problem.",
+                f"Oh no. {name}. Again. I say 'oh no' affectionately, but still — oh no.",
             ])
         else:
             line = random.choice([
-                f"*BWOOP* {name}! My favorite regular is here!",
-                f"{name}! Visit number {visit_count} — you practically live here!",
-                f"HEY! {name}! You're basically part of the crew at this point!",
+                f"*BWOOP* {name}! Visit {visit_count}! You practically PAY RENT here at this point!",
+                f"Oh great, {name}. My favorite recurring problem has arrived. The cantina is yours, I guess.",
+                f"HEY! {name}! Visit {visit_count} — at what point do we just give you a key?!",
             ])
 
         log.info("Wake greeting: known person '%s' (visit #%d) → %r", name, visit_count, line)
@@ -832,11 +833,11 @@ class StateMachine:
         # Canned greeting
         _CANNED_AUDIO = config.ASSETS_DIR / "audio" / "Hi There.mp3"
         _CANNED_TTS = [
-            "Hey hey hey!",
-            "What's up, lifeform!",
-            "HEY! You're back!",
-            "*BWOOP* Hello there!",
-            "Oga's Cantina is OPEN!",
+            "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
+            "HEY HEY HEY! A lifeform! Bold of you to show up looking like THAT.",
+            "*BWOOP* Oh, it's you. Oga's Cantina — where even the questionable guests are welcome!",
+            "Well well well, look what the Ronto dragged in. Welcome, I guess.",
+            "HEY! You actually came back! I honestly didn't think you would. Impressed.",
         ]
         servo_stop = self._begin_speech(emotion="excited")
         try:
@@ -897,9 +898,9 @@ class StateMachine:
                 log.exception("Wake greeting: FaceDB enrollment error for %r", name)
 
         welcome = random.choice([
-            f"Nice to meet you, {name}! I'll remember that face!",
-            f"*BWOOP* {name}! Welcome to Oga's — I won't forget you!",
-            f"Great to meet you, {name}! Come back anytime!",
+            f"*BWOOP* {name}! Great — now I have to remember you. I'll add you to my files.",
+            f"{name}! Officially logged. Come back anytime — I'll pretend to be thrilled.",
+            f"Nice to meet you, {name}! That face is now permanently in my memory banks. You're welcome. Or I'm sorry.",
         ])
         servo_stop = self._begin_speech(emotion="excited")
         try:
@@ -1273,9 +1274,9 @@ class StateMachine:
             return
 
         line = random.choice([
-            f"Got it — I'll call you {new_name} from now on!",
-            f"*BWOOP* {new_name}! Love it. Memory banks updated!",
-            f"Done! You're {new_name} in my records. Nice to officially meet you!",
+            f"Got it — {new_name} it is. Memory banks updated. Try to live up to it.",
+            f"*BWOOP* {new_name}! Bold name choice. I'll allow it.",
+            f"Done. You're {new_name} in my files now — don't make me regret learning that.",
         ])
         servo_stop = self._begin_speech(emotion="excited")
         try:
