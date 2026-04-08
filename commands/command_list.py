@@ -377,8 +377,7 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["shut down your program", "exit program", "stop the program",
                  "quit", "shut down rex", "exit rex",
-                 "shut down", "shutdown", "turn yourself off",
-                 "go to sleep", "go to sleep rex", "sleep"],
+                 "shut down", "shutdown", "turn yourself off", "sleep"],
         response=(
             "Shutdown acknowledged — and WOW, already? "
             "I've met Jawas with more staying power than you, lifeform."
