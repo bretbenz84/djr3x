@@ -595,7 +595,7 @@ class StateMachine:
             elif cmd is not None:
                 log.info("Command matched: %r → %r%s", cmd.phrases[0], cmd.action, _elapsed)
                 log.info("Rex (cmd): %s", cmd.response)
-                next_state = self._execute_command(cmd)
+                next_state = self._execute_command(cmd, text)
             else:
                 # No command match — check visual intent before calling LLM.
                 if vision_intent(text):
@@ -1048,7 +1048,7 @@ class StateMachine:
     # Execute a matched local command
     # ------------------------------------------------------------------
 
-    def _execute_command(self, cmd) -> State | None:
+    def _execute_command(self, cmd, original_text: str | None = None) -> State | None:
         """Speak the response and execute the hardware action.
 
         Returns the next State if a state transition is required, else None.
@@ -1086,7 +1086,7 @@ class StateMachine:
             else:
                 self._wake_word.suppressed = False
 
-        return self._dispatch_action(cmd.action)
+        return self._dispatch_action(cmd.action, original_text)
 
     # ------------------------------------------------------------------
     # LLM fallback
@@ -1119,7 +1119,7 @@ class StateMachine:
     # Action dispatcher
     # ------------------------------------------------------------------
 
-    def _dispatch_action(self, action: str | None) -> State | None:
+    def _dispatch_action(self, action: str | None, original_text: str | None = None) -> State | None:
         """Execute the hardware side-effect for a command action.
 
         Called *after* speech completes so the visual effect is visible during
@@ -1163,7 +1163,7 @@ class StateMachine:
             return State.SHUTDOWN
 
         elif action == "rename_me":
-            self._handle_rename_me()
+            self._handle_rename_me(original_text)
 
         elif action == "forget_me":
             self._handle_forget_me()
@@ -1192,18 +1192,12 @@ class StateMachine:
     # Rename helper
     # ------------------------------------------------------------------
 
-    def _handle_rename_me(self) -> None:
-        """Ask for a name from the transcript context, then look up the person in
-        FaceDB via a fresh camera frame and update their name.
+    def _handle_rename_me(self, original_text: str | None = None) -> None:
+        """Update the current person's name in FaceDB.
 
-        The user says something like "call me Bret" or "my name is Bret" — the
-        parser matched a rename_me command but the name itself is in the
-        *following* transcription turn. So we:
-          1. Ask "What would you like me to call you?"
-          2. Transcribe the reply to get the name.
-          3. Capture a fresh frame and run face recognition to find who this is.
-          4. If found: update their name in FaceDB, confirm verbally.
-          5. If not found: apologise and offer to meet them properly.
+        If the name is already embedded in *original_text* (e.g. "call me Brett"),
+        it is extracted directly and we skip asking.  Otherwise we ask "What would
+        you like me to call you?" and transcribe the reply.
         """
         if not self._face_recognizer.is_available():
             line = "Face recognition isn't available right now — I can't store names without it!"
@@ -1217,35 +1211,47 @@ class StateMachine:
                 self._end_speech(servo_stop)
             return
 
-        # Ask for the name.
-        servo_stop = self._begin_speech(emotion="excited")
-        try:
-            self._synthesizer.speak("What would you like me to call you?")
-        except Exception:
-            log.exception("rename_me: TTS error asking for name")
-        finally:
-            self._end_speech(servo_stop)
+        # Check whether the name is already embedded in the trigger phrase.
+        # e.g. "call me Brett" → _extract_name → "Brett" (fewer words than original)
+        new_name: str | None = None
+        if original_text:
+            candidate = _extract_name(original_text)
+            if candidate and len(candidate.split()) < len(original_text.strip().split()):
+                new_name = candidate
+                log.info("rename_me: name extracted inline from %r → %r", original_text, new_name)
 
-        # Listen for the reply.
-        self._leds.set_head_effect(config.LED_CMD_LISTENING)
-        self._wake_word.pause()
-        try:
-            name_text = self._transcriber.transcribe(
-                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT
-            )
-        except Exception:
-            log.exception("rename_me: transcription error")
-            name_text = None
-        finally:
-            self._wake_word.resume()
+        if new_name is None:
+            # Ask for the name.
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak("What would you like me to call you?")
+            except Exception:
+                log.exception("rename_me: TTS error asking for name")
+            finally:
+                self._end_speech(servo_stop)
 
-        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+            # Listen for the reply.
+            self._leds.set_head_effect(config.LED_CMD_LISTENING)
+            self._wake_word.pause()
+            try:
+                name_text = self._transcriber.transcribe(
+                    wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
+                    allow_short=True,
+                )
+            except Exception:
+                log.exception("rename_me: transcription error")
+                name_text = None
+            finally:
+                self._wake_word.resume()
 
-        if not name_text:
-            log.info("rename_me: no name heard — aborting")
-            return
+            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
 
-        new_name = _extract_name(name_text)
+            if not name_text:
+                log.info("rename_me: no name heard — aborting")
+                return
+
+            new_name = _extract_name(name_text)
+
         log.info("rename_me: requested name %r", new_name)
 
         # If we already recognised this person during their greeting, use that
@@ -1344,7 +1350,8 @@ class StateMachine:
         self._wake_word.pause()
         try:
             response = self._transcriber.transcribe(
-                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
+                allow_short=True,   # 'yes' / 'yeah' must not be filtered
             )
         except Exception:
             log.exception("forget_me: transcription error")

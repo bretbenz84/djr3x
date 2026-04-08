@@ -69,6 +69,15 @@ def parse(text: str) -> Command | None:
         log.debug("Command exact match: %r → %s", normalized, cmd.phrases[0])
         return cmd
 
+    # --- Stage 1b: prefix match ---
+    # Catches "call me Brett" → "call me", "rename me to Alex" → "rename me to", etc.
+    # Checks longest phrases first so a longer prefix never loses to a shorter one.
+    for phrase in sorted(PHRASE_INDEX, key=len, reverse=True):
+        if normalized.startswith(phrase + " "):
+            cmd = PHRASE_INDEX[phrase]
+            log.debug("Command prefix match: %r starts with %r → %s", normalized, phrase, cmd.phrases[0])
+            return cmd
+
     # --- Stage 2: fuzzy match ---
     # Skip fuzzy matching for very short inputs — a 1-3 character string can
     # accidentally score above the threshold against much longer phrases.

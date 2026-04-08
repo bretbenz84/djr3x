@@ -7,7 +7,9 @@
       "Bash(arduino-cli compile:*)",
       "Bash(ls /home/bbenziger/djr3x/*.py)",
       "Bash(venv/bin/python -c \"from vision.face_db import FaceDB; db = FaceDB\\('/tmp/test_face.db'\\); print\\('OK'\\); db.close\\(\\)\")",
-      "Bash(venv/bin/python -c ':*)"
+      "Bash(venv/bin/python -c ':*)",
+      "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; print\\('OK -', len\\(PHRASE_INDEX\\), 'phrases'\\)\")",
+      "Bash(python3 -c ':*)"
     ]
   }
 }

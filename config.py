@@ -280,8 +280,11 @@ WHISPER_MIN_WORDS = 2
 
 # Whisper-specific recording limits (tighter than the generic caps in the
 # "recording / wake word" section above — shorter recording = lower latency).
-WHISPER_MAX_RECORD_SECONDS = float(_optional("WHISPER_MAX_RECORD_SECONDS", "8.0"))
-WHISPER_SILENCE_DURATION   = float(_optional("WHISPER_SILENCE_DURATION",   "0.4"))
+WHISPER_MAX_RECORD_SECONDS   = float(_optional("WHISPER_MAX_RECORD_SECONDS",   "8.0"))
+WHISPER_SILENCE_DURATION     = float(_optional("WHISPER_SILENCE_DURATION",     "0.4"))
+# Silence required before ending a recording — longer than WHISPER_SILENCE_DURATION
+# to avoid cutting off speech in noisy environments or natural mid-sentence pauses.
+TRANSCRIBE_SILENCE_DURATION  = float(_optional("TRANSCRIBE_SILENCE_DURATION",  "1.2"))
 
 # Substrings (lowercase) that identify known Whisper hallucination phrases.
 # Any result whose lowercased text contains one of these is silently dropped.
@@ -310,6 +313,11 @@ WHISPER_HALLUCINATION_FILTER: list[str] = [
     ".org",
     "otter.ai",
     "transcribed by",
+    # Repeated filler words — classic Whisper hallucination on near-silence audio
+    "okay okay okay",
+    "okay okay",
+    "ok ok ok",
+    "ok ok",
 ]
 
 # ---------------------------------------------------------------------------

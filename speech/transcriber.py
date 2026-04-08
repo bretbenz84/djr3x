@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 # the audio sent to the API and lower end-to-end latency.
 _SILENCE_CHUNKS_NEEDED: int = max(
     1,
-    round(config.WHISPER_SILENCE_DURATION * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE),
+    round(config.TRANSCRIBE_SILENCE_DURATION * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE),
 )
 _MAX_CHUNKS: int = round(
     config.WHISPER_MAX_RECORD_SECONDS * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE
@@ -142,6 +142,7 @@ class Transcriber:
         self,
         wait_for_speech_seconds: float | None = None,
         t0: float | None = None,
+        allow_short: bool = False,
     ) -> str | None:
         """Capture one utterance from the microphone and return its text.
 
@@ -313,7 +314,7 @@ class Transcriber:
             time.monotonic() - t_api, _mark(),
         )
         log.debug("Whisper result: %r", text)
-        return _filter_hallucination(text)
+        return _filter_hallucination(text, allow_short=allow_short)
 
 
 # ---------------------------------------------------------------------------
@@ -351,14 +352,17 @@ def _is_date_hallucination(text: str) -> bool:
     return False
 
 
-def _filter_hallucination(text: str) -> str:
+def _filter_hallucination(text: str, allow_short: bool = False) -> str:
     """Return text unchanged if it looks like real speech, otherwise "".
 
     Drops results that are:
       - empty / whitespace only
-      - shorter than WHISPER_MIN_WORDS words
+      - shorter than WHISPER_MIN_WORDS words (skipped when allow_short=True)
       - contain a known Whisper hallucination substring
       - a bare month name, year, or 'month year' / 'year month' pattern
+
+    allow_short=True bypasses the minimum word count check, allowing
+    single-word confirmations like 'yes', 'yeah', 'sure' to pass through.
     """
     if not text:
         return ""
@@ -375,7 +379,7 @@ def _filter_hallucination(text: str) -> str:
         return ""
 
     words = text.split()
-    if len(words) < config.WHISPER_MIN_WORDS:
+    if not allow_short and len(words) < config.WHISPER_MIN_WORDS:
         log.info("Whisper result too short (%d word(s)), filtered: %r", len(words), text)
         return ""
 

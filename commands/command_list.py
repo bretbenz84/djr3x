@@ -285,7 +285,9 @@ COMMANDS: list[Command] = [
     # -----------------------------------------------------------------------
 
     Command(
-        phrases=["call me", "my name is", "rename me", "my name's"],
+        phrases=["call me", "my name is", "rename me", "my name's",
+                 "from now on call me", "just call me", "rename me to",
+                 "change my name to"],
         response="",   # not spoken — action=rename_me is handled by the state machine
         action="rename_me",
     ),
