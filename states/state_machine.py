@@ -742,31 +742,61 @@ class StateMachine:
             frame = self._camera.capture_frame()
 
         # ------------------------------------------------------------------
-        # Try face recognition
+        # Try face recognition — hidden behind a scanning audio line
         # ------------------------------------------------------------------
         if frame and self._face_recognizer.is_available():
             n_people = len(self._face_db.list_people())
             print(f"Face scan: {n_people} people in database")
 
-            result = self._face_recognizer.identify(
-                frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
-            )
+            # Run dlib face recognition in a background thread so the 2-4 s
+            # processing time is hidden behind the scanning audio line below.
+            face_result: list = [None]
 
+            def _identify() -> None:
+                face_result[0] = self._face_recognizer.identify(
+                    frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+                )
+
+            face_thread = threading.Thread(
+                target=_identify, daemon=True, name="djr3x-face-identify"
+            )
+            face_thread.start()
+
+            # Play scanning line immediately — _begin_speech() also raises the arm
+            # so the animation runs concurrently with both TTS and face recognition.
+            scanning_line = random.choice([
+                "Hmmmmm... interesting. Lifeform identity scan complete.",
+                "Scanning... scanning... oh. It is you.",
+                "Identity scan in progress... beep boop... scan complete.",
+                "Hold still... analyzing lifeform... done.",
+                "Running biometric scan... fascinating specimen.",
+            ])
+            log.info("Wake greeting: playing scanning line — %r", scanning_line)
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak(scanning_line)
+            except Exception:
+                log.exception("Wake greeting: scanning line TTS error")
+            finally:
+                self._end_speech(servo_stop)
+
+            # Wait for face recognition to finish (almost certainly done by now).
+            face_thread.join()
+            result = face_result[0]
+
+            # Console status — identify() already logged the distance via find_closest().
             if n_people > 0:
-                # encode_face was already called inside identify(); call again for
-                # the closest-match console line (cached by OS — negligible cost).
-                enc = self._face_recognizer.encode_face(frame)
-                closest = self._face_db.find_closest(enc) if enc is not None else None
-                if closest is not None:
-                    _cid, cname, cdist = closest
+                if result is not None:
+                    _pid, rname, rdist = result
                     print(
-                        f"Face scan: closest match '{cname}' at distance {cdist:.3f} "
-                        f"(threshold {config.FACE_RECOGNITION_TOLERANCE})"
+                        f"Face scan: RECOGNIZED {rname} (distance {rdist:.3f}, "
+                        f"threshold {config.FACE_RECOGNITION_TOLERANCE})"
                     )
-                    if result is not None:
-                        print(f"Face scan: RECOGNIZED {cname}")
-                    else:
-                        print(f"Face scan: UNKNOWN (closest was '{cname}' at {cdist:.3f})")
+                else:
+                    print(
+                        f"Face scan: UNKNOWN (no match within threshold "
+                        f"{config.FACE_RECOGNITION_TOLERANCE} — see logs for closest)"
+                    )
             else:
                 print("Face scan: database empty — no comparison possible")
 
