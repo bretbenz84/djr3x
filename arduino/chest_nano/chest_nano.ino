@@ -3,6 +3,7 @@
 
 #include <FastLED.h>
 #include <EEPROM.h>
+#include <math.h>
 
 
 // How many NeoPixels are attached
@@ -78,6 +79,32 @@ const CRGB BlockLEDColors[4] = { cRED, cWHITE, cGOLD, cBLUE };
 byte LEDIndex = 0;
 bool inout = 0;
 byte State = 0;
+
+// ---------------------------------------------------------------------------
+// Serial command parser
+// ---------------------------------------------------------------------------
+#define SERIAL_BUF 32
+char    serialBuf[SERIAL_BUF];
+uint8_t serialPos = 0;
+
+// ---------------------------------------------------------------------------
+// Chest mode
+// ---------------------------------------------------------------------------
+enum ChestMode : uint8_t {
+    CM_STARTUP,       // power-on: ShortCircuit once, then auto-switch to IDLE
+    CM_IDLE,          // default: RandomBlocks2 at normal brightness
+    CM_ACTIVE,        // Rex awake: RandomBlocks2 brighter
+    CM_SPEAK_NEUTRAL, // speaking neutral: RandomBlocks2
+    CM_SPEAK_EXCITED, // speaking excited: AllRed, full brightness
+    CM_SPEAK_SAD,     // speaking sad: AllBlue, dim
+    CM_SPEAK_ANGRY,   // speaking angry: rapid red strobe
+    CM_SPEAK_HAPPY,   // speaking happy: confetti
+    CM_SLEEP,         // sleep: very dim slow red breath
+    CM_OFF,           // all off
+    CM_MANUAL,        // NEXT command: cycle gPatterns[] manually
+};
+ChestMode chestMode = CM_STARTUP;
+
 // setup() function -- runs once at startup --------------------------------
 
 void setup() {
@@ -104,6 +131,16 @@ void setup() {
 		LEDOn[x] = 0;
 	}
 
+	// Initialise serial command buffer.
+	serialPos = 0;
+
+	// Begin power-on startup animation (ShortCircuit → IDLE).
+	// gCurrentPatternNumber initialises to 1 (non-zero), which is what we need
+	// to detect ShortCircuit completion (it sets gCurrentPatternNumber = 0).
+	DecayTime = 80;
+	FadeInterval = 0;
+	FadeMillis = millis();
+	chestMode = CM_STARTUP;
 }
 
 // List of patterns to cycle through.  Each is defined as a separate function below.
@@ -129,15 +166,79 @@ uint8_t gCurrentPatternNumber = 1; // Index number of which pattern is current
 uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 uint8_t gSat = 0; // saturation value
 bool updown = 0;
+
+// ---------------------------------------------------------------------------
+// Mode dispatcher — called every loop tick
+// ---------------------------------------------------------------------------
+//
+// CM_STARTUP: runs ShortCircuit() directly; detects completion when ShortCircuit
+//             internally sets gCurrentPatternNumber = 0, then switches to CM_IDLE.
+// CM_MANUAL:  uses gPatterns[gCurrentPatternNumber]() so NEXT still works.
+// All other modes call a specific pattern function, with FastLED.setBrightness
+// set at command time (in handleCommand).
+
+void runCurrentMode() {
+	switch (chestMode) {
+		case CM_STARTUP:
+			ShortCircuit();
+			if (gCurrentPatternNumber == 0) {
+				// ShortCircuit completed — switch to idle
+				chestMode = CM_IDLE;
+				gCurrentPatternNumber = 1;
+				FastLED.setBrightness(BRIGHTNESS);
+			}
+			break;
+
+		case CM_IDLE:
+		case CM_SPEAK_NEUTRAL:
+			RandomBlocks2();
+			break;
+
+		case CM_ACTIVE:
+			RandomBlocks2();
+			break;
+
+		case CM_SPEAK_EXCITED:
+			AllRed();
+			break;
+
+		case CM_SPEAK_SAD:
+			AllBlue();
+			break;
+
+		case CM_SPEAK_ANGRY:
+			angryFlash();
+			break;
+
+		case CM_SPEAK_HAPPY:
+			confetti();
+			break;
+
+		case CM_SLEEP:
+			sleepBreath();
+			break;
+
+		case CM_OFF:
+			LEDsOff();
+			break;
+
+		case CM_MANUAL:
+			gPatterns[gCurrentPatternNumber]();
+			break;
+	}
+}
+
 // loop() function -- runs repeatedly as long as board is on ---------------
 
 void loop() {
+	readSerial();
+
 	if (millis() - previousMillis > interval) {
-		//	DataLoop();
 		previousMillis = millis();
-		// Call the current pattern function once, updating the 'leds' array
-		gPatterns[gCurrentPatternNumber]();
-    RandomEyes();
+		// Call the current mode function, updating the 'leds' array
+		runCurrentMode();
+		// RandomEyes only in active modes — skip during sleep/off
+		if (chestMode != CM_SLEEP && chestMode != CM_OFF) RandomEyes();
 	}
 
 	if (millis() - LEDUpdateMillis > LEDUpdateInterval) {
@@ -190,6 +291,93 @@ void nextPattern()
 	gCurrentPatternNumber = (gCurrentPatternNumber + 1) % ARRAY_SIZE(gPatterns);
 	// skip 0
 	if (gCurrentPatternNumber == 0) gCurrentPatternNumber = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Serial command handler
+// ---------------------------------------------------------------------------
+//
+// Commands (newline-terminated, 115200 baud):
+//   STARTUP          — play ShortCircuit once then switch to RandomBlocks2
+//   IDLE             — RandomBlocks2 at normal brightness (default)
+//   ACTIVE           — RandomBlocks2 at higher brightness
+//   SPEAK:{emotion}  — emotion-specific pattern:
+//                        neutral  → RandomBlocks2
+//                        excited  → AllRed, full brightness
+//                        sad      → AllBlue, dim
+//                        angry    → rapid red strobe
+//                        happy    → confetti
+//   SPEAK_STOP       — return to IDLE (end of speech)
+//   SLEEP            — very dim slow red breathing pulse
+//   OFF              — all LEDs off
+//   NEXT             — cycle to next pattern in gPatterns[]
+
+void handleCommand(char *cmd) {
+	if (strcmp(cmd, "STARTUP") == 0) {
+		DecayTime = 80;
+		FadeInterval = 0;
+		FadeMillis = millis();
+		gCurrentPatternNumber = 1;
+		FastLED.setBrightness(BRIGHTNESS);
+		chestMode = CM_STARTUP;
+
+	} else if (strcmp(cmd, "IDLE") == 0 || strcmp(cmd, "SPEAK_STOP") == 0) {
+		FastLED.setBrightness(BRIGHTNESS);
+		chestMode = CM_IDLE;
+
+	} else if (strcmp(cmd, "ACTIVE") == 0) {
+		FastLED.setBrightness(200);
+		chestMode = CM_ACTIVE;
+
+	} else if (strncmp(cmd, "SPEAK:", 6) == 0) {
+		const char *emotion = cmd + 6;
+		if (strcmp(emotion, "excited") == 0) {
+			FastLED.setBrightness(255);
+			chestMode = CM_SPEAK_EXCITED;
+		} else if (strcmp(emotion, "sad") == 0) {
+			FastLED.setBrightness(55);
+			chestMode = CM_SPEAK_SAD;
+		} else if (strcmp(emotion, "angry") == 0) {
+			FastLED.setBrightness(255);
+			chestMode = CM_SPEAK_ANGRY;
+		} else if (strcmp(emotion, "happy") == 0) {
+			FastLED.setBrightness(BRIGHTNESS);
+			chestMode = CM_SPEAK_HAPPY;
+		} else {
+			// neutral or unknown emotion
+			FastLED.setBrightness(BRIGHTNESS);
+			chestMode = CM_SPEAK_NEUTRAL;
+		}
+
+	} else if (strcmp(cmd, "SLEEP") == 0) {
+		FastLED.setBrightness(BRIGHTNESS);
+		chestMode = CM_SLEEP;
+
+	} else if (strcmp(cmd, "OFF") == 0) {
+		FastLED.setBrightness(BRIGHTNESS);
+		chestMode = CM_OFF;
+
+	} else if (strcmp(cmd, "NEXT") == 0) {
+		nextPattern();
+		chestMode = CM_MANUAL;
+	}
+	// Unknown commands are silently ignored.
+}
+
+void readSerial() {
+	while (Serial.available()) {
+		char c = (char)Serial.read();
+		if (c == '\n' || c == '\r') {
+			if (serialPos > 0) {
+				serialBuf[serialPos] = '\0';
+				handleCommand(serialBuf);
+				serialPos = 0;
+			}
+		} else if (serialPos < SERIAL_BUF - 1) {
+			serialBuf[serialPos++] = c;
+		}
+		// Buffer overflow: discard characters until the next newline.
+	}
 }
 
 // Turns on block of 4 LEDs based on start number
@@ -254,7 +442,7 @@ void RandomBlocks()
 		for (y = 0; y < 3; y++) {
 			pos = PanelAStart + i + y * 20;
 
-			if (!LEDOn[pos]) {	// LED off, fade it 
+			if (!LEDOn[pos]) {	// LED off, fade it
 				DJLEDs[pos].fadeToBlackBy(8);
 			}
 			else {
@@ -282,7 +470,7 @@ void RandomBlocks()
 		for (y = 0; y < 3; y++) {
 			pos = PanelA1 + i * 4 + y * 20;
 
-			if (!LEDOn[pos]) {	// LED off, fade it 
+			if (!LEDOn[pos]) {	// LED off, fade it
 				for (byte x = 0; x < 4; x++) {
 					DJLEDs[pos + x].fadeToBlackBy(8);
 				}
@@ -327,15 +515,15 @@ void RandomBlocks2()
 	// Random single bars
 	//int pos = random16(8);
 
-	// Bar 1 
+	// Bar 1
 
 	// Blink end LED;
 	pos = PanelAStart + Bar1Length;
 	DJLEDs[pos].fadeToBlackBy(8);
 	if (millis() - LEDMillis[pos] > IntervalTime[pos]) {
 		if (!LEDOn[pos]) { // LED Off - turn in on
-			
-			
+
+
 			IntervalTime[pos] = random(200, 500);
 			LEDMillis[pos] = millis();
 			LEDOn[pos] = 1;
@@ -370,7 +558,7 @@ void RandomBlocks2()
 		y = 1;
 			pos = PanelBStart + i;// + y * 20;
 
-			if (!LEDOn[pos]) {	// LED off, fade it 
+			if (!LEDOn[pos]) {	// LED off, fade it
 				DJLEDs[pos].fadeToBlackBy(8);
 			}
 			else {
@@ -393,7 +581,7 @@ void RandomBlocks2()
 
 	}
 
-	// Bar 3 
+	// Bar 3
 
 // Blink end LED;
 	pos = PanelCStart + Bar3Length;
@@ -431,10 +619,10 @@ void RandomBlocks2()
 
 	 //Large Block LEDs
 	for (i = 0; i < 9; i++) {
-	
-			pos = StartLEDNum[i]; 
 
-			if (!LEDOn[pos]) {	// LED off, fade it 
+			pos = StartLEDNum[i];
+
+			if (!LEDOn[pos]) {	// LED off, fade it
 				for (byte x = 0; x < 4; x++) {
 					DJLEDs[pos + x].fadeToBlackBy(8);
 				}
@@ -457,7 +645,7 @@ void RandomBlocks2()
 					LEDOn[pos] = 0;
 				}
 			}
-		
+
 
 	}
 
@@ -555,10 +743,6 @@ void AllBlue() {
 }
 
 
-
-
-
-
 void ShortCircuit() {
 	if (millis() - FadeMillis > FadeInterval) {
 		addGlitter4(150);
@@ -581,4 +765,27 @@ void LEDsOff() {
 	fadeToBlackBy(DJLEDs, NUM_LEDS, 5);
 
 
+}
+
+// ---------------------------------------------------------------------------
+// New animation functions
+// ---------------------------------------------------------------------------
+
+// sleepBreath — all 98 pixels pulse dim red with an 8-second sine-wave period.
+// RandomEyes is suppressed while in CM_SLEEP so the last two pixels also breathe.
+void sleepBreath() {
+    uint32_t now    = millis();
+    float    phase  = (float)(now % 8000UL) / 8000.0f;   // 0.0 → 1.0
+    float    bright = 0.5f * (1.0f - cosf(TWO_PI * phase)); // sine 0→1→0
+    uint8_t  b      = (uint8_t)(bright * 50.0f);           // 0 – 50 (very dim)
+    fill_solid(DJLEDs, NUM_LEDS, CRGB(b, 0, 0));
+}
+
+// angryFlash — rapid red strobe at ~6 Hz (75 ms on / 75 ms off).
+void angryFlash() {
+    if ((millis() % 150UL) < 75UL) {
+        fill_solid(DJLEDs, NUM_LEDS, CRGB(255, 0, 0));
+    } else {
+        fill_solid(DJLEDs, NUM_LEDS, CRGB(0, 0, 0));
+    }
 }
