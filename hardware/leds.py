@@ -236,6 +236,7 @@ class LEDController:
         """Write a command string to the head Nano."""
         if self._head is None:
             return
+        log.debug("LEDs head ← %r", cmd.strip())
         with self._head_lock:
             _write(self._head, cmd, label="head")
 

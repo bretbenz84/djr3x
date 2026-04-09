@@ -326,7 +326,8 @@ SLEEP: list[Step] = [
          eyes=(0, 5, 25)),
 
     # 2.0 s — final slumped position; all channels at shutdown/sleep values.
-    #          Eyes drop to sleep dim colour.
+    #          Eyes and mouth LEDs are handled by the SLEEP serial command sent
+    #          in _run_sleep() after this animation completes.
     Step(delay=2.0,
          servos={_T: config.SERVO_CHANNELS[_T]["max"],
                  _L: config.SERVO_CHANNELS[_L]["min"],
@@ -335,13 +336,7 @@ SLEEP: list[Step] = [
                  _AL: config.SERVO_CHANNELS[_AL]["min"],
                  _AR: config.SERVO_CHANNELS[_AR]["min"],
                  _HL: config.SERVO_CHANNELS[_HL]["neutral"],
-                 _HR: config.SERVO_CHANNELS[_HR]["min"]},
-         eyes=_EYE_SLEEP),
-
-    # 0.8 s — activate very dim eye breathing on the head Nano.
-    #          EYE was already set in the previous step; IDLE triggers breathing.
-    Step(delay=0.8,
-         head=config.LED_CMD_IDLE),
+                 _HR: config.SERVO_CHANNELS[_HR]["min"]}),
 ]
 
 
