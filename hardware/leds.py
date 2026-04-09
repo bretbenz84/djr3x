@@ -164,6 +164,7 @@ class LEDController:
         the SLEEP animation with a stale SPEAK_STOP.
         """
         self._sleep_active = True
+        log.info("LEDs: sending SLEEP to head Nano (head=%s)", self._head)
         self._send_head("SLEEP\n")
 
     def clear_sleep_mode(self) -> None:
@@ -259,7 +260,10 @@ class LEDController:
         Suppressed when in SLEEP mode so the red breathing animation is not killed.
         """
         time.sleep(2.0)
-        if not self._mouth_active and not self._sleep_active:
+        if self._sleep_active:
+            log.info("Mouth watchdog: sleep mode active — suppressing SPEAK_STOP")
+            return
+        if not self._mouth_active:
             log.debug("Mouth watchdog: re-sending SPEAK_STOP × 3 (safety net)")
             for _ in range(3):
                 self._send_head(config.LED_CMD_SPEAK_STOP)

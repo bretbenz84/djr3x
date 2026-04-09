@@ -1153,13 +1153,16 @@ class StateMachine:
         # the 'wakeuprex' model in SLEEP state).  Check for shutdown too.
         log.info("SLEEP: waiting for 'wakeuprex' wake word …")
         while True:
-            triggered = self._wake_event.wait(timeout=60.0)
+            triggered = self._wake_event.wait(timeout=5.0)
             if self._shutdown_event.is_set():
                 self._transition_to(State.SHUTDOWN)
                 return
             if triggered:
                 self._wake_event.clear()
                 break
+            # Re-assert sleep animation every 5 s in case a late SPEAK_STOP
+            # or watchdog overrode it.
+            self._leds.set_sleep_mode()
 
         # Wake up!
         log.info("SLEEP: wake word received — starting wake-up sequence")
