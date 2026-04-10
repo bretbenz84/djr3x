@@ -11,7 +11,7 @@ Pipeline per frame:
 
 Upsample strategy
 -----------------
-Recognition  (identify):  upsample=1 first; if no face found, retry at upsample=2.
+Recognition  (identify):  upsample=0 only.
 Enrollment   (encode_face with for_enrollment=True):  upsample=2 directly.
 
 upsample=0 → original resolution (fastest, misses small/distant faces).
@@ -179,8 +179,8 @@ class FaceRecognizer:
         """Detect the largest face in *image_b64* and return its 128-d encoding.
 
         for_enrollment=False (recognition):
-            Tries upsample=1 first; retries at upsample=2 if no face found.
-            The scanning-line audio hides the extra detection pass.
+            Uses upsample=0 only. At 1080p capture resolution this keeps wake-
+            time face recognition fast enough on the Pi 4.
 
         for_enrollment=True (enrollment):
             Always uses upsample=2 directly — accuracy matters more than
@@ -198,7 +198,7 @@ class FaceRecognizer:
             return None
 
         frame_h = rgb.shape[0]
-        upsample_levels = [2] if for_enrollment else [1, 2]
+        upsample_levels = [2] if for_enrollment else [0]
         mode = "enrollment" if for_enrollment else "recognition"
         self._save_debug_frame(image_b64, mode)
         log.info(
