@@ -299,6 +299,13 @@ COMMANDS: list[Command] = [
         action="forget_me",
     ),
 
+    Command(
+        phrases=["what's my name", "what is my name", "do you know my name",
+                 "do you remember my name", "remember my name"],
+        response="",   # not spoken — action=recall_name routes to LLM with conversation history
+        action="recall_name",
+    ),
+
     # -----------------------------------------------------------------------
     # Vision — these are forwarded to the LLM with a live camera frame;
     # the response field is never spoken (action="vision" bypasses TTS).

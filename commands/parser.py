@@ -94,6 +94,16 @@ def parse(text: str) -> Command | None:
     if candidates:
         best = candidates[0]
         score = difflib.SequenceMatcher(None, normalized, best).ratio()
+
+        # Semantic exclusion: inputs with 'my name' are about the person speaking,
+        # not about Rex — never let them match commands that are about Rex's identity.
+        if "my name" in normalized and ("your name" in best or "what are you" in best):
+            log.debug(
+                "Semantic exclusion blocked fuzzy match (%.2f): %r → %r (my/your conflict)",
+                score, normalized, best,
+            )
+            return None
+
         cmd = PHRASE_INDEX[best]
         log.debug(
             "Command fuzzy match (%.2f): %r → %r",
