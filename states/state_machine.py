@@ -780,7 +780,7 @@ class StateMachine:
             _SCANNING_LINES = [
                 "Hmmmmm... interesting. Lifeform identity scan complete.",
                 "Scanning... scanning... oh. It is you.",
-                "Identity scan in progress... beep boop... scan complete.",
+                "Identity scan in progress... calculating... scan complete.",
                 "Hold still... analyzing lifeform... done.",
                 "Running biometric scan... fascinating specimen.",
             ]
@@ -882,19 +882,19 @@ class StateMachine:
             # First return visit after being enrolled
             line = random.choice([
                 f"Oh great — {name} is back. I had exactly five minutes of peace. Worth it? Debatable.",
-                f"*BWOOP* {name}! You came back! Bold move. I respect the audacity.",
+                f"{name}! You came back! Bold move. I respect the audacity.",
                 f"Well well well, {name} returns. The cantina was doing FINE without you, but here we are.",
                 f"Oh! {name}! You actually remembered where the cantina is — I'm genuinely surprised.",
             ])
         elif visit_count < 5:
             line = random.choice([
                 f"HEY, {name}! Back again?! You're really committing to this, huh.",
-                f"*WHIRR* {name}! Visit number {visit_count}. Starting to become a problem.",
+                f"{name}! Visit number {visit_count}. Starting to become a problem.",
                 f"Oh no. {name}. Again. I say 'oh no' affectionately, but still — oh no.",
             ])
         else:
             line = random.choice([
-                f"*BWOOP* {name}! Visit {visit_count}! You practically PAY RENT here at this point!",
+                f"{name}! Visit {visit_count}! You practically PAY RENT here at this point!",
                 f"Oh great, {name}. My favorite recurring problem has arrived. The cantina is yours, I guess.",
                 f"HEY! {name}! Visit {visit_count} — at what point do we just give you a key?!",
             ])
@@ -954,7 +954,7 @@ class StateMachine:
         _CANNED_TTS = [
             "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
             "HEY HEY HEY! A lifeform! Bold of you to show up looking like THAT.",
-            "*BWOOP* Oh, it's you. Oga's Cantina — where even the questionable guests are welcome!",
+            "Oh, it's you. Oga's Cantina — where even the questionable guests are welcome!",
             "Well well well, look what the Ronto dragged in. Welcome, I guess.",
             "HEY! You actually came back! I honestly didn't think you would. Impressed.",
         ]
@@ -981,7 +981,7 @@ class StateMachine:
         log.info("Wake greeting: asking unknown person their name")
         servo_stop = self._begin_speech(emotion="excited")
         try:
-            self._synthesizer.speak("I don't think we've met — what's your name?")
+            self._synthesizer.speak(_pick_no_repeat(_UNKNOWN_FACE_LINES, "unknown_face"))
         except Exception:
             log.exception("Wake greeting: name-ask TTS error")
         finally:
@@ -1123,11 +1123,7 @@ class StateMachine:
 
         threading.Thread(target=_enroll, daemon=True, name="djr3x-enroll").start()
 
-        welcome = random.choice([
-            f"*BWOOP* {name}! Great — now I have to remember you. I'll add you to my files.",
-            f"{name}! Officially logged. Come back anytime — I'll pretend to be thrilled.",
-            f"Nice to meet you, {name}! That face is now permanently in my memory banks. You're welcome. Or I'm sorry.",
-        ])
+        welcome = _pick_no_repeat(_ENROLLMENT_CONFIRMATION_LINES, "enrollment_confirm").format(name=name)
         servo_stop = self._begin_speech(emotion="excited")
         try:
             self._synthesizer.speak(welcome)
@@ -1702,7 +1698,7 @@ class StateMachine:
         line = random.choice([
             f"Fine, {new_name} it is. Weird choice but okay.",
             f"Got it — {new_name} it is. Memory banks updated. Try to live up to it.",
-            f"*BWOOP* {new_name}! Bold name choice. I'll allow it.",
+            f"{new_name}! Bold name choice. I'll allow it.",
             f"Done. You're {new_name} in my files now — don't make me regret learning that.",
         ])
         servo_stop = self._begin_speech(emotion="excited")
@@ -1907,7 +1903,7 @@ class StateMachine:
         log.info("recall_name: face not recognised — asking for name")
         servo_stop = self._begin_speech(emotion="neutral")
         try:
-            self._synthesizer.speak("I don't think we've met — what's your name?")
+            self._synthesizer.speak(_pick_no_repeat(_UNKNOWN_FACE_LINES, "unknown_face"))
         except Exception:
             log.exception("recall_name: TTS error (asking for name)")
         finally:
@@ -2027,6 +2023,59 @@ _SHUTDOWN_INTERRUPT_LINES = (
     "Fine, forget the pleasantries — shutting down!",
     "Oh, so mysterious! Fine, powering down then.",
 )
+
+# Unknown-face prompt — played when Rex sees a face he doesn't recognise and
+# asks for their name.  Shared between _learn_new_person and _handle_recall_name.
+_UNKNOWN_FACE_LINES: tuple[str, ...] = (
+    "I don't recognize you, which means either you're new or just deeply forgettable. Name?",
+    "Face not in my databanks. Either you're new or my memory is being merciful. Who are you?",
+    "Hmm. Nothing. Absolutely nothing in my memory banks. "
+    "Should I be relieved or insulted on your behalf? What's your name?",
+    "You know, most lifeforms make enough of an impression to be remembered. "
+    "Apparently not you. Yet. Name?",
+    "My facial recognition says unknown. My fashion recognition says... also unknown. Who ARE you?",
+    "New face! Or maybe I blocked you out. Hard to tell. What do they call you?",
+    "Running scan... running scan... yeah nothing. "
+    "You have the kind of face that takes a while to process. Name?",
+    "I have met thousands of lifeforms and remembered most of them. "
+    "You are not most of them. Yet. What is your name?",
+)
+
+# Enrollment confirmation — played after a new person gives their name.
+# Use {name} as the placeholder; call .format(name=name) on the picked line.
+_ENROLLMENT_CONFIRMATION_LINES: tuple[str, ...] = (
+    "{name}! Great — now I have to remember you. I'll add you to my files.",
+    "{name}! Officially logged. Come back anytime — I'll pretend to be thrilled.",
+    "Nice to meet you, {name}! That face is now permanently in my memory banks. "
+    "You're welcome. Or I'm sorry.",
+    "Got it. I will remember you now, {name}. Probably. Don't test me on it.",
+    "{name}! Filed, catalogued, and stored. You are now officially someone I know. "
+    "Congratulations on that.",
+    "Right then, {name}. You're in the system. "
+    "Try not to do anything that makes me regret this.",
+    "{name} — logged! I'll know you next time. "
+    "Unless my motivator glitches again, in which case I apologise in advance.",
+    "Welcome to the databanks, {name}. "
+    "It's a mess in there but your face now has a spot. Very exclusive.",
+)
+
+# Tracks the last-used line per pool so the same line is never repeated
+# back-to-back.  Keyed by an arbitrary string that namespaces each pool.
+_line_rotation: dict[str, str] = {}
+
+
+def _pick_no_repeat(pool: tuple[str, ...], key: str) -> str:
+    """Return a random entry from *pool*, excluding the last-used entry for *key*.
+
+    *key* namespaces the rotation state so different pools don't interfere.
+    Falls back to the full pool if all entries happen to equal the last (i.e.
+    pool has only one item).
+    """
+    last = _line_rotation.get(key)
+    choices = [line for line in pool if line != last] or list(pool)
+    picked = random.choice(choices)
+    _line_rotation[key] = picked
+    return picked
 
 
 def _is_name_refusal(text: str) -> bool:

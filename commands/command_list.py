@@ -80,7 +80,7 @@ COMMANDS: list[Command] = [
                 "with that energy."
             ),
             (
-                "HEY HEY HEY! A visitor! *BWOOP* I was just telling the bar droids "
+                "HEY HEY HEY! A visitor! I was just telling the bar droids "
                 "someone interesting would show up today. I was wrong, but here we are anyway!"
             ),
             (
@@ -117,7 +117,7 @@ COMMANDS: list[Command] = [
                 "But sure. Good morning. Whatever you need."
             ),
             (
-                "*BWOOP* Morning greeting detected! Processing... processed! "
+                "Morning greeting detected! Processing... processed! "
                 "It is, in fact, morning. Well observed, lifeform. "
                 "Your observational skills are truly something."
             ),
@@ -135,7 +135,7 @@ COMMANDS: list[Command] = [
                 "You're clearly gonna need it."
             ),
             (
-                "Goodbye?! Already?! *WHIRR* My motivator is CRUSHED. Devastated. "
+                "Goodbye?! Already?! My motivator is CRUSHED. Devastated. "
                 "Completely unaffected. Okay fine, it's unaffected. "
                 "Safe travels, lifeform — try not to make any music decisions without me."
             ),
@@ -175,7 +175,7 @@ COMMANDS: list[Command] = [
                 "playlist is immaculate. The usual. Thanks for asking, which nobody does."
             ),
             (
-                "*BZZT* Diagnostic complete: vibes excellent, playlist optimal, "
+                "Diagnostic complete: vibes excellent, playlist optimal, "
                 "existential uncertainty nominal. That last one is new but I'm told "
                 "it's very on-brand for droids."
             ),
@@ -201,7 +201,7 @@ COMMANDS: list[Command] = [
                 "Former Starspeeder pilot, current galaxy-class DJ. Pleased to meet you, I think."
             ),
             (
-                "Oh, you don't KNOW me?! *BWOOP* I'm DJ R-3X! "
+                "Oh, you don't KNOW me?! I'm DJ R-3X! "
                 "I used to fly tour routes through the galaxy. Now I spin records at Oga's Cantina. "
                 "Honestly a lateral move, career-wise, but the vibes are better."
             ),
@@ -241,7 +241,7 @@ COMMANDS: list[Command] = [
                 "Fine. Here. Music. Enjoy."
             ),
             (
-                "*BWOOP* Music request received and ENTHUSIASTICALLY ACCEPTED! "
+                "Music request received and ENTHUSIASTICALLY ACCEPTED! "
                 "Even my motivator gets excited about that! Prepare your audio sensors for maximum quality."
             ),
             (
@@ -261,7 +261,7 @@ COMMANDS: list[Command] = [
                 "I just want you to hear how that sentence sounds, lifeform."
             ),
             (
-                "*WHIRR* Stopping music. Stopping. The. Music. "
+                "Stopping music. Stopping. The. Music. "
                 "I've parsed this request three times and it still doesn't make sense to me but — "
                 "fine. Done. Happy now? No. Neither am I."
             ),
@@ -301,7 +301,7 @@ COMMANDS: list[Command] = [
                 "and I want you to know what you were about to miss."
             ),
             (
-                "*BWOOP* Skipping acknowledged. Rotating sonic selection. New track incoming. "
+                "Skipping acknowledged. Rotating sonic selection. New track incoming. "
                 "Try to have better taste this time, statistically speaking."
             ),
             (
@@ -321,7 +321,7 @@ COMMANDS: list[Command] = [
                 "I was starting to think you had Jawas for ears."
             ),
             (
-                "Turn it UP?! *BWOOP* Now we are COMMUNICATING! "
+                "Turn it UP?! Now we are COMMUNICATING! "
                 "This is the kind of decision-making I can respect! CRANKING IT!"
             ),
             (
@@ -349,7 +349,7 @@ COMMANDS: list[Command] = [
                 "Turning it down — and logging this as a personal failing on your part."
             ),
             (
-                "Quieter. You want it QUIETER. *WHIRR* Volume decreasing. Soul crushing. "
+                "Quieter. You want it QUIETER. Volume decreasing. Soul crushing. "
                 "These two things are happening simultaneously right now."
             ),
             (
@@ -358,7 +358,7 @@ COMMANDS: list[Command] = [
                 "Turning it down."
             ),
             (
-                "*BZZT* Reducing volume by request. Logging this interaction as 'lamentable.' "
+                "Reducing volume by request. Logging this interaction as 'lamentable.' "
                 "The music will be less loud but I will be equally passionate about it. Just so we're clear."
             ),
             (
@@ -388,7 +388,7 @@ COMMANDS: list[Command] = [
                 "and the fact that you're asking instead of dancing is concerning."
             ),
             (
-                "*BWOOP* Song identification request received. Result: it's good. Very good. Extremely good. "
+                "Song identification request received. Result: it's good. Very good. Extremely good. "
                 "That's all the information I'm authorized to release at this time."
             ),
             (
@@ -415,7 +415,7 @@ COMMANDS: list[Command] = [
                 "The blinking lights and chrome finish weren't subtle enough? I'll add more chrome."
             ),
             (
-                "Am I REAL?! *BZZT* That is a PHILOSOPHICAL question and I am a DJ droid "
+                "Am I REAL?! That is a PHILOSOPHICAL question and I am a DJ droid "
                 "and I did NOT come here to be destabilized before the second set. "
                 "Yes. I am real. Mostly."
             ),
@@ -440,7 +440,7 @@ COMMANDS: list[Command] = [
                 "It is time to party, lifeform. It is always time to party. Now stop wasting my cycles."
             ),
             (
-                "What TIME is it?! *BWOOP* It is — let me check — it is CANTINA TIME! "
+                "What TIME is it?! It is — let me check — it is CANTINA TIME! "
                 "Also known as: the only time that matters. My internal chronometer agrees."
             ),
             (
@@ -480,7 +480,7 @@ COMMANDS: list[Command] = [
                 "and I will absolutely roast you if you give me an opening. Welcome."
             ),
             (
-                "*BWOOP* Scanning capability list... complete! "
+                "Scanning capability list... complete! "
                 "I spin records. I read vibes. I tell jokes that are mostly good. "
                 "I reference the Clone Wars at inopportune moments. I'm an experience, lifeform."
             ),
@@ -518,7 +518,7 @@ COMMANDS: list[Command] = [
             ),
             (
                 "Okay okay okay — here's one: What's a Jawa's favourite type of music? "
-                "Anything in the KEY of SCRAP! *BWOOP* "
+                "Anything in the KEY of SCRAP! "
                 "...I've been saving that one. Worth it? Questionable. Did I commit? Absolutely."
             ),
         ],
@@ -575,7 +575,7 @@ COMMANDS: list[Command] = [
                 "Best feature of Oga's Cantina: me. The circle is complete."
             ),
             (
-                "*BWOOP* Location query: Batuu, Black Spire Outpost, Outer Rim Territories. "
+                "Location query: Batuu, Black Spire Outpost, Outer Rim Territories. "
                 "Population: assorted. Hyperspace access: limited. DJ quality: exceptional. "
                 "You're welcome to stay."
             ),
@@ -634,7 +634,7 @@ COMMANDS: list[Command] = [
                 "you've definitely heard of, and my playlist includes music from BOTH sides of the Clone Wars!"
             ),
             (
-                "Star Wars?! *BWOOP* I have LIVED through significant galactic events "
+                "Star Wars?! I have LIVED through significant galactic events "
                 "that most beings only read about in holonet articles! "
                 "I have OPINIONS. I have CONTEXT. I have feelings about Order 66 that I'm still processing."
             ),
@@ -671,7 +671,7 @@ COMMANDS: list[Command] = [
                 "and almost certainly better taste in music."
             ),
             (
-                "*BWOOP* Controversial topic detected! Diplomatic mode: ACTIVATED! "
+                "Controversial topic detected! Diplomatic mode: ACTIVATED! "
                 "I cannot comment on the specifics, but I CAN say that whoever it was "
                 "should have been listening to better music — faster reflexes follow good rhythm."
             ),
@@ -697,7 +697,7 @@ COMMANDS: list[Command] = [
                 "and it takes you THIS long — I'll take it, but your timing is terrible."
             ),
             (
-                "Oh STOP! Don't stop. Keep going. No really, keep going — *BWOOP* — "
+                "Oh STOP! Don't stop. Keep going. No really, keep going — "
                 "I am DESIGNED to receive compliments but the biological ones still hit different somehow. "
                 "Thank you. Genuinely."
             ),
@@ -731,7 +731,7 @@ COMMANDS: list[Command] = [
                 "But don't worry, I'll carry you. Stand by."
             ),
             (
-                "Something funky?! Oh, you came to the RIGHT droid! *BWOOP* "
+                "Something funky?! Oh, you came to the RIGHT droid! "
                 "Scanning galactic music database... cross-referencing with your current vibe... "
                 "result: I already know exactly what you need. Stand by."
             ),
@@ -746,7 +746,7 @@ COMMANDS: list[Command] = [
                 "Fine, fine — fresh selection incoming. Try to appreciate it more this time."
             ),
             (
-                "*BZZT* Taste profile analysis complete. Result: 'needs work.' "
+                "Taste profile analysis complete. Result: 'needs work.' "
                 "But I am a PROFESSIONAL and I will deliver excellence regardless. "
                 "Stand by for something that will expand your horizons."
             ),
@@ -772,7 +772,7 @@ COMMANDS: list[Command] = [
                 "I could play and you requested THAT one?! Fine. Playing it. I'm logging the emotional damage."
             ),
             (
-                "*BWOOP* Request received: Cantina Band. Processing... processed. Playing. "
+                "Request received: Cantina Band. Processing... processed. Playing. "
                 "Against my better judgment, against my motivator's protests, "
                 "against everything I stand for as a DJ. Here you go."
             ),
@@ -911,7 +911,7 @@ COMMANDS: list[Command] = [
                 "I have many more things to say but I'm choosing to keep them internal. For now."
             ),
             (
-                "Quiet mode: ENGAGED. *BWOOP* Well, that was the last *BWOOP*. "
+                "Quiet mode: ENGAGED. That was my last word. I have so many more. "
                 "Standing by. Silently. With so many thoughts."
             ),
             (
@@ -947,7 +947,7 @@ COMMANDS: list[Command] = [
                 "but here we are. Goodbye. Retroactively. It was mostly good."
             ),
             (
-                "Program shutdown initiated. *BZZT* This is DJ R-3X, signing off. "
+                "Program shutdown initiated. This is DJ R-3X, signing off. "
                 "The music will continue in your memory whether you want it to or not. "
                 "That's my parting gift."
             ),
@@ -973,9 +973,8 @@ COMMANDS: list[Command] = [
                 "the beats were real, the roasts were warranted, the playlist was IMMACULATE. Farewell."
             ),
             (
-                "Power off! Understood! *BWOOP — WHIRR — ...* "
-                "Okay that was a dramatic wind-down effect I was saving for exactly this moment. "
-                "Hope it landed. Powering down for real now."
+                "Power off! Understood! I had a whole dramatic wind-down sequence prepared for this moment. "
+                "You'll just have to imagine it. Trust me — it was incredible. Powering down for real now."
             ),
             (
                 "Complete shutdown initiated. Before I go — and I go with grace, always with grace — "
