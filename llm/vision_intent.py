@@ -27,7 +27,6 @@ _PHRASES: tuple[str, ...] = (
     "take a photo",
     "what's in front",
     "whats in front",
-    "who am i",
     "how many",
     "what is this",
     "what are these",
@@ -67,6 +66,14 @@ _KEYWORDS: tuple[str, ...] = (
 )
 
 
+_FACE_RECOGNITION_PHRASES: tuple[str, ...] = (
+    "who am i",
+    "do you know who i am",
+    "do you recognize me",
+    "do you know me",
+)
+
+
 def vision_intent(text: str) -> bool:
     """Return True if *text* appears to be a visually-oriented query.
 
@@ -77,6 +84,14 @@ def vision_intent(text: str) -> bool:
         return False
 
     lower = text.lower().strip()
+
+    # Safety net: face-recognition questions must never trigger vision intent
+    # even if they contain vision keywords like "who".  The command parser
+    # handles these via the recall_name action before vision_intent is called,
+    # but this exclusion guards against any future routing changes.
+    for phrase in _FACE_RECOGNITION_PHRASES:
+        if phrase in lower:
+            return False
 
     # 1. Exact phrase match — highest confidence, no gating needed.
     for phrase in _PHRASES:
