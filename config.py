@@ -383,6 +383,7 @@ CAMERA_POSE_NECK:  int = int(_optional("CAMERA_POSE_NECK",  str(SERVO_CHANNELS[0
 # How long (seconds) to wait after moving to the camera pose before capturing.
 CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "0.5"))
 FACE_DB_PATH              = Path(_optional("FACE_DB_PATH", str(ASSETS_DIR / "face_db.sqlite")))
+FACE_DEBUG_DIR            = Path(_optional("FACE_DEBUG_DIR", str(ASSETS_DIR / "face_debug")))
 DLIB_SHAPE_PREDICTOR_PATH = Path(_optional("DLIB_SHAPE_PREDICTOR_PATH", str(MODELS_DIR / "shape_predictor_68_face_landmarks.dat")))
 DLIB_FACE_MODEL_PATH      = Path(_optional("DLIB_FACE_MODEL_PATH",      str(MODELS_DIR / "dlib_face_recognition_resnet_model_v1.dat")))
 FACE_RECOGNITION_TOLERANCE = float(_optional("FACE_RECOGNITION_TOLERANCE", "0.6"))

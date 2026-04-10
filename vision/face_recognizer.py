@@ -46,6 +46,8 @@ from __future__ import annotations
 
 import base64
 import logging
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import cv2
@@ -129,6 +131,18 @@ class FaceRecognizer:
             log.warning("FaceRecognizer: image decode error — %s", exc)
             return None
 
+    def _save_debug_frame(self, image_b64: str, mode: str) -> None:
+        """Persist the exact JPEG input for later inspection."""
+        try:
+            debug_dir: Path = config.FACE_DEBUG_DIR
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            path = debug_dir / f"{stamp}_{mode}.jpg"
+            path.write_bytes(base64.b64decode(image_b64))
+            log.debug("FaceRecognizer: saved debug frame to %s", path)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("FaceRecognizer: failed to save debug frame — %s", exc)
+
     def _largest_rect(self, rects) -> Optional[object]:
         """Return the dlib rectangle with the greatest area, or None."""
         if len(rects) == 0:
@@ -186,6 +200,7 @@ class FaceRecognizer:
         frame_h = rgb.shape[0]
         upsample_levels = [2] if for_enrollment else [1, 2]
         mode = "enrollment" if for_enrollment else "recognition"
+        self._save_debug_frame(image_b64, mode)
         log.info(
             "FaceRecognizer: %s — frame %s, HOG upsample strategy %s",
             mode, rgb.shape, upsample_levels,
