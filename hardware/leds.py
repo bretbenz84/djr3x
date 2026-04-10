@@ -45,12 +45,14 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from typing import Callable
 
 import serial
 
 import config
 
 log = logging.getLogger(__name__)
+_SERIAL_ERRORS = (serial.SerialException, serial.SerialTimeoutException)
 
 # Mouth brightness polling interval (seconds).  ~30 Hz is smooth without
 # flooding the Nano's 115200-baud serial buffer.
@@ -69,7 +71,11 @@ class LEDController:
     and the corresponding Nano is simply skipped on every send.
     """
 
-    def __init__(self, player) -> None:
+    def __init__(
+        self,
+        player,
+        serial_factory: Callable[..., serial.Serial] = serial.Serial,
+    ) -> None:
         """
         Parameters
         ----------
@@ -78,15 +84,16 @@ class LEDController:
             brightness thread.
         """
         self._player = player
+        self._serial_factory = serial_factory
         self._chest_port = config.NANO_CHEST_PORT
         self._head_port = config.NANO_HEAD_PORT
         self._baud = config.LED_NANO_BAUD
 
         self._chest: serial.Serial | None = _open_serial(
-            self._chest_port, self._baud, label="chest"
+            self._chest_port, self._baud, label="chest", serial_factory=self._serial_factory
         )
         self._head: serial.Serial | None = _open_serial(
-            self._head_port, self._baud, label="head"
+            self._head_port, self._baud, label="head", serial_factory=self._serial_factory
         )
 
         # Mouth brightness thread state
@@ -118,16 +125,8 @@ class LEDController:
     def close(self) -> None:
         """stop() then close serial ports."""
         self.stop()
-        if self._chest is not None:
-            try:
-                self._chest.close()
-            except Exception:
-                pass
-        if self._head is not None:
-            try:
-                self._head.close()
-            except Exception:
-                pass
+        _close_serial(self._chest)
+        _close_serial(self._head)
 
     # ------------------------------------------------------------------
     # Effect / color control
@@ -281,28 +280,35 @@ class LEDController:
 
     def _reopen_chest_locked(self) -> None:
         """Re-open the chest Nano after a write failure. Caller must hold _chest_lock."""
-        if self._chest is not None:
-            try:
-                self._chest.close()
-            except Exception:
-                pass
-        self._chest = _open_serial(self._chest_port, self._baud, label="chest")
+        _close_serial(self._chest)
+        self._chest = _open_serial(
+            self._chest_port,
+            self._baud,
+            label="chest",
+            serial_factory=self._serial_factory,
+        )
 
     def _reopen_head_locked(self) -> None:
         """Re-open the head Nano after a write failure. Caller must hold _head_lock."""
-        if self._head is not None:
-            try:
-                self._head.close()
-            except Exception:
-                pass
-        self._head = _open_serial(self._head_port, self._baud, label="head")
+        _close_serial(self._head)
+        self._head = _open_serial(
+            self._head_port,
+            self._baud,
+            label="head",
+            serial_factory=self._serial_factory,
+        )
 
 
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
 
-def _open_serial(port: str | None, baud: int, label: str) -> serial.Serial | None:
+def _open_serial(
+    port: str | None,
+    baud: int,
+    label: str,
+    serial_factory: Callable[..., serial.Serial] = serial.Serial,
+) -> serial.Serial | None:
     """Try to open a serial port, retrying up to SERIAL_RETRY_ATTEMPTS times.
 
     Returns None immediately (no retry) if port is None — caller has not
@@ -318,10 +324,10 @@ def _open_serial(port: str | None, baud: int, label: str) -> serial.Serial | Non
                 "LEDs: opening %s Nano on %s at %d baud (attempt %d/%d)",
                 label, port, baud, attempt, config.SERIAL_RETRY_ATTEMPTS,
             )
-            s = serial.Serial(port, baud, timeout=1.0)
+            s = serial_factory(port, baud, timeout=1.0)
             log.info("LEDs: %s Nano opened on attempt %d", label, attempt)
             return s
-        except serial.SerialException as exc:
+        except _SERIAL_ERRORS as exc:
             log.warning(
                 "LEDs: could not open %s Nano on %s (attempt %d/%d) — %s",
                 label, port, attempt, config.SERIAL_RETRY_ATTEMPTS, exc,
@@ -347,9 +353,19 @@ def _write(port: serial.Serial, cmd: str, label: str) -> bool:
     try:
         port.write(cmd.encode())
         return True
-    except serial.SerialException as exc:
+    except _SERIAL_ERRORS as exc:
         log.warning("LEDs: write to %s Nano failed — %s", label, exc)
         return False
+
+
+def _close_serial(port: serial.Serial | None) -> None:
+    """Best-effort close used by both shutdown and reconnect paths."""
+    if port is None:
+        return
+    try:
+        port.close()
+    except Exception:
+        pass
 
 
 def _normalise_cmd(effect: str) -> str:

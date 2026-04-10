@@ -41,12 +41,14 @@ import logging
 import random
 import threading
 import time
+from typing import Callable
 
 import serial
 
 import config
 
 log = logging.getLogger(__name__)
+_SERIAL_ERRORS = (serial.SerialException, serial.SerialTimeoutException)
 
 # ---------------------------------------------------------------------------
 # Pololu compact protocol byte codes
@@ -108,8 +110,9 @@ class ServoController:
     _lock makes serial writes thread-safe.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, serial_factory: Callable[..., serial.Serial] = serial.Serial) -> None:
         self._lock = threading.Lock()
+        self._serial_factory = serial_factory
         self._emotion: str = "neutral"
         self._current_speed: int = config.SERVO_DEFAULT_SPEED
         self._stop_event = threading.Event()
@@ -139,8 +142,7 @@ class ServoController:
     # Serial open with retry
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _open_maestro_serial() -> serial.Serial:
+    def _open_maestro_serial(self) -> serial.Serial:
         """Open the Maestro serial port, retrying up to SERIAL_RETRY_ATTEMPTS times.
 
         Raises serial.SerialException if all attempts fail.
@@ -155,14 +157,14 @@ class ServoController:
                     "Opening Maestro serial port %s @ %d baud (attempt %d/%d)",
                     port, baud, attempt, config.SERIAL_RETRY_ATTEMPTS,
                 )
-                ser = serial.Serial(port, baud, timeout=1)
+                ser = self._serial_factory(port, baud, timeout=1)
                 log.info(
                     "Maestro port opened on attempt %d — waiting %d s for initialisation",
                     attempt, config.MAESTRO_STARTUP_DELAY,
                 )
                 time.sleep(config.MAESTRO_STARTUP_DELAY)
                 return ser
-            except serial.SerialException as exc:
+            except _SERIAL_ERRORS as exc:
                 log.warning(
                     "Maestro serial open failed (attempt %d/%d): %s",
                     attempt, config.SERIAL_RETRY_ATTEMPTS, exc,
@@ -217,7 +219,7 @@ class ServoController:
         # before cutting PWM output.
         time.sleep(1.0)
         self.power_off()
-        self._serial.close()
+        self._close_serial(self._serial)
         log.info("Maestro serial port closed.")
 
     def power_off(self) -> None:
@@ -693,7 +695,7 @@ class ServoController:
         """
         try:
             self._serial.write(raw)
-        except serial.SerialException as exc:
+        except _SERIAL_ERRORS as exc:
             log.warning("Maestro write failed — attempting reconnect: %s", exc)
             self._reconnect_serial_locked()
             self._serial.write(raw)
@@ -703,8 +705,15 @@ class ServoController:
 
         Caller must hold _lock.
         """
+        self._close_serial(self._serial)
+        self._serial = self._open_maestro_serial()
+
+    @staticmethod
+    def _close_serial(port: serial.Serial | None) -> None:
+        """Best-effort serial close used by normal shutdown and reconnects."""
+        if port is None:
+            return
         try:
-            self._serial.close()
+            port.close()
         except Exception:
             pass
-        self._serial = self._open_maestro_serial()

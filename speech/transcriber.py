@@ -52,6 +52,10 @@ _END_SILENCE_CHUNKS: int = max(
 _MAX_CHUNKS: int = round(
     config.WHISPER_MAX_RECORD_SECONDS * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE
 )
+_STALL_CHUNKS: int = max(
+    1,
+    round(1.5 * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE),
+)
 
 
 class Transcriber:
@@ -193,6 +197,28 @@ class Transcriber:
             config.AUDIO_INPUT_DEVICE, config.AUDIO_SAMPLE_RATE,
             config.AUDIO_CHUNK_SIZE, self._speech_threshold,
         )
+        # Use a slightly lower threshold for ongoing speech detection than the
+        # calibrated peak threshold used to reject room noise. This preserves
+        # noise robustness while avoiding false negatives when natural speech
+        # dips below the calibrated ceiling during the first few words.
+        speech_detect_threshold = max(
+            config.TRANSCRIBE_SPEECH_THRESHOLD_MIN,
+            int(self._speech_threshold * 0.65),
+        )
+        stall_threshold = max(10.0, speech_detect_threshold * 0.05)
+        log.info(
+            "Transcriber thresholds: calibrated=%d, speech-detect=%d, stall<=%.0f%s",
+            self._speech_threshold,
+            speech_detect_threshold,
+            stall_threshold,
+            _mark(),
+        )
+        log.debug(
+            "Transcriber: speech-detect threshold=%d (base=%d), stall threshold=%.0f",
+            speech_detect_threshold,
+            self._speech_threshold,
+            stall_threshold,
+        )
 
         _SENTINEL = object()
         _early_return: object = _SENTINEL  # set to None if Phase 1 times out
@@ -206,6 +232,7 @@ class Transcriber:
             speech_first_chunk = None
             consecutive_speech: int = 0
             silence_chunks: int = 0
+            near_zero_chunks: int = 0
 
             try:
                 with _open_input_stream() as stream:
@@ -229,7 +256,21 @@ class Transcriber:
                             consecutive_speech, silence_chunks,
                         )
 
-                        if rms >= self._speech_threshold:
+                        if rms <= stall_threshold:
+                            near_zero_chunks += 1
+                        else:
+                            near_zero_chunks = 0
+
+                        # A long run of near-zero chunks usually means the mic
+                        # stream is stalled or returning effectively empty audio.
+                        # Reopen once via the normal retry loop instead of
+                        # waiting out the full listen window on dead input.
+                        if near_zero_chunks >= _STALL_CHUNKS:
+                            raise sd.PortAudioError(
+                                f"input stream stalled: {near_zero_chunks} near-zero chunks"
+                            )
+
+                        if rms >= speech_detect_threshold:
                             # --- above-threshold chunk ---
                             if speech_first_chunk is None:
                                 speech_first_chunk = chunk_index
