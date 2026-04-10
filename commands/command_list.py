@@ -805,6 +805,21 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
+        phrases=[
+            "completely wipe your memory",
+            "wipe your memory",
+            "erase all your memories",
+            "forget everyone",
+            "wipe everyone from memory",
+            "delete everyone from memory",
+            "reset face memory",
+            "clear face database",
+        ],
+        response="",   # not spoken — action=wipe_memory is handled by the state machine
+        action="wipe_memory",
+    ),
+
+    Command(
         phrases=["what's my name", "what is my name", "do you know my name",
                  "do you remember my name", "remember my name",
                  "who am i", "do you know who i am", "do you recognize me", "do you know me"],

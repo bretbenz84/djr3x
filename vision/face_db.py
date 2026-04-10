@@ -244,6 +244,13 @@ class FaceDB:
             self._conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
         log.info("FaceDB: deleted person id=%d", person_id)
 
+    def delete_all_people(self) -> None:
+        """Remove all people and all stored face encodings."""
+        with self._conn:
+            self._conn.execute("DELETE FROM face_encodings")
+            self._conn.execute("DELETE FROM people")
+        log.info("FaceDB: deleted all people and encodings")
+
     def close(self) -> None:
         self._conn.close()
         log.debug("FaceDB: connection closed")

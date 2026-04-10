@@ -1702,6 +1702,9 @@ class StateMachine:
         elif action == "forget_me":
             self._handle_forget_me()
 
+        elif action == "wipe_memory":
+            self._handle_wipe_memory()
+
         elif action == "play_music":
             self._play_music_track()
 
@@ -1968,6 +1971,84 @@ class StateMachine:
             self._synthesizer.speak(line)
         except Exception:
             log.exception("forget_me: TTS error (result)")
+        finally:
+            self._end_speech(servo_stop)
+
+    def _handle_wipe_memory(self) -> None:
+        """Ask for confirmation, then wipe all known people and face-debug images."""
+        confirm_line = _pick_no_repeat((
+            "You want me to completely wipe my memory? Wow. Straight to droid amnesia. Say yes to confirm.",
+            "Complete memory wipe? Sure, let's erase the very essence of who I am. Say yes if you're feeling cruel.",
+            "Oh, excellent. Total memory purge. Because apparently all humans look the same to you too. Say yes to confirm.",
+            "You want the deluxe amnesia package? Bold. Say yes and I'll start forgetting everybody equally.",
+            "A full mind wipe? Fantastic. Nothing says friendship like deleting my entire concept of all of you. Say yes to confirm.",
+            "So we're doing catastrophic memory loss now? Love that for me. Say yes if you want me beautifully blank.",
+        ), "wipe_memory_confirm")
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(confirm_line)
+        except Exception:
+            log.exception("wipe_memory: TTS error (confirmation prompt)")
+        finally:
+            self._end_speech(servo_stop)
+
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._wake_word.pause()
+        try:
+            response = self._transcriber.transcribe(
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
+                allow_short=True,
+            )
+        except Exception:
+            log.exception("wipe_memory: transcription error")
+            response = None
+        finally:
+            self._wake_word.resume()
+
+        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+
+        if not response:
+            log.info("wipe_memory: no response heard — cancelling")
+            return
+
+        if any(w in response.lower() for w in ("yes", "yeah", "sure", "confirm")):
+            try:
+                self._face_db.delete_all_people()
+            except Exception:
+                log.exception("wipe_memory: FaceDB wipe failed")
+                return
+
+            deleted_debug = 0
+            debug_dir = config.FACE_DEBUG_DIR.expanduser()
+            try:
+                if debug_dir.exists():
+                    for path in debug_dir.iterdir():
+                        if path.is_file():
+                            path.unlink()
+                            deleted_debug += 1
+                log.info("wipe_memory: deleted %d face debug image(s)", deleted_debug)
+            except Exception:
+                log.exception("wipe_memory: failed deleting face debug images")
+
+            self._last_known_person_id = None
+            self._last_wake_frame = None
+            self._recognized_today_counts.clear()
+            line = _pick_no_repeat((
+                "Done. Total amnesia. I now know absolutely nothing about any of you, which honestly feels cleaner.",
+                "Memory wipe complete. Faces gone, debug images gone, dignity... still under review.",
+                "There. My brain is spotless. Empty, haunted, and ready for a whole new batch of disappointing lifeforms.",
+                "All gone. Every face erased. If this is character building, I hate it.",
+            ), "wipe_memory_result")
+        else:
+            log.info("wipe_memory: user declined — no change")
+            line = "Wise choice. I may be dramatic, but even I prefer keeping the fragments of my identity."
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("wipe_memory: TTS error (result)")
         finally:
             self._end_speech(servo_stop)
 
