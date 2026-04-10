@@ -194,23 +194,57 @@ class StateMachine:
 
         self._transcriber.warmup()   # no-op for Whisper; kept for interface consistency
         self._transcriber.calibrate_noise_floor()
+        startup_error: list[Exception | None] = [None]
 
-        if self._wake_word.is_available():
-            self._wake_word.warmup()
-            self._wake_word.start()
-        else:
-            log.warning(
-                "Wake word models not found — wake word detection disabled. "
-                "Rex will never leave IDLE unless request_shutdown() is called."
-            )
+        def _finish_startup() -> None:
+            try:
+                if self._wake_word.is_available():
+                    self._wake_word.warmup()
+                    self._wake_word.start()
+                else:
+                    log.warning(
+                        "Wake word models not found — wake word detection disabled. "
+                        "Rex will never leave IDLE unless request_shutdown() is called."
+                    )
 
-        if self._servos is not None:
-            self._servos.start()
+                if self._servos is not None:
+                    self._servos.start()
 
-        self._leds.start()
+                self._leds.start()
 
-        self._camera.warmup()
-        self._camera.start()
+                self._camera.warmup()
+                self._camera.start()
+            except Exception as exc:  # noqa: BLE001
+                startup_error[0] = exc
+
+        startup_thread = threading.Thread(
+            target=_finish_startup,
+            daemon=True,
+            name="djr3x-startup-warmup",
+        )
+        startup_thread.start()
+
+        filler_line = random.choice([
+            "Uh... hang on... startup routines are still rattling around in here...",
+            "Um... almost ready... just waking up the rest of my circuits...",
+            "Okay... okay... one second... systems are still coming online...",
+            "Hmmm... give me a second here... getting everything spun up...",
+        ])
+        servo_stop = None
+        try:
+            servo_stop = self._begin_speech(emotion="neutral")
+            self._synthesizer.speak(filler_line)
+        except Exception:
+            log.exception("StateMachine: startup filler speech failed")
+        finally:
+            if servo_stop is not None:
+                self._end_speech(servo_stop)
+            else:
+                self._wake_word.suppressed = False
+
+        startup_thread.join()
+        if startup_error[0] is not None:
+            raise startup_error[0]
 
         log.info("StateMachine: all subsystems ready.")
 
