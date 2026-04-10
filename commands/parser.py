@@ -45,7 +45,7 @@ def normalize(text: str) -> str:
     return text.strip()
 
 
-def parse(text: str) -> Command | None:
+def parse(text: str, *, allow_fuzzy: bool = True) -> Command | None:
     """Attempt to match *text* against the predefined command list.
 
     Returns the matched Command on success, or None if no phrase is close
@@ -53,8 +53,10 @@ def parse(text: str) -> Command | None:
 
     Matching is two-stage:
       - Exact: O(1) dict lookup after normalization.
+      - Prefix: longest matching phrase prefix.
       - Fuzzy: difflib.get_close_matches over all ~119 phrase keys,
-               accepting the best match above COMMAND_FUZZY_THRESHOLD.
+               accepting the best match above COMMAND_FUZZY_THRESHOLD
+               when allow_fuzzy=True.
     """
     if not text or not text.strip():
         return None
@@ -77,6 +79,10 @@ def parse(text: str) -> Command | None:
             cmd = PHRASE_INDEX[phrase]
             log.debug("Command prefix match: %r starts with %r → %s", normalized, phrase, cmd.phrases[0])
             return cmd
+
+    if not allow_fuzzy:
+        log.debug("No exact/prefix command match for: %r", normalized)
+        return None
 
     # --- Stage 2: fuzzy match ---
     # Skip fuzzy matching for very short inputs — a 1-3 character string can

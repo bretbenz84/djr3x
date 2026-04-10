@@ -607,7 +607,14 @@ class StateMachine:
 
             # --- Parse and respond ---
             _elapsed = f" [+{time.monotonic() - self._pipeline_t0:.1f}s]"
-            cmd = parse(text)
+            # Route deterministically:
+            #   1. Exact/prefix local commands
+            #   2. Vision intent fallback
+            #   3. Fuzzy local commands
+            #   4. Plain LLM fallback
+            # This keeps fuzzy matching from stealing open-ended or visual
+            # questions that should go to the LLM path.
+            cmd = parse(text, allow_fuzzy=False)
             if cmd is not None and cmd.action == "vision":
                 # Vision command — capture a fresh frame right now and send to LLM.
                 log.info("Vision command: %r%s", cmd.phrases[0], _elapsed)
@@ -622,7 +629,8 @@ class StateMachine:
                 log.info("Command matched: %r → %r%s", cmd.phrases[0], cmd.action, _elapsed)
                 next_state = self._execute_command(cmd, text)
             else:
-                # No command match — check visual intent before calling LLM.
+                # No exact/prefix command match — check visual intent before
+                # allowing fuzzy command matching or plain LLM fallback.
                 if vision_intent(text):
                     log.info("Vision intent detected — capturing frame%s", _elapsed)
                     _pose = self._prepare_camera_pose()
@@ -631,10 +639,18 @@ class StateMachine:
                     if frame:
                         log.debug("Camera: fresh frame captured for vision intent (%d bytes b64)",
                                   len(frame))
+                    next_state = self._speak_llm(text, image=frame, t0=self._pipeline_t0)
                 else:
-                    log.info("No vision intent — sending text only to ChatGPT%s", _elapsed)
-                    frame = None
-                next_state = self._speak_llm(text, image=frame, t0=self._pipeline_t0)
+                    fuzzy_cmd = parse(text, allow_fuzzy=True)
+                    if fuzzy_cmd is not None:
+                        log.info(
+                            "Command fuzzy-matched: %r → %r%s",
+                            fuzzy_cmd.phrases[0], fuzzy_cmd.action, _elapsed
+                        )
+                        next_state = self._execute_command(fuzzy_cmd, text)
+                    else:
+                        log.info("No vision intent or command match — sending text only to ChatGPT%s", _elapsed)
+                        next_state = self._speak_llm(text, image=None, t0=self._pipeline_t0)
 
             # Ensure all audio has finished before re-opening the mic.
             self._player.wait_for_speech()
