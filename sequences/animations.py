@@ -653,7 +653,8 @@ class AnimationPlayer:
                     while time.monotonic() < deadline:
                         if self._cancel.is_set():
                             return
-                        time.sleep(min(0.02, deadline - time.monotonic()))
+                        remaining = max(0.0, deadline - time.monotonic())
+                        time.sleep(min(0.02, remaining))
 
                 if self._cancel.is_set():
                     return
