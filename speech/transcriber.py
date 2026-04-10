@@ -417,12 +417,11 @@ def _filter_hallucination(text: str, allow_short: bool = False) -> str:
 
     Drops results that are:
       - empty / whitespace only
-      - shorter than WHISPER_MIN_WORDS words (skipped when allow_short=True)
       - contain a known Whisper hallucination substring
       - a bare month name, year, or 'month year' / 'year month' pattern
 
-    allow_short=True bypasses the minimum word count check, allowing
-    single-word confirmations like 'yes', 'yeah', 'sure' to pass through.
+    allow_short is retained for API compatibility with existing call sites,
+    but short results are no longer filtered purely for length.
     """
     if not text:
         return ""
@@ -437,17 +436,6 @@ def _filter_hallucination(text: str, allow_short: bool = False) -> str:
     if _is_date_hallucination(text):
         log.info("Whisper hallucination filtered (date pattern): %r", text)
         return ""
-
-    words = text.split()
-    if len(words) < config.WHISPER_MIN_WORDS:
-        # Single-word whitelisted commands are always valid regardless of
-        # allow_short — covers 'shutdown', 'yes', 'hi', etc.
-        if len(words) == 1 and words[0].lower() in config.SINGLE_WORD_COMMANDS:
-            log.debug("Whisper single-word command whitelisted: %r", text)
-            return text
-        if not allow_short:
-            log.info("Whisper result too short (%d word(s)), filtered: %r", len(words), text)
-            return ""
 
     return text
 

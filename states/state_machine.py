@@ -487,6 +487,8 @@ class StateMachine:
         if self._shutdown_event.is_set():
             self._transition_to(State.SHUTDOWN)
             return
+        if self._state != State.ACTIVE:
+            return
 
         # Wait for the wave to finish (usually already done by the time audio ends),
         # then restore hand speed and restart the servo idle thread.
@@ -1117,6 +1119,11 @@ class StateMachine:
                 if cmd.action == "os_shutdown":
                     self._os_shutdown_requested = True
                 self._shutdown_event.set()
+                return
+            elif cmd.action == "cancel":
+                log.info("Wake greeting: cancel command spoken during name capture — returning to IDLE")
+                self._play_return_to_idle_chime()
+                self._transition_to(State.IDLE)
                 return
             else:
                 log.info("Wake greeting: command %r spoken during name capture — cancelling", cmd.action)

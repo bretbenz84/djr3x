@@ -284,20 +284,6 @@ WAKE_WORD_CHUNK_SIZE = 1280
 # and makes the first API call ~200 ms faster.  Set to "" to auto-detect.
 WHISPER_LANGUAGE = _optional("WHISPER_LANGUAGE", "en")
 
-# Minimum number of words in a Whisper result to be treated as real speech.
-# Results shorter than this are discarded as likely hallucinations.
-WHISPER_MIN_WORDS = 2
-
-# Single-word results that are always valid and must never be filtered by the
-# min-word check — covers commands, confirmations, and greetings that are
-# legitimately one word.
-SINGLE_WORD_COMMANDS: frozenset[str] = frozenset({
-    "shutdown", "quit", "stop",
-    "cancel", "nevermind",
-    "yes", "no", "yeah", "nope", "sure", "ok", "okay",
-    "bye", "hello", "hi", "help",
-})
-
 # Whisper-specific recording limits (tighter than the generic caps in the
 # "recording / wake word" section above — shorter recording = lower latency).
 WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",       "8.0"))
