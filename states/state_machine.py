@@ -45,6 +45,7 @@ import os
 import random
 import threading
 import time
+from datetime import date
 from pathlib import Path
 
 import config
@@ -180,6 +181,11 @@ class StateMachine:
         # personalized (GPT-4o + camera) on successive wake word activations.
         # False → canned first, then flips to True for personalized, and so on.
         self._greeting_toggle: bool = False
+
+        # Per-day count of how many times each recognized person has woken Rex.
+        # Used only for roast wording; resets automatically when the date changes.
+        self._recognized_today_date: date = date.today()
+        self._recognized_today_counts: dict[int, int] = {}
 
         # Animation player — shares hardware refs with the rest of the machine
         self._animations = AnimationPlayer(self._servos, self._leds)
@@ -982,10 +988,14 @@ class StateMachine:
             if result is not None:
                 person_id, name, distance = result
                 self._face_db.update_last_seen(person_id)
-                person = self._face_db.get_person(person_id)
-                visit_count = person["visit_count"] if person else 1
+                today = date.today()
+                if today != self._recognized_today_date:
+                    self._recognized_today_date = today
+                    self._recognized_today_counts.clear()
+                bother_count = self._recognized_today_counts.get(person_id, 0) + 1
+                self._recognized_today_counts[person_id] = bother_count
                 self._last_known_person_id = person_id
-                self._play_known_person_greeting(name, visit_count)
+                self._play_known_person_greeting(name, bother_count)
                 return
 
             if status == "no_face":
@@ -1018,30 +1028,33 @@ class StateMachine:
             suppress_canned_greeting=played_initial_wake_clip,
         )
 
-    def _play_known_person_greeting(self, name: str, visit_count: int) -> None:
+    def _play_known_person_greeting(self, name: str, bother_count: int) -> None:
         """Speak a personalised greeting for a recognised returning visitor."""
-        if visit_count <= 1:
-            # First return visit after being enrolled
-            line = random.choice([
-                f"Oh great — {name} is back. I had exactly five minutes of peace. Worth it? Debatable.",
-                f"{name}! You came back! Bold move. I respect the audacity.",
-                f"Well well well, {name} returns. The cantina was doing FINE without you, but here we are.",
-                f"Oh! {name}! You actually remembered where the cantina is — I'm genuinely surprised.",
-            ])
-        elif visit_count < 5:
-            line = random.choice([
-                f"HEY, {name}! Back again?! You're really committing to this, huh.",
-                f"{name}! Visit number {visit_count}. Starting to become a problem.",
-                f"Oh no. {name}. Again. I say 'oh no' affectionately, but still — oh no.",
-            ])
+        if bother_count <= 1:
+            pool = (
+                f"Oh great — {name} found me. Day officially downgraded.",
+                f"{name}! There you are. I was almost enjoying the silence.",
+                f"Well well well, {name}. You bug me once today and we're already off to a strong start.",
+                f"Oh! {name}! Bold of you to open today's conversation budget on me.",
+            )
+        elif bother_count < 5:
+            pool = (
+                f"HEY, {name}! That's {bother_count} times you've bugged me today. Outstanding lack of restraint.",
+                f"{name}! Bugging me for the {bother_count} time today? You're really committing to the bit.",
+                f"Oh no, {name}. Again. That's {bother_count} interruptions today, and yes, I'm counting.",
+                f"{name}! Today's annoyance tally is now {bother_count}. Impressive in the worst way.",
+            )
         else:
-            line = random.choice([
-                f"{name}! Visit {visit_count}! You practically PAY RENT here at this point!",
-                f"Oh great, {name}. My favorite recurring problem has arrived. The cantina is yours, I guess.",
-                f"HEY! {name}! Visit {visit_count} — at what point do we just give you a key?!",
-            ])
+            pool = (
+                f"{name}! That's {bother_count} times you've bugged me today. At this point you're a system malfunction.",
+                f"Oh great, {name}. Interruption number {bother_count} today. The commitment is disturbing.",
+                f"HEY! {name}! {bother_count} times today? Even my error logs are starting to judge you.",
+                f"{name}! You have bothered me {bother_count} times today. That's not a schedule, that's a vendetta.",
+            )
 
-        log.info("Wake greeting: known person '%s' (visit #%d) → %r", name, visit_count, line)
+        line = _pick_no_repeat(pool, "known_person_greeting")
+
+        log.info("Wake greeting: known person '%s' (bother count today=%d) → %r", name, bother_count, line)
         servo_stop = self._begin_speech(emotion="excited")
         try:
             self._synthesizer.speak(line)
