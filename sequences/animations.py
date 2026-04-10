@@ -34,6 +34,7 @@ Graceful degradation
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from dataclasses import dataclass, field
@@ -165,6 +166,59 @@ STARTUP: list[Step] = [
          servos={_T: 4100, _V: 6700},
          eyes=_EYE_AMBER),
 ]
+
+
+def _startup_sequence() -> list[Step]:
+    """Return the startup sequence with a randomized neck sweep direction."""
+    neck_min = config.SERVO_CHANNELS[_P]["min"]
+    neck_max = config.SERVO_CHANNELS[_P]["max"]
+    first_pan, second_pan = random.choice([
+        (neck_max, neck_min),
+        (neck_min, neck_max),
+    ])
+    return [
+        Step(delay=0.0,
+             servos={_T: config.SERVO_CHANNELS[_T]["max"],
+                     _L: config.SERVO_CHANNELS[_L]["min"],
+                     _P: 6000,
+                     _V: config.SERVO_CHANNELS[_V]["min"],
+                     _AL: 5200, _AR: 5200, _HL: 5000, _HR: 5000},
+             chest=config.LED_CMD_OFF,
+             head=config.LED_CMD_OFF,
+             eyes=_EYE_OFF),
+        Step(delay=0.5,
+             speeds={_P: config.SERVO_NECK_STARTUP_SPEED},
+             servos={_T: 5100, _V: 5100},
+             eyes=(0, 0, 40)),
+        Step(delay=0.5,
+             servos={_T: 4700, _L: 3500, _V: 5700,
+                     _P: first_pan,
+                     _AL: 5600, _AR: 5600},
+             chest=config.LED_CMD_IDLE,
+             eyes=(0, 40, 140)),
+        Step(delay=0.4,
+             servos={_T: 4500, _L: 4200, _V: 6000,
+                     _P: 6000},
+             eyes=(0, 55, 180)),
+        Step(delay=0.8,
+             servos={_T: 4400, _L: 5000, _V: 6300,
+                     _P: second_pan,
+                     _AL: 5900, _AR: 5900, _HL: 5800, _HR: 5800},
+             eyes=(0, 70, 220)),
+        Step(delay=0.5,
+             speeds={_P: config.SERVO_DEFAULT_SPEED},
+             servos={_T: 4200, _L: config.SERVO_CHANNELS[_L]["neutral"], _P: 6000, _V: 6600,
+                     _AL: 6000, _AR: 6000, _HL: 6000, _HR: 6000},
+             chest=config.LED_CMD_ACTIVE,
+             head=config.LED_CMD_ACTIVE,
+             eyes=_EYE_BLUE),
+        Step(delay=0.4,
+             servos={_T: 3960, _V: 6900},
+             eyes=_EYE_EXCITED),
+        Step(delay=0.3,
+             servos={_T: 4100, _V: 6700},
+             eyes=_EYE_AMBER),
+    ]
 
 
 # --- Shutdown ---------------------------------------------------------------
@@ -465,7 +519,7 @@ class AnimationPlayer:
         Call *before* starting the ServoController idle thread so arm
         motion is not fought by background randomisation.
         """
-        self._launch(STARTUP, blocking=False)
+        self._launch(_startup_sequence(), blocking=False)
 
     def play_shutdown(self) -> None:
         """Start the shutdown (power-down) animation in a background thread
