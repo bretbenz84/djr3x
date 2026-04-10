@@ -169,6 +169,12 @@ class Camera:
                 log.warning("Camera: frame read failed after reopen")
                 return None
 
+        frame = cv2.convertScaleAbs(
+            frame,
+            alpha=config.CAMERA_BRIGHTNESS_GAIN,
+            beta=config.CAMERA_BRIGHTNESS_OFFSET,
+        )
+
         encode_params = [cv2.IMWRITE_JPEG_QUALITY, config.VISION_JPEG_QUALITY]
         ok, buf = cv2.imencode(".jpg", frame, encode_params)
         if not ok:
