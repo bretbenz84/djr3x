@@ -842,11 +842,11 @@ class StateMachine:
                 "Running biometric scan... fascinating specimen.",
             ]
             _RECOGNITION_FILLER_LINES = [
-                "...hey...",
-                "Um... um...",
-                "Hang on...",
-                "Let's see here...",
-                "One tiny second...",
+                "Uh... hang on... hang on... I'm looking...",
+                "Um... let's see... yeah... still processing...",
+                "Okay... okay... hold still... almost got it...",
+                "Hmmm... let's see here... give me a second...",
+                "Hang on... just a tiny second... thinking... thinking...",
             ]
             _NO_FACE_LINES = [
                 "Uh... I can't even see your face from here.",
