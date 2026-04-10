@@ -427,6 +427,11 @@ def _filter_hallucination(text: str, allow_short: bool = False) -> str:
         return ""
 
     lower = text.lower()
+    exact = lower.strip().strip(" \t\r\n.!?,:;\"'")
+
+    if exact in config.WHISPER_HALLUCINATION_EXACT:
+        log.info("Whisper hallucination filtered: %r (exact short match %r)", text, exact)
+        return ""
 
     for phrase in config.WHISPER_HALLUCINATION_FILTER:
         if phrase in lower:

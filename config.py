@@ -334,6 +334,15 @@ WHISPER_HALLUCINATION_FILTER: list[str] = [
     "ok ok",
 ]
 
+# Exact lowercased phrases that Whisper sometimes hallucinates on near-silence.
+# These are matched after light punctuation stripping, so "Thank you." and
+# "you" can be dropped without blocking normal longer sentences containing
+# those words.
+WHISPER_HALLUCINATION_EXACT: set[str] = {
+    "thank you",
+    "you",
+}
+
 # ---------------------------------------------------------------------------
 # Speech — synthesis (ElevenLabs)
 # ---------------------------------------------------------------------------
