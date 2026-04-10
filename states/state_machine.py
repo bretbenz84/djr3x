@@ -839,6 +839,13 @@ class StateMachine:
                 "Hold still... analyzing lifeform... done.",
                 "Running biometric scan... fascinating specimen.",
             ]
+            _RECOGNITION_FILLER_LINES = [
+                "...hey...",
+                "Um... um...",
+                "Hang on...",
+                "Let's see here...",
+                "One tiny second...",
+            ]
 
             if n_people == 0:
                 # Empty database — definitely heading to enrollment.  Hide the
@@ -884,6 +891,20 @@ class StateMachine:
                     target=_identify_known, daemon=True, name="djr3x-face-identify"
                 )
                 face_thread2.start()
+                face_thread2.join(timeout=0.25)
+                if face_thread2.is_alive():
+                    filler_line = random.choice(_RECOGNITION_FILLER_LINES)
+                    log.info(
+                        "Wake greeting: face recognition still running — playing filler line — %r",
+                        filler_line,
+                    )
+                    servo_stop = self._begin_speech(emotion="excited")
+                    try:
+                        self._synthesizer.speak(filler_line)
+                    except Exception:
+                        log.exception("Wake greeting: filler-line TTS error")
+                    finally:
+                        self._end_speech(servo_stop)
                 face_thread2.join()
                 result = face_result2[0]
 
