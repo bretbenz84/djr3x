@@ -74,59 +74,102 @@ class WakeWordDetector:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _all_model_paths() -> tuple:
+    def _active_model_paths() -> tuple:
         return (
             config.WAKE_WORD_MODEL_1,
             config.WAKE_WORD_MODEL_2,
             config.WAKE_WORD_MODEL_3,
             config.WAKE_WORD_MODEL_4,
-            config.WAKE_SLEEP_MODEL,   # optional sleep-mode wake word
         )
 
+    @staticmethod
+    def _sleep_model_paths() -> tuple:
+        return (config.WAKE_SLEEP_MODEL,)
+
     def is_available(self) -> bool:
-        """Return True if at least one wake word model file exists on disk.
+        """Return True if at least one normal wake word model exists on disk.
 
         Does NOT load the model. Safe to call at any time.
         """
-        return any(p.exists() for p in self._all_model_paths())
+        return any(p.exists() for p in self._active_model_paths())
 
     def warmup(self) -> None:
-        """Load wake word model(s) into memory. Call once at startup.
+        """Load the normal wake word model(s) into memory. Call once at startup.
 
-        Loads whichever of the four configured .onnx files actually exist.
-        Raises RuntimeError if no model files are found.
-        Raises RuntimeError if called more than once.
+        Loads whichever configured non-sleep .onnx files actually exist.
         """
-        if self._model is not None:
-            log.warning("WakeWordDetector.warmup() called more than once — ignoring")
-            return
+        self.use_active_models()
 
-        all_paths = self._all_model_paths()
-        paths = [p for p in all_paths if p.exists()]
+    def use_active_models(self) -> None:
+        """Load the normal wake word models, excluding the sleep-only model."""
+        self._swap_models(
+            self._active_model_paths(),
+            profile_name="active",
+            missing_label="wake word model(s)",
+        )
+
+    def use_sleep_model(self) -> None:
+        """Load only the sleep-mode wake word model."""
+        self._swap_models(
+            self._sleep_model_paths(),
+            profile_name="sleep",
+            missing_label="sleep wake word model",
+        )
+
+    def _swap_models(
+        self,
+        candidate_paths: tuple[Path, ...],
+        *,
+        profile_name: str,
+        missing_label: str,
+    ) -> None:
+        """Load a specific wake-word model profile, pausing capture if needed."""
+        was_running = self._thread is not None and self._thread.is_alive()
+        if was_running:
+            self.pause()
+
+        paths = [p for p in candidate_paths if p.exists()]
         if not paths:
+            if was_running:
+                self.resume()
             raise RuntimeError(
-                "No wake word model files found.\n"
-                + "\n".join(f"  Model {i+1}: {p}" for i, p in enumerate(all_paths))
+                f"No {missing_label} found for {profile_name} profile.\n"
+                + "\n".join(f"  {p}" for p in candidate_paths)
                 + "\nPlace trained .onnx files at those paths or update .env."
             )
 
-        missing = [p for p in all_paths if not p.exists()]
-        total = len(all_paths)
+        missing = [p for p in candidate_paths if not p.exists()]
+        total = len(candidate_paths)
         if missing:
             log.warning(
-                "Wake word model(s) not found (running with %d/%d): %s",
-                len(paths), total, [str(m) for m in missing],
+                "%s not found for %s profile (running with %d/%d): %s",
+                missing_label.capitalize(),
+                profile_name,
+                len(paths),
+                total,
+                [str(m) for m in missing],
             )
 
-        log.info(
-            "Loading %d wake word model(s): %s",
-            len(paths), [p.name for p in paths],
-        )
-        self._model = OWWModel(
-            wakeword_model_paths=[str(p) for p in paths],
-        )
-        loaded = list(self._model.models.keys())
-        log.info("Wake word models loaded (%d/%d models): %s", len(loaded), total, loaded)
+        try:
+            log.info(
+                "Loading %s wake word model(s): %s",
+                profile_name,
+                [p.name for p in paths],
+            )
+            self._model = OWWModel(
+                wakeword_model_paths=[str(p) for p in paths],
+            )
+            loaded = list(self._model.models.keys())
+            log.info(
+                "Wake word %s models loaded (%d/%d models): %s",
+                profile_name,
+                len(loaded),
+                total,
+                loaded,
+            )
+        finally:
+            if was_running:
+                self.resume()
 
     # ------------------------------------------------------------------
     # Lifecycle

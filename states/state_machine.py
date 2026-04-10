@@ -1243,6 +1243,13 @@ class StateMachine:
         """
         log.info("→ SLEEP")
 
+        try:
+            self._wake_word.use_sleep_model()
+        except Exception:
+            log.exception("SLEEP: failed to load sleep wake word model")
+            self._transition_to(State.IDLE)
+            return
+
         # Very dim blue breathing eyes — EYE must be sent before IDLE so the
         # Nano has a non-black eyeColor to breathe at.
         self._leds.set_chest_effect(config.LED_CMD_IDLE)
@@ -1301,6 +1308,13 @@ class StateMachine:
                 config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
             )
             self._servos.start()
+
+        try:
+            self._wake_word.use_active_models()
+        except Exception:
+            log.exception("SLEEP: failed to restore active wake word models")
+            self._transition_to(State.SHUTDOWN)
+            return
 
         self._transition_to(State.IDLE)
 
