@@ -376,12 +376,14 @@ VISION_JPEG_QUALITY  = int(_optional("VISION_JPEG_QUALITY", "85"))
 
 # Servo positions used when preparing for a camera capture.
 # Visor fully open gives the camera an unobstructed view; neck centred avoids
-# the frame being cut off by an extreme pan.  Both are tunable via .env.
-CAMERA_POSE_VISOR: int = int(_optional("CAMERA_POSE_VISOR", str(SERVO_CHANNELS[3]["max"])))     # ch 3 max = 6976 (fully open)
-CAMERA_POSE_NECK:  int = int(_optional("CAMERA_POSE_NECK",  str(SERVO_CHANNELS[0]["neutral"]))) # ch 0 neutral = 6000 (centred)
+# the frame being cut off by an extreme pan; head tilt points the camera lower.
+# All are tunable via .env.
+CAMERA_POSE_VISOR: int = int(_optional("CAMERA_POSE_VISOR", str(SERVO_CHANNELS[3]["max"])))         # ch 3 max = 6976 (fully open)
+CAMERA_POSE_NECK:  int = int(_optional("CAMERA_POSE_NECK",  str(SERVO_CHANNELS[0]["neutral"])))     # ch 0 neutral = 6000 (centred)
+CAMERA_POSE_TILT:  int = int(_optional("CAMERA_POSE_TILT",  str(SERVO_CHANNELS[2]["max"])))         # ch 2 max = 5504 (tilt down)
 
 # How long (seconds) to wait after moving to the camera pose before capturing.
-CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "0.5"))
+CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "0.7"))
 FACE_DB_PATH              = Path(_optional("FACE_DB_PATH", str(ASSETS_DIR / "face_db.sqlite")))
 FACE_DEBUG_DIR            = Path(_optional("FACE_DEBUG_DIR", str(ASSETS_DIR / "face_debug")))
 DLIB_SHAPE_PREDICTOR_PATH = Path(_optional("DLIB_SHAPE_PREDICTOR_PATH", str(MODELS_DIR / "shape_predictor_68_face_landmarks.dat")))

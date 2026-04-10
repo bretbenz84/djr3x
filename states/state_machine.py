@@ -1929,11 +1929,11 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def _prepare_camera_pose(self) -> dict[int, int] | None:
-        """Move visor fully open and neck to centre for an unobstructed capture.
+        """Move visor/head into a stable capture pose before taking a frame.
 
-        Sends speed + position commands for visor (ch 3) and neck (ch 0), then
-        sleeps config.CAMERA_POSE_SETTLE_SECS so the servos reach position before
-        the caller calls capture_frame().
+        Sends position commands for visor (ch 3), neck pan (ch 0), and head tilt
+        (ch 2) together, then sleeps config.CAMERA_POSE_SETTLE_SECS so the
+        servos reach position before the caller calls capture_frame().
 
         Returns a restore dict for _restore_servo_pose().  The restore targets
         are the channel neutral positions — ServoController has no get_position
@@ -1946,20 +1946,23 @@ class StateMachine:
             return None
 
         restore = {
-            config.SERVO_VISOR:    config.SERVO_CHANNELS[config.SERVO_VISOR]["neutral"],
-            config.SERVO_HEAD_PAN: config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["neutral"],
+            config.SERVO_VISOR:     config.SERVO_CHANNELS[config.SERVO_VISOR]["neutral"],
+            config.SERVO_HEAD_PAN:  config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["neutral"],
+            config.SERVO_HEAD_TILT: config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["neutral"],
         }
 
-        self._servos.set_channel_speed(config.SERVO_VISOR,    config.SERVO_DEFAULT_SPEED)
-        self._servos.set_position(config.SERVO_VISOR,          config.CAMERA_POSE_VISOR)
+        self._servos.set_channel_speed(config.SERVO_VISOR, config.SERVO_DEFAULT_SPEED)
         self._servos.set_channel_speed(config.SERVO_HEAD_PAN, config.SERVO_DEFAULT_SPEED)
-        self._servos.set_position(config.SERVO_HEAD_PAN,       config.CAMERA_POSE_NECK)
+        self._servos.set_channel_speed(config.SERVO_HEAD_TILT, config.SERVO_DEFAULT_SPEED)
+        self._servos.set_position(config.SERVO_VISOR, config.CAMERA_POSE_VISOR)
+        self._servos.set_position(config.SERVO_HEAD_PAN, config.CAMERA_POSE_NECK)
+        self._servos.set_position(config.SERVO_HEAD_TILT, config.CAMERA_POSE_TILT)
 
         time.sleep(config.CAMERA_POSE_SETTLE_SECS)
         return restore
 
     def _restore_servo_pose(self, restore: dict[int, int] | None) -> None:
-        """Return visor and neck to positions saved by _prepare_camera_pose().
+        """Return capture-pose servos to positions saved by _prepare_camera_pose().
 
         Safe to call even when servos are unavailable or restore is None
         (e.g. when _prepare_camera_pose() returned None because servos were off).
