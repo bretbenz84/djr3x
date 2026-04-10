@@ -385,7 +385,7 @@ WAKE_GOODBYE_TIMEOUT     = 4.0   # seconds to wait after "are you there?" before
 CAMERA_DEVICE_INDEX  = int(_optional("CAMERA_DEVICE_INDEX", "0"))
 CAMERA_FRAME_WIDTH   = int(_optional("CAMERA_FRAME_WIDTH", "1920"))
 CAMERA_FRAME_HEIGHT  = int(_optional("CAMERA_FRAME_HEIGHT", "1080"))
-CAMERA_CAPTURE_FLUSH_FRAMES = int(_optional("CAMERA_CAPTURE_FLUSH_FRAMES", "2"))
+CAMERA_CAPTURE_FLUSH_FRAMES = int(_optional("CAMERA_CAPTURE_FLUSH_FRAMES", "4"))
 CAMERA_BRIGHTNESS_GAIN = float(_optional("CAMERA_BRIGHTNESS_GAIN", "1.15"))
 CAMERA_BRIGHTNESS_OFFSET = int(_optional("CAMERA_BRIGHTNESS_OFFSET", "8"))
 VISION_JPEG_QUALITY  = int(_optional("VISION_JPEG_QUALITY", "85"))
@@ -399,7 +399,7 @@ CAMERA_POSE_NECK:  int = int(_optional("CAMERA_POSE_NECK",  str(SERVO_CHANNELS[0
 CAMERA_POSE_TILT:  int = int(_optional("CAMERA_POSE_TILT",  str(SERVO_CHANNELS[2]["neutral"] + 320)))  # ch 2 slightly down from neutral
 
 # How long (seconds) to wait after moving to the camera pose before capturing.
-CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "1.4"))
+CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "1.8"))
 FACE_DB_PATH              = Path(_optional("FACE_DB_PATH", str(ASSETS_DIR / "face_db.sqlite")))
 FACE_DEBUG_DIR            = Path(_optional("FACE_DEBUG_DIR", str(ASSETS_DIR / "face_debug")))
 DLIB_SHAPE_PREDICTOR_PATH = Path(_optional("DLIB_SHAPE_PREDICTOR_PATH", str(MODELS_DIR / "shape_predictor_68_face_landmarks.dat")))
