@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import os
 import signal
 import sys
 import time
@@ -129,6 +130,18 @@ def _register_signals(sm: StateMachine) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def _started_as_service() -> bool:
+    """Best-effort check for systemd/service-style launches.
+
+    Interactive terminal runs should skip the startup enumeration delay, while
+    service-managed launches keep it because USB/audio devices may still be
+    settling right after boot.
+    """
+    if os.environ.get("INVOCATION_ID") or os.environ.get("JOURNAL_STREAM"):
+        return True
+    return not sys.stdin.isatty()
+
+
 def main() -> None:
     _setup_logging()
     log.info("DJ-R3X controller starting up …")
@@ -138,8 +151,11 @@ def main() -> None:
     #    simultaneously on the Pi can take 3-5 s; the retry logic in
     #    ServoController and LEDController will handle stragglers, but starting
     #    with a generous wait reduces the number of retries needed in practice.
-    log.info("Waiting 5 s for USB serial and audio devices to enumerate …")
-    time.sleep(5)
+    if _started_as_service():
+        log.info("Waiting 5 s for USB serial and audio devices to enumerate …")
+        time.sleep(5)
+    else:
+        log.info("Interactive launch detected — skipping startup enumeration delay")
 
     # 1. Construct state machine (probes serial ports, opens hardware)
     sm = StateMachine()
