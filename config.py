@@ -396,7 +396,7 @@ VISION_JPEG_QUALITY  = int(_optional("VISION_JPEG_QUALITY", "85"))
 # All are tunable via .env.
 CAMERA_POSE_VISOR: int = int(_optional("CAMERA_POSE_VISOR", str(SERVO_CHANNELS[3]["max"])))         # ch 3 max = 6976 (fully open)
 CAMERA_POSE_NECK:  int = int(_optional("CAMERA_POSE_NECK",  str(SERVO_CHANNELS[0]["neutral"])))     # ch 0 neutral = 6000 (centred)
-CAMERA_POSE_TILT:  int = int(_optional("CAMERA_POSE_TILT",  str(SERVO_CHANNELS[2]["max"])))         # ch 2 max = 5504 (tilt down)
+CAMERA_POSE_TILT:  int = int(_optional("CAMERA_POSE_TILT",  str(SERVO_CHANNELS[2]["neutral"] + 320)))  # ch 2 slightly down from neutral
 
 # How long (seconds) to wait after moving to the camera pose before capturing.
 CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "1.0"))
