@@ -150,6 +150,14 @@ class Camera:
                 log.debug("Camera: capture_frame called but camera unavailable")
                 return None
 
+        # Flush a couple of frames from the open stream so a just-moved camera
+        # pose is reflected in the captured image rather than returning an
+        # older buffered frame from before the servo movement settled.
+        for _ in range(max(0, config.CAMERA_CAPTURE_FLUSH_FRAMES)):
+            ok, frame = self._cap.read()
+            if not ok or frame is None:
+                break
+
         ok, frame = self._cap.read()
         if not ok or frame is None:
             log.warning("Camera: frame read failed — attempting reopen")

@@ -384,6 +384,7 @@ WAKE_GOODBYE_TIMEOUT     = 4.0   # seconds to wait after "are you there?" before
 CAMERA_DEVICE_INDEX  = int(_optional("CAMERA_DEVICE_INDEX", "0"))
 CAMERA_FRAME_WIDTH   = int(_optional("CAMERA_FRAME_WIDTH", "1920"))
 CAMERA_FRAME_HEIGHT  = int(_optional("CAMERA_FRAME_HEIGHT", "1080"))
+CAMERA_CAPTURE_FLUSH_FRAMES = int(_optional("CAMERA_CAPTURE_FLUSH_FRAMES", "2"))
 VISION_JPEG_QUALITY  = int(_optional("VISION_JPEG_QUALITY", "85"))
 
 # Servo positions used when preparing for a camera capture.
