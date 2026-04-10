@@ -375,6 +375,15 @@ WAKE_GOODBYE_TIMEOUT     = 4.0   # seconds to wait after "are you there?" before
 
 CAMERA_DEVICE_INDEX  = int(_optional("CAMERA_DEVICE_INDEX", "0"))
 VISION_JPEG_QUALITY  = int(_optional("VISION_JPEG_QUALITY", "85"))
+
+# Servo positions used when preparing for a camera capture.
+# Visor fully open gives the camera an unobstructed view; neck centred avoids
+# the frame being cut off by an extreme pan.  Both are tunable via .env.
+CAMERA_POSE_VISOR: int = int(_optional("CAMERA_POSE_VISOR", str(SERVO_CHANNELS[3]["max"])))     # ch 3 max = 6976 (fully open)
+CAMERA_POSE_NECK:  int = int(_optional("CAMERA_POSE_NECK",  str(SERVO_CHANNELS[0]["neutral"]))) # ch 0 neutral = 6000 (centred)
+
+# How long (seconds) to wait after moving to the camera pose before capturing.
+CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "0.5"))
 FACE_DB_PATH              = Path(_optional("FACE_DB_PATH", str(ASSETS_DIR / "face_db.sqlite")))
 DLIB_SHAPE_PREDICTOR_PATH = Path(_optional("DLIB_SHAPE_PREDICTOR_PATH", str(MODELS_DIR / "shape_predictor_68_face_landmarks.dat")))
 DLIB_FACE_MODEL_PATH      = Path(_optional("DLIB_FACE_MODEL_PATH",      str(MODELS_DIR / "dlib_face_recognition_resnet_model_v1.dat")))

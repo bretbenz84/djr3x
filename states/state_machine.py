@@ -595,7 +595,9 @@ class StateMachine:
             if cmd is not None and cmd.action == "vision":
                 # Vision command — capture a fresh frame right now and send to LLM.
                 log.info("Vision command: %r%s", cmd.phrases[0], _elapsed)
+                _pose = self._prepare_camera_pose()
                 frame = self._camera.capture_frame()
+                self._restore_servo_pose(_pose)
                 if frame:
                     log.debug("Camera: fresh frame captured for vision command (%d bytes b64)",
                               len(frame))
@@ -608,7 +610,9 @@ class StateMachine:
                 # No command match — check visual intent before calling LLM.
                 if vision_intent(text):
                     log.info("Vision intent detected — capturing frame%s", _elapsed)
+                    _pose = self._prepare_camera_pose()
                     frame = self._camera.capture_frame()
+                    self._restore_servo_pose(_pose)
                     if frame:
                         log.debug("Camera: fresh frame captured for vision intent (%d bytes b64)",
                                   len(frame))
@@ -761,7 +765,9 @@ class StateMachine:
         """
         frame: str | None = None
         if self._camera.is_available():
+            _pose = self._prepare_camera_pose()
             frame = self._camera.capture_frame()
+            self._restore_servo_pose(_pose)
             if frame:
                 self._last_wake_frame = frame   # save for enrollment fallback
 
@@ -1058,7 +1064,9 @@ class StateMachine:
         # available immediately (no camera access inside the thread).
         enroll_frame: str | None = None
         if self._camera.is_available():
+            _pose = self._prepare_camera_pose()
             enroll_frame = self._camera.capture_frame()
+            self._restore_servo_pose(_pose)
             if enroll_frame:
                 log.info("Enrollment: captured fresh frame (%d b64 bytes)", len(enroll_frame))
             else:
@@ -1092,7 +1100,9 @@ class StateMachine:
 
             if enc is None and self._camera.is_available():
                 log.info("Enrollment: both cached frames failed — capturing one final live frame")
+                _pose = self._prepare_camera_pose()
                 final_f = self._camera.capture_frame()
+                self._restore_servo_pose(_pose)
                 if final_f:
                     log.info("Enrollment: final live frame captured (%d b64 bytes)", len(final_f))
                     enc = self._face_recognizer.encode_face(final_f, for_enrollment=True)
@@ -1649,7 +1659,12 @@ class StateMachine:
             log.info("rename_me: using cached person_id=%d", person_id)
         else:
             # Unknown visitor path — capture a fresh frame and try to identify.
-            frame = self._camera.capture_frame() if self._camera.is_available() else None
+            if self._camera.is_available():
+                _pose = self._prepare_camera_pose()
+                frame = self._camera.capture_frame()
+                self._restore_servo_pose(_pose)
+            else:
+                frame = None
             if not frame:
                 line = "I can't see you right now — try again when the camera is working!"
                 log.info("rename_me: no camera frame available")
@@ -1778,6 +1793,51 @@ class StateMachine:
             self._end_speech(servo_stop)
 
     # ------------------------------------------------------------------
+    # Camera pose helpers
+    # ------------------------------------------------------------------
+
+    def _prepare_camera_pose(self) -> dict[int, int] | None:
+        """Move visor fully open and neck to centre for an unobstructed capture.
+
+        Sends speed + position commands for visor (ch 3) and neck (ch 0), then
+        sleeps config.CAMERA_POSE_SETTLE_SECS so the servos reach position before
+        the caller calls capture_frame().
+
+        Returns a restore dict for _restore_servo_pose().  The restore targets
+        are the channel neutral positions — ServoController has no get_position
+        API, so neutral is the best approximation of "where they were" and is
+        also the position the idle loop naturally drifts toward.
+
+        Returns None if servos are unavailable (caller must still check).
+        """
+        if self._servos is None:
+            return None
+
+        restore = {
+            config.SERVO_VISOR:    config.SERVO_CHANNELS[config.SERVO_VISOR]["neutral"],
+            config.SERVO_HEAD_PAN: config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["neutral"],
+        }
+
+        self._servos.set_channel_speed(config.SERVO_VISOR,    config.SERVO_DEFAULT_SPEED)
+        self._servos.set_position(config.SERVO_VISOR,          config.CAMERA_POSE_VISOR)
+        self._servos.set_channel_speed(config.SERVO_HEAD_PAN, config.SERVO_DEFAULT_SPEED)
+        self._servos.set_position(config.SERVO_HEAD_PAN,       config.CAMERA_POSE_NECK)
+
+        time.sleep(config.CAMERA_POSE_SETTLE_SECS)
+        return restore
+
+    def _restore_servo_pose(self, restore: dict[int, int] | None) -> None:
+        """Return visor and neck to positions saved by _prepare_camera_pose().
+
+        Safe to call even when servos are unavailable or restore is None
+        (e.g. when _prepare_camera_pose() returned None because servos were off).
+        """
+        if self._servos is None or not restore:
+            return
+        for channel, position in restore.items():
+            self._servos.set_position(channel, position)
+
+    # ------------------------------------------------------------------
     # Recall-name helper
     # ------------------------------------------------------------------
 
@@ -1807,7 +1867,12 @@ class StateMachine:
             return None
 
         # Capture a fresh frame for both identification and the vision roast.
-        frame = self._camera.capture_frame() if self._camera.is_available() else None
+        if self._camera.is_available():
+            _pose = self._prepare_camera_pose()
+            frame = self._camera.capture_frame()
+            self._restore_servo_pose(_pose)
+        else:
+            frame = None
 
         # Try to identify the speaker.
         result = None
@@ -1871,7 +1936,12 @@ class StateMachine:
         log.info("recall_name: new person gave name %r", name)
 
         # Enroll — try a fresh frame first, fall back to the frame captured earlier.
-        enroll_frame = self._camera.capture_frame() if self._camera.is_available() else None
+        if self._camera.is_available():
+            _pose = self._prepare_camera_pose()
+            enroll_frame = self._camera.capture_frame()
+            self._restore_servo_pose(_pose)
+        else:
+            enroll_frame = None
         enc = None
         if enroll_frame:
             enc = self._face_recognizer.encode_face(enroll_frame, for_enrollment=True)
