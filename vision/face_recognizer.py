@@ -255,3 +255,43 @@ class FaceRecognizer:
             )
 
         return self._db.find_person(encoding, tolerance=tolerance)
+
+    def identify_with_status(
+        self,
+        image_b64: str,
+        tolerance: float = 0.6,
+    ) -> tuple[str, Optional[tuple[int, str, float]]]:
+        """Return a statusful identification result for wake-routing decisions.
+
+        Status values:
+          - "match": face detected and matched within tolerance
+          - "no_match": face detected but not recognized
+          - "no_face": image decoded but no face was detected
+          - "db_empty": face detected but FaceDB has no people
+          - "unavailable": recognizer models are not loaded
+        """
+        if not self._available:
+            return "unavailable", None
+
+        encoding = self.encode_face(image_b64, for_enrollment=False)
+        if encoding is None:
+            return "no_face", None
+
+        closest = self._db.find_closest(encoding)
+        if closest is None:
+            log.info("FaceRecognizer: identify — database empty, nothing to match against")
+            return "db_empty", None
+
+        _cid, cname, cdist = closest
+        if cdist <= tolerance:
+            log.info(
+                "FaceRecognizer: MATCH — '%s' at distance=%.4f (tolerance=%.4f)",
+                cname, cdist, tolerance,
+            )
+            return "match", self._db.find_person(encoding, tolerance=tolerance)
+
+        log.info(
+            "FaceRecognizer: NO MATCH — closest is '%s' at distance=%.4f (tolerance=%.4f)",
+            cname, cdist, tolerance,
+        )
+        return "no_match", None

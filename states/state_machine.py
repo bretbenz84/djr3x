@@ -848,15 +848,22 @@ class StateMachine:
                 "Let's see here...",
                 "One tiny second...",
             ]
+            _NO_FACE_LINES = [
+                "Uh... I can't even see your face from here.",
+                "Hard to identify a lifeform when there is no lifeform in frame.",
+                "I would scan you, but your face is doing an excellent job of not being on camera.",
+                "No face detected. Very mysterious. Very unhelpful.",
+                "You want the full identity routine? First I need an actual face to look at.",
+            ]
 
             if n_people == 0:
                 # Empty database — definitely heading to enrollment.  Hide the
                 # 2-4 s dlib latency behind the scanning audio line by running
                 # face recognition and TTS concurrently.
-                face_result: list = [None]
+                face_result: list = [("no_face", None)]
 
                 def _identify_empty() -> None:
-                    face_result[0] = self._face_recognizer.identify(
+                    face_result[0] = self._face_recognizer.identify_with_status(
                         frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
                     )
 
@@ -876,16 +883,19 @@ class StateMachine:
                     self._end_speech(servo_stop)
 
                 face_thread.join()
-                result = face_result[0]
-                print("Face scan: database empty — no comparison possible")
+                status, result = face_result[0]
+                if status == "db_empty":
+                    print("Face scan: database empty — no comparison possible")
+                elif status == "no_face":
+                    print("Face scan: NO FACE DETECTED")
 
             else:
                 # Database has known people — run recognition without any scanning
                 # line so a recognised person gets an instant greeting.
-                face_result2: list = [None]
+                face_result2: list = [("no_face", None)]
 
                 def _identify_known() -> None:
-                    face_result2[0] = self._face_recognizer.identify(
+                    face_result2[0] = self._face_recognizer.identify_with_status(
                         frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
                     )
 
@@ -908,15 +918,15 @@ class StateMachine:
                     finally:
                         self._end_speech(servo_stop)
                 face_thread2.join()
-                result = face_result2[0]
+                status, result = face_result2[0]
 
-                if result is not None:
+                if status == "match" and result is not None:
                     _pid, rname, rdist = result
                     print(
                         f"Face scan: RECOGNIZED {rname} (distance {rdist:.3f}, "
                         f"threshold {config.FACE_RECOGNITION_TOLERANCE})"
                     )
-                else:
+                elif status == "no_match":
                     print(
                         f"Face scan: UNKNOWN (no match within threshold "
                         f"{config.FACE_RECOGNITION_TOLERANCE} — see logs for closest)"
@@ -932,6 +942,8 @@ class StateMachine:
                         log.exception("Wake greeting: scanning line TTS error")
                     finally:
                         self._end_speech(servo_stop)
+                elif status == "no_face":
+                    print("Face scan: NO FACE DETECTED")
 
             if result is not None:
                 person_id, name, distance = result
@@ -940,6 +952,18 @@ class StateMachine:
                 visit_count = person["visit_count"] if person else 1
                 self._last_known_person_id = person_id
                 self._play_known_person_greeting(name, visit_count)
+                return
+
+            if status == "no_face":
+                line = random.choice(_NO_FACE_LINES)
+                log.info("Wake greeting: no face detected — %r", line)
+                servo_stop = self._begin_speech(emotion="neutral")
+                try:
+                    self._synthesizer.speak(line)
+                except Exception:
+                    log.exception("Wake greeting: no-face TTS error")
+                finally:
+                    self._end_speech(servo_stop)
                 return
 
             # Unknown face — fall through to the existing alternating path,
