@@ -77,8 +77,8 @@ class Camera:
                     time.sleep(self._OPEN_RETRY_DELAY)
                 continue
 
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_FRAME_WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_FRAME_HEIGHT)
 
             # Give the sensor a moment to initialise before reading the test frame.
             time.sleep(self._WARMUP_DELAY)
