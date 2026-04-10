@@ -604,7 +604,6 @@ class StateMachine:
                 next_state = self._speak_llm(text, image=frame, t0=self._pipeline_t0)
             elif cmd is not None:
                 log.info("Command matched: %r → %r%s", cmd.phrases[0], cmd.action, _elapsed)
-                log.info("Rex (cmd): %s", cmd.response)
                 next_state = self._execute_command(cmd, text)
             else:
                 # No command match — check visual intent before calling LLM.
@@ -1393,6 +1392,8 @@ class StateMachine:
         after any pre-speak logic and right before audio is queued.
         """
         emotion = _action_to_emotion(cmd.action)
+        response = cmd.get_response()
+        log.info("Rex (cmd): %s", response)
         servo_stop = None
         try:
             if cmd.audio:
@@ -1406,10 +1407,10 @@ class StateMachine:
                         cmd.audio,
                     )
                     servo_stop = self._begin_speech(emotion=emotion)
-                    self._synthesizer.speak(cmd.response)
+                    self._synthesizer.speak(response)
             else:
                 servo_stop = self._begin_speech(emotion=emotion)
-                self._synthesizer.speak(cmd.response)
+                self._synthesizer.speak(response)
         except Exception:
             log.exception("Error speaking command response")
         finally:
