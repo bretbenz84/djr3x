@@ -225,6 +225,8 @@ TRANSCRIBE_NOISE_FLOOR_DURATION    = float(_optional("TRANSCRIBE_NOISE_FLOOR_DUR
 NOISE_FLOOR_MULTIPLIER             = float(_optional("NOISE_FLOOR_MULTIPLIER",           "2.0"))  # scale factor applied to measured RMS
 TRANSCRIBE_SPEECH_THRESHOLD_MIN    = int(_optional("TRANSCRIBE_SPEECH_THRESHOLD_MIN",    "300"))  # floor — avoids cutting out real speech
 TRANSCRIBE_SPEECH_THRESHOLD_MAX    = int(_optional("TRANSCRIBE_SPEECH_THRESHOLD_MAX",    "800"))  # ceiling — noisy room can't silence Rex
+TRANSCRIBE_MIN_WHISPER_SECONDS     = float(_optional("TRANSCRIBE_MIN_WHISPER_SECONDS",   "0.5"))  # skip normal-path Whisper calls for ultra-short clips
+TRANSCRIBE_MIN_VOICED_CHUNKS       = int(_optional("TRANSCRIBE_MIN_VOICED_CHUNKS",       "5"))    # minimum above-threshold chunks before a normal-path clip is worth transcribing
 SILENCE_DURATION             = 1.2  # seconds of silence to end capture
 MAX_RECORD_SECONDS           = 12.0 # hard cap on a single utterance
 
@@ -340,6 +342,7 @@ WHISPER_HALLUCINATION_FILTER: list[str] = [
 # those words.
 WHISPER_HALLUCINATION_EXACT: set[str] = {
     "thank you",
+    "thank you thank you",
     "you",
 }
 

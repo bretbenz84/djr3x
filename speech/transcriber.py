@@ -233,6 +233,7 @@ class Transcriber:
             consecutive_speech: int = 0
             silence_chunks: int = 0
             near_zero_chunks: int = 0
+            voiced_chunks: int = 0
 
             try:
                 with _open_input_stream() as stream:
@@ -275,6 +276,7 @@ class Transcriber:
                             if speech_first_chunk is None:
                                 speech_first_chunk = chunk_index
                             consecutive_speech += 1
+                            voiced_chunks += 1
                             silence_chunks = 0   # reset Phase 2 silence counter
 
                             if not speech_started and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS:
@@ -343,6 +345,25 @@ class Transcriber:
 
         pcm = np.concatenate(frames_for_whisper) if frames_for_whisper else np.array([], dtype=np.int16)
         audio_duration = len(pcm) / config.AUDIO_SAMPLE_RATE
+
+        # On the normal command path, avoid sending ultra-short, weak clips to
+        # Whisper. These are the main source of near-silence hallucinations
+        # like "thank you" when the user hesitates too long before speaking.
+        if not allow_short:
+            if (
+                audio_duration < config.TRANSCRIBE_MIN_WHISPER_SECONDS
+                or voiced_chunks < config.TRANSCRIBE_MIN_VOICED_CHUNKS
+            ):
+                log.info(
+                    "Transcriber: skipping Whisper for short/weak clip "
+                    "(duration=%.1fs, voiced_chunks=%d, min_duration=%.1fs, min_voiced=%d)%s",
+                    audio_duration,
+                    voiced_chunks,
+                    config.TRANSCRIBE_MIN_WHISPER_SECONDS,
+                    config.TRANSCRIBE_MIN_VOICED_CHUNKS,
+                    _mark(),
+                )
+                return ""
 
         log.info(
             "Silence detected — sending %.1f s audio to Whisper …%s",
