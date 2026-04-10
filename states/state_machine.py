@@ -781,6 +781,27 @@ class StateMachine:
     # Speech helpers
     # ------------------------------------------------------------------
 
+    def _play_initial_wake_clip(self) -> bool:
+        """Play the canned wake clip once at the start of the wake flow.
+
+        Returns True if the clip was played, False if it was unavailable or
+        playback failed before audio could be queued.
+        """
+        clip_path = config.ASSETS_DIR / "audio" / "Hi There.mp3"
+        if not clip_path.exists():
+            return False
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._player.play_file(clip_path)
+            self._player.wait_for_speech(timeout=10.0)
+            return True
+        except Exception:
+            log.exception("Wake greeting: initial wake clip error")
+            return False
+        finally:
+            self._end_speech(servo_stop)
+
     def _play_wake_greeting(self) -> None:
         """Greet the user on wake word.
 
@@ -794,6 +815,8 @@ class StateMachine:
         Always completes (audio finishes and any name-learning exchange is done)
         before returning so the caller can open the mic immediately afterwards.
         """
+        played_initial_wake_clip = self._play_initial_wake_clip()
+
         frame: str | None = None
         if self._camera.is_available():
             _pose = self._prepare_camera_pose()
@@ -899,14 +922,20 @@ class StateMachine:
             # Unknown face — fall through to the existing alternating path,
             # then offer to learn the person's name.
             log.info("Wake greeting: face detected but unknown — running standard greeting")
-            self._play_alternating_greeting(frame)
+            self._play_alternating_greeting(
+                frame,
+                suppress_canned_greeting=played_initial_wake_clip,
+            )
             self._learn_new_person(frame)
             return
 
         # ------------------------------------------------------------------
         # No face recognition (or no camera frame) — existing alternating path
         # ------------------------------------------------------------------
-        self._play_alternating_greeting(frame)
+        self._play_alternating_greeting(
+            frame,
+            suppress_canned_greeting=played_initial_wake_clip,
+        )
 
     def _play_known_person_greeting(self, name: str, visit_count: int) -> None:
         """Speak a personalised greeting for a recognised returning visitor."""
@@ -940,7 +969,11 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
-    def _play_alternating_greeting(self, frame: str | None) -> None:
+    def _play_alternating_greeting(
+        self,
+        frame: str | None,
+        suppress_canned_greeting: bool = False,
+    ) -> None:
         """Alternates between canned and personalized greetings, unchanged from before."""
         do_personalized = self._greeting_toggle and self._camera.is_available() and frame
         self._greeting_toggle = not self._greeting_toggle
@@ -982,6 +1015,10 @@ class StateMachine:
             log.info("Wake greeting: personalized path failed — falling back to canned")
 
         # Canned greeting
+        if suppress_canned_greeting:
+            log.info("Wake greeting: canned clip already played earlier — skipping replay")
+            return
+
         _CANNED_AUDIO = config.ASSETS_DIR / "audio" / "Hi There.mp3"
         _CANNED_TTS = [
             "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
