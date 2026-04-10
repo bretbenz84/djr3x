@@ -480,6 +480,14 @@ class StateMachine:
         # Greet the user concurrently with the arm wave.
         self._play_wake_greeting()
 
+        # The greeting path can request shutdown (for example if the user says
+        # "shutdown" when asked for their name).  Honor that before restoring
+        # idle servo motion so we don't briefly restart hardware we're about to
+        # power down.
+        if self._shutdown_event.is_set():
+            self._transition_to(State.SHUTDOWN)
+            return
+
         # Wait for the wave to finish (usually already done by the time audio ends),
         # then restore hand speed and restart the servo idle thread.
         self._animations.wait(timeout=5.0)
