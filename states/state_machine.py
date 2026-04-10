@@ -1504,6 +1504,10 @@ class StateMachine:
             self._os_shutdown_requested = True
             return State.SHUTDOWN
 
+        elif action == "recall_name":
+            log.info("recall_name: falling through to LLM with original text %r", original_text)
+            return self._speak_llm(original_text or "", t0=None)
+
         elif action == "rename_me":
             return self._handle_rename_me(original_text)
 
