@@ -341,6 +341,7 @@ WHISPER_HALLUCINATION_FILTER: list[str] = [
 # "you" can be dropped without blocking normal longer sentences containing
 # those words.
 WHISPER_HALLUCINATION_EXACT: set[str] = {
+    "okay okay okay",
     "thank you",
     "thank you thank you",
     "you",

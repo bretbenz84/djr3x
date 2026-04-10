@@ -197,18 +197,22 @@ class Transcriber:
             config.AUDIO_INPUT_DEVICE, config.AUDIO_SAMPLE_RATE,
             config.AUDIO_CHUNK_SIZE, self._speech_threshold,
         )
-        # Use a slightly lower threshold for ongoing speech detection than the
-        # calibrated peak threshold used to reject room noise. This preserves
-        # noise robustness while avoiding false negatives when natural speech
-        # dips below the calibrated ceiling during the first few words.
+        # Use a stricter threshold to START speech than to CONTINUE speech.
+        # This reduces false starts in quiet rooms while still letting natural
+        # speech dip below the initial peak once recording is underway.
         speech_detect_threshold = max(
             config.TRANSCRIBE_SPEECH_THRESHOLD_MIN,
             int(self._speech_threshold * 0.65),
         )
+        speech_start_threshold = max(
+            speech_detect_threshold,
+            int(self._speech_threshold * 0.90),
+        )
         stall_threshold = max(10.0, speech_detect_threshold * 0.05)
         log.info(
-            "Transcriber thresholds: calibrated=%d, speech-detect=%d, stall<=%.0f%s",
+            "Transcriber thresholds: calibrated=%d, speech-start=%d, speech-detect=%d, stall<=%.0f%s",
             self._speech_threshold,
+            speech_start_threshold,
             speech_detect_threshold,
             stall_threshold,
             _mark(),
@@ -271,7 +275,11 @@ class Transcriber:
                                 f"input stream stalled: {near_zero_chunks} near-zero chunks"
                             )
 
-                        if rms >= speech_detect_threshold:
+                        active_threshold = (
+                            speech_detect_threshold if speech_started else speech_start_threshold
+                        )
+
+                        if rms >= active_threshold:
                             # --- above-threshold chunk ---
                             if speech_first_chunk is None:
                                 speech_first_chunk = chunk_index
