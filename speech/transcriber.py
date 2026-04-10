@@ -61,7 +61,10 @@ class Transcriber:
     """
 
     def __init__(self) -> None:
-        self._client = OpenAI(api_key=config.OPENAI_API_KEY)
+        self._client = OpenAI(
+            api_key=config.OPENAI_API_KEY,
+            timeout=config.OPENAI_TIMEOUT_SECONDS,
+        )
         # Speech detection threshold — may be overridden by calibrate_noise_floor().
         self._speech_threshold: int = config.TRANSCRIBE_SPEECH_THRESHOLD
 
@@ -108,14 +111,7 @@ class Transcriber:
             duration, config.AUDIO_INPUT_DEVICE,
         )
         try:
-            raw = sd.rec(
-                n_frames,
-                samplerate=config.AUDIO_SAMPLE_RATE,
-                channels=config.MIC_CHANNELS,
-                dtype="int16",
-                device=config.AUDIO_INPUT_DEVICE,
-                blocking=True,
-            )
+            raw = _record_with_fallback(n_frames)
         except sd.PortAudioError:
             log.warning(
                 "Noise floor calibration failed — keeping threshold at %d",
@@ -212,13 +208,7 @@ class Transcriber:
             silence_chunks: int = 0
 
             try:
-                with sd.InputStream(
-                    samplerate=config.AUDIO_SAMPLE_RATE,
-                    channels=config.MIC_CHANNELS,
-                    dtype="int16",
-                    device=config.AUDIO_INPUT_DEVICE,
-                    blocksize=config.AUDIO_CHUNK_SIZE,
-                ) as stream:
+                with _open_input_stream() as stream:
                     log.info(
                         "Mic open, waiting for speech (%.1fs window) …%s",
                         _wait_secs, _mark(),
@@ -419,3 +409,49 @@ def _filter_hallucination(text: str, allow_short: bool = False) -> str:
             return ""
 
     return text
+
+
+def _input_devices_to_try() -> list[int | None]:
+    device = config.AUDIO_INPUT_DEVICE
+    return [device, None] if device is not None else [None]
+
+
+def _record_with_fallback(n_frames: int) -> np.ndarray:
+    last_exc: sd.PortAudioError | None = None
+    for device in _input_devices_to_try():
+        try:
+            if device is None and config.AUDIO_INPUT_DEVICE is not None:
+                log.warning("Transcriber: falling back to default input device for calibration")
+            return sd.rec(
+                n_frames,
+                samplerate=config.AUDIO_SAMPLE_RATE,
+                channels=config.MIC_CHANNELS,
+                dtype="int16",
+                device=device,
+                blocking=True,
+            )
+        except sd.PortAudioError as exc:
+            last_exc = exc
+            log.warning("Transcriber: calibration input device %s failed — %s", device, exc)
+    assert last_exc is not None
+    raise last_exc
+
+
+def _open_input_stream():
+    last_exc: sd.PortAudioError | None = None
+    for device in _input_devices_to_try():
+        try:
+            if device is None and config.AUDIO_INPUT_DEVICE is not None:
+                log.warning("Transcriber: falling back to default input device")
+            return sd.InputStream(
+                samplerate=config.AUDIO_SAMPLE_RATE,
+                channels=config.MIC_CHANNELS,
+                dtype="int16",
+                device=device,
+                blocksize=config.AUDIO_CHUNK_SIZE,
+            )
+        except sd.PortAudioError as exc:
+            last_exc = exc
+            log.warning("Transcriber: input device %s failed — %s", device, exc)
+    assert last_exc is not None
+    raise last_exc

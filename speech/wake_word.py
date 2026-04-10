@@ -241,13 +241,7 @@ class WakeWordDetector:
             _stream_opened = False
             try:
                 self._idle_event.clear()
-                with sd.InputStream(
-                    samplerate=config.AUDIO_SAMPLE_RATE,
-                    channels=config.MIC_CHANNELS,
-                    dtype="int16",
-                    device=config.AUDIO_INPUT_DEVICE,
-                    blocksize=config.WAKE_WORD_CHUNK_SIZE,
-                ) as stream:
+                with _open_input_stream() as stream:
                     _stream_opened = True
                     _open_attempts = 0
                     log.debug("Wake word audio stream open (chunk=%d samples, %.0f ms)",
@@ -308,3 +302,28 @@ class WakeWordDetector:
             finally:
                 log.debug("Wake word: mic stream closed (finally block — idle_event will be set)")
                 self._idle_event.set()   # stream is closed; pause() may unblock
+
+
+def _input_devices_to_try() -> list[int | None]:
+    device = config.AUDIO_INPUT_DEVICE
+    return [device, None] if device is not None else [None]
+
+
+def _open_input_stream():
+    last_exc: sd.PortAudioError | None = None
+    for device in _input_devices_to_try():
+        try:
+            if device is None and config.AUDIO_INPUT_DEVICE is not None:
+                log.warning("Wake word: falling back to default input device")
+            return sd.InputStream(
+                samplerate=config.AUDIO_SAMPLE_RATE,
+                channels=config.MIC_CHANNELS,
+                dtype="int16",
+                device=device,
+                blocksize=config.WAKE_WORD_CHUNK_SIZE,
+            )
+        except sd.PortAudioError as exc:
+            last_exc = exc
+            log.warning("Wake word: input device %s failed — %s", device, exc)
+    assert last_exc is not None
+    raise last_exc

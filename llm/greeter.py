@@ -80,7 +80,10 @@ class Greeter:
     """Generates a personalized greeting from a camera frame using gpt-4o."""
 
     def __init__(self) -> None:
-        self._client = OpenAI(api_key=config.OPENAI_API_KEY)
+        self._client = OpenAI(
+            api_key=config.OPENAI_API_KEY,
+            timeout=config.OPENAI_TIMEOUT_SECONDS,
+        )
 
     def generate(self, image_b64: str) -> str:
         """Return a short personalized Rex-style greeting for the person in the frame.

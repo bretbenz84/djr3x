@@ -89,7 +89,10 @@ class ChatGPTClient:
     """Streaming GPT-4o-mini client with conversation history for DJ-R3X."""
 
     def __init__(self) -> None:
-        self._client = OpenAI(api_key=config.OPENAI_API_KEY)
+        self._client = OpenAI(
+            api_key=config.OPENAI_API_KEY,
+            timeout=config.OPENAI_TIMEOUT_SECONDS,
+        )
         self._history: list[dict[str, str]] = []
 
     # ------------------------------------------------------------------

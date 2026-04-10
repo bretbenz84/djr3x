@@ -234,12 +234,20 @@ class StateMachine:
     def close(self) -> None:
         """Stop all subsystems and release hardware resources."""
         log.info("StateMachine: shutting down subsystems")
-        self._wake_word.stop()
-        if self._servos is not None:
-            self._servos.close()
-        self._leds.close()
-        self._player.close()
-        self._camera.stop()
+        for label, fn in (
+            ("wake word", self._wake_word.stop),
+            ("servos", self._servos.close if self._servos is not None else None),
+            ("leds", self._leds.close),
+            ("audio player", self._player.close),
+            ("camera", self._camera.stop),
+            ("face db", self._face_db.close),
+        ):
+            if fn is None:
+                continue
+            try:
+                fn()
+            except Exception:
+                log.exception("StateMachine: error while closing %s", label)
 
     def request_shutdown(self) -> None:
         """Thread-safe: schedule a transition to SHUTDOWN from any thread

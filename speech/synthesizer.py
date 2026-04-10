@@ -45,7 +45,10 @@ class Synthesizer:
 
     def __init__(self, player: AudioPlayer) -> None:
         self._player = player
-        self._client = ElevenLabs(api_key=config.ELEVENLABS_API_KEY)
+        self._client = ElevenLabs(
+            api_key=config.ELEVENLABS_API_KEY,
+            timeout=config.ELEVENLABS_TIMEOUT_SECONDS,
+        )
         self._voice_settings = VoiceSettings(
             stability=config.ELEVENLABS_STABILITY,
             similarity_boost=config.ELEVENLABS_SIMILARITY,

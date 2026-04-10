@@ -78,12 +78,15 @@ class LEDController:
             brightness thread.
         """
         self._player = player
+        self._chest_port = config.NANO_CHEST_PORT
+        self._head_port = config.NANO_HEAD_PORT
+        self._baud = config.LED_NANO_BAUD
 
         self._chest: serial.Serial | None = _open_serial(
-            config.NANO_CHEST_PORT, config.LED_NANO_BAUD, label="chest"
+            self._chest_port, self._baud, label="chest"
         )
         self._head: serial.Serial | None = _open_serial(
-            config.NANO_HEAD_PORT, config.LED_NANO_BAUD, label="head"
+            self._head_port, self._baud, label="head"
         )
 
         # Mouth brightness thread state
@@ -230,7 +233,10 @@ class LEDController:
         if self._chest is None:
             return
         with self._chest_lock:
-            _write(self._chest, cmd, label="chest")
+            if not _write(self._chest, cmd, label="chest"):
+                self._reopen_chest_locked()
+                if self._chest is not None:
+                    _write(self._chest, cmd, label="chest")
 
     def _send_head(self, cmd: str) -> None:
         """Write a command string to the head Nano."""
@@ -238,7 +244,10 @@ class LEDController:
             return
         log.debug("LEDs head ← %r", cmd.strip())
         with self._head_lock:
-            _write(self._head, cmd, label="head")
+            if not _write(self._head, cmd, label="head"):
+                self._reopen_head_locked()
+                if self._head is not None:
+                    _write(self._head, cmd, label="head")
 
     # ------------------------------------------------------------------
     # Internal — mouth brightness worker thread + watchdog
@@ -269,6 +278,24 @@ class LEDController:
             for _ in range(3):
                 self._send_head(config.LED_CMD_SPEAK_STOP)
                 time.sleep(0.05)
+
+    def _reopen_chest_locked(self) -> None:
+        """Re-open the chest Nano after a write failure. Caller must hold _chest_lock."""
+        if self._chest is not None:
+            try:
+                self._chest.close()
+            except Exception:
+                pass
+        self._chest = _open_serial(self._chest_port, self._baud, label="chest")
+
+    def _reopen_head_locked(self) -> None:
+        """Re-open the head Nano after a write failure. Caller must hold _head_lock."""
+        if self._head is not None:
+            try:
+                self._head.close()
+            except Exception:
+                pass
+        self._head = _open_serial(self._head_port, self._baud, label="head")
 
 
 # ---------------------------------------------------------------------------
@@ -312,12 +339,17 @@ def _open_serial(port: str | None, baud: int, label: str) -> serial.Serial | Non
     return None
 
 
-def _write(port: serial.Serial, cmd: str, label: str) -> None:
-    """Write cmd to port; log and swallow serial errors."""
+def _write(port: serial.Serial, cmd: str, label: str) -> bool:
+    """Write cmd to port; log and swallow serial errors.
+
+    Returns True on success, False when the write failed.
+    """
     try:
         port.write(cmd.encode())
+        return True
     except serial.SerialException as exc:
         log.warning("LEDs: write to %s Nano failed — %s", label, exc)
+        return False
 
 
 def _normalise_cmd(effect: str) -> str:

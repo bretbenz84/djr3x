@@ -144,13 +144,22 @@ class Camera:
             f"data:image/jpeg;base64,{frame_b64}"
         """
         if not self._available or self._cap is None:
-            log.debug("Camera: capture_frame called but camera unavailable")
-            return None
+            log.warning("Camera: unavailable at capture time — attempting reopen")
+            self._reopen()
+            if not self._available or self._cap is None:
+                log.debug("Camera: capture_frame called but camera unavailable")
+                return None
 
         ok, frame = self._cap.read()
         if not ok or frame is None:
-            log.warning("Camera: frame read failed")
-            return None
+            log.warning("Camera: frame read failed — attempting reopen")
+            self._reopen()
+            if not self._available or self._cap is None:
+                return None
+            ok, frame = self._cap.read()
+            if not ok or frame is None:
+                log.warning("Camera: frame read failed after reopen")
+                return None
 
         encode_params = [cv2.IMWRITE_JPEG_QUALITY, config.VISION_JPEG_QUALITY]
         ok, buf = cv2.imencode(".jpg", frame, encode_params)
@@ -161,3 +170,8 @@ class Camera:
         b64 = base64.b64encode(buf.tobytes()).decode("ascii")
         log.debug("Camera: frame captured successfully (%d bytes b64)", len(b64))
         return b64
+
+    def _reopen(self) -> None:
+        """Release and reopen the camera after a runtime failure."""
+        self.stop()
+        self.warmup()

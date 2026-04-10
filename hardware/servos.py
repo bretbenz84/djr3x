@@ -236,7 +236,7 @@ class ServoController:
         with self._lock:
             # Step 1 — Go Home (0xA2, compact protocol, no parameters)
             log.info("power_off: sending Go Home (0xA2)")
-            self._serial.write(bytes([_CMD_GO_HOME]))
+            self._write_command_locked(bytes([_CMD_GO_HOME]))
             self._serial.flush()
             time.sleep(0.1)   # let the Maestro act on Go Home before disabling
 
@@ -249,7 +249,7 @@ class ServoController:
                     config.SERVO_CHANNELS.get(channel, {}).get("name", "?"),
                     raw.hex(),
                 )
-                self._serial.write(raw)
+                self._write_command_locked(raw)
 
             # Step 3 — flush and wait for Maestro to process
             self._serial.flush()
@@ -655,11 +655,11 @@ class ServoController:
 
     def _send_target(self, channel: int, position: int) -> None:
         """Write a Set Target command.  Caller must hold _lock."""
-        self._serial.write(_encode(_CMD_SET_TARGET, channel, position))
+        self._write_command_locked(_encode(_CMD_SET_TARGET, channel, position))
 
     def _send_speed(self, channel: int, speed: int) -> None:
         """Write a Set Speed command.  Caller must hold _lock."""
-        self._serial.write(_encode(_CMD_SET_SPEED, channel, speed))
+        self._write_command_locked(_encode(_CMD_SET_SPEED, channel, speed))
 
     def _apply_speed(self, speed: int) -> None:
         """Set the same speed on every managed channel."""
@@ -671,7 +671,7 @@ class ServoController:
         """Set per-channel acceleration from SERVO_CHANNELS config."""
         with self._lock:
             for channel, cfg in config.SERVO_CHANNELS.items():
-                self._serial.write(
+                self._write_command_locked(
                     _encode(_CMD_SET_ACCEL, channel, cfg["acceleration"])
                 )
 
@@ -685,3 +685,26 @@ class ServoController:
         base = (ch_cfg["min"], ch_cfg["max"])
         overrides = config.SERVO_EMOTION_LIMITS.get(self._emotion, {})
         return overrides.get(channel, base)
+
+    def _write_command_locked(self, raw: bytes) -> None:
+        """Write a Maestro command, reopening the serial port once on failure.
+
+        Caller must hold _lock.
+        """
+        try:
+            self._serial.write(raw)
+        except serial.SerialException as exc:
+            log.warning("Maestro write failed — attempting reconnect: %s", exc)
+            self._reconnect_serial_locked()
+            self._serial.write(raw)
+
+    def _reconnect_serial_locked(self) -> None:
+        """Re-open the Maestro serial port after a runtime disconnect.
+
+        Caller must hold _lock.
+        """
+        try:
+            self._serial.close()
+        except Exception:
+            pass
+        self._serial = self._open_maestro_serial()

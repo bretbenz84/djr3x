@@ -1,8 +1,7 @@
 // DJ Rex LED Panels
 // Requires FASTLED Library - https://github.com/FastLED/FastLED
 
-#include <FastLED.h>
-#include <EEPROM.h>
+
 #include <math.h>
 
 

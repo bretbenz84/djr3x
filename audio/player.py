@@ -326,11 +326,10 @@ class AudioPlayer:
             self._audio_started.clear()   # arm the event; callback sets it on first samples
 
             finished = threading.Event()
-            with sd.OutputStream(
+            with _open_output_stream(
                 samplerate=SPEECH_SAMPLE_RATE,
                 channels=config.AUDIO_OUTPUT_CHANNELS,
                 dtype="int16",
-                device=config.AUDIO_OUTPUT_DEVICE,
                 blocksize=config.AUDIO_CHUNK_SIZE,
                 callback=self._speech_callback,
                 finished_callback=finished.set,
@@ -460,11 +459,10 @@ class AudioPlayer:
                 if pos >= len(data):
                     raise sd.CallbackStop()
 
-            with sd.OutputStream(
+            with _open_output_stream(
                 samplerate=sr,
                 channels=channels,
                 dtype="float32",
-                device=config.AUDIO_OUTPUT_DEVICE,
                 callback=_callback,
                 finished_callback=finished.set,
             ):
@@ -519,3 +517,22 @@ def _load_audio_file(
         sr = target_sr
 
     return data, sr
+
+
+def _output_devices_to_try() -> list[int | None]:
+    device = config.AUDIO_OUTPUT_DEVICE
+    return [device, None] if device is not None else [None]
+
+
+def _open_output_stream(**kwargs):
+    last_exc: sd.PortAudioError | None = None
+    for device in _output_devices_to_try():
+        try:
+            if device is None and config.AUDIO_OUTPUT_DEVICE is not None:
+                log.warning("AudioPlayer: falling back to default output device")
+            return sd.OutputStream(device=device, **kwargs)
+        except sd.PortAudioError as exc:
+            last_exc = exc
+            log.warning("AudioPlayer: output device %s failed — %s", device, exc)
+    assert last_exc is not None
+    raise last_exc

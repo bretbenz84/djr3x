@@ -51,6 +51,8 @@ def _optional_int(key: str, default: int | None = None) -> int | None:
 OPENAI_API_KEY      = _require("OPENAI_API_KEY")
 ELEVENLABS_API_KEY  = _require("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = _require("ELEVENLABS_VOICE_ID")
+OPENAI_TIMEOUT_SECONDS = float(_optional("OPENAI_TIMEOUT_SECONDS", "30"))
+ELEVENLABS_TIMEOUT_SECONDS = float(_optional("ELEVENLABS_TIMEOUT_SECONDS", "60"))
 
 # ---------------------------------------------------------------------------
 # LLM
