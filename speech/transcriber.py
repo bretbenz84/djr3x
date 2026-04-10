@@ -11,14 +11,22 @@ Then per utterance (after wake word fires):
     if text:
         ...
 
-Silence gating
---------------
-Recording stops when the microphone RMS falls below SILENCE_THRESHOLD for
-SILENCE_DURATION consecutive seconds, OR when MAX_RECORD_SECONDS elapses.
-The silence clock only starts after the first speech chunk is detected so
-that an initial quiet moment before the user speaks doesn't cut off early.
-If no speech is detected at all (entire recording is below threshold), the
-buffer is discarded and an empty string is returned without an API call.
+Two-phase silence detection
+---------------------------
+Phase 1 — Waiting for speech to begin:
+    After the mic opens, keep listening for up to TRANSCRIBE_SPEECH_WAIT_SECONDS
+    (default 5.0 s).  The silence clock does NOT run during this phase — dead air
+    before the person starts speaking never ends the recording early.  If no speech
+    is detected before the window expires, return None so the caller can prompt
+    "are you there?".
+
+Phase 2 — Recording active speech:
+    Once speech_started = True (RMS above threshold for TRANSCRIBE_MIN_SPEECH_CHUNKS
+    consecutive chunks), switch to end-of-speech detection.  Require
+    TRANSCRIBE_END_SILENCE_SECONDS (default 1.5 s) of sustained silence to stop.
+    Any chunk above the RMS threshold resets the silence counter back to zero so
+    brief inter-word pauses never cut off an utterance mid-sentence.
+    WHISPER_MAX_RECORD_SECONDS is a hard safety cap regardless of silence.
 """
 
 from __future__ import annotations
@@ -36,11 +44,10 @@ import config
 
 log = logging.getLogger(__name__)
 
-# Whisper-specific recording limits — tighter than the generic caps to reduce
-# the audio sent to the API and lower end-to-end latency.
-_SILENCE_CHUNKS_NEEDED: int = max(
+# Chunk counts derived from config — computed once at import time.
+_END_SILENCE_CHUNKS: int = max(
     1,
-    round(config.TRANSCRIBE_SILENCE_DURATION * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE),
+    round(config.TRANSCRIBE_END_SILENCE_SECONDS * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE),
 )
 _MAX_CHUNKS: int = round(
     config.WHISPER_MAX_RECORD_SECONDS * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE
@@ -146,36 +153,39 @@ class Transcriber:
     ) -> str | None:
         """Capture one utterance from the microphone and return its text.
 
-        Opens the mic, reads chunks using silence-gating logic, then encodes
-        the buffer as a WAV and sends it to the Whisper API. Trims leading and
+        Opens the mic, runs two-phase silence detection, then encodes the
+        buffer as a WAV and sends it to the Whisper API.  Trims leading and
         trailing silence before sending so dead air doesn't inflate latency.
 
-        Returns the transcription as a stripped string, empty string if no
-        speech was detected, or the API call fails.
+        Phase 1 — waiting for speech:
+            Listens for up to wait_for_speech_seconds (default:
+            TRANSCRIBE_SPEECH_WAIT_SECONDS) without stopping on silence.
+            Returns None if no speech begins within that window so the caller
+            can trigger an "are you there?" prompt.
 
-        If wait_for_speech_seconds is given, returns None (without an API
-        call) if speech has not started within that many seconds. This lets
-        the caller distinguish "no speech in the window" from "speech was
-        detected but Whisper returned nothing".
+        Phase 2 — recording active speech:
+            Once speech_started = True, requires TRANSCRIBE_END_SILENCE_SECONDS
+            of sustained silence to stop.  Any chunk above the RMS threshold
+            resets the counter; brief pauses never cut off an utterance.
+
+        Returns the transcription string, "" if speech was detected but Whisper
+        returned nothing (or the API fails), or None if Phase 1 timed out.
 
         t0: optional monotonic timestamp from wake word detection; when
         provided, all INFO log lines include an elapsed-since-wake marker.
 
         Raises sounddevice.PortAudioError if the mic cannot be opened.
         """
-        frames_list: list[np.ndarray] = []
-        silence_chunks: int = 0
-        speech_started: bool = False
-        consecutive_speech: int = 0        # chunks above threshold in a row
-        speech_first_chunk: int | None = None   # first chunk at/above threshold
-
-        wait_chunks: int | None = (
-            round(wait_for_speech_seconds * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE)
+        _wait_secs: float = (
+            wait_for_speech_seconds
             if wait_for_speech_seconds is not None
-            else None
+            else config.TRANSCRIBE_SPEECH_WAIT_SECONDS
+        )
+        _wait_chunks: int = round(
+            _wait_secs * config.AUDIO_SAMPLE_RATE / config.AUDIO_CHUNK_SIZE
         )
 
-        def _mark(label: str = "") -> str:
+        def _mark() -> str:
             """Return ' [+X.Xs]' elapsed marker when t0 is set, else ''."""
             if t0 is None:
                 return ""
@@ -189,13 +199,18 @@ class Transcriber:
         )
 
         _SENTINEL = object()
-        _early_return: object = _SENTINEL  # set to None if early exit triggered
+        _early_return: object = _SENTINEL  # set to None if Phase 1 times out
+        frames_list: list[np.ndarray] = []
+        speech_started: bool = False
+        speech_first_chunk: int | None = None
+
         for _attempt in range(3):
             frames_list = []
-            silence_chunks = 0
             speech_started = False
-            consecutive_speech = 0
             speech_first_chunk = None
+            consecutive_speech: int = 0
+            silence_chunks: int = 0
+
             try:
                 with sd.InputStream(
                     samplerate=config.AUDIO_SAMPLE_RATE,
@@ -204,7 +219,10 @@ class Transcriber:
                     device=config.AUDIO_INPUT_DEVICE,
                     blocksize=config.AUDIO_CHUNK_SIZE,
                 ) as stream:
-                    log.info("Mic open, listening …%s", _mark())
+                    log.info(
+                        "Mic open, waiting for speech (%.1fs window) …%s",
+                        _wait_secs, _mark(),
+                    )
                     for chunk_index in range(_MAX_CHUNKS):
                         frames, overflowed = stream.read(config.AUDIO_CHUNK_SIZE)
                         if overflowed:
@@ -214,37 +232,48 @@ class Transcriber:
                         samples = frames.astype(np.float32).mean(axis=1).astype(np.int16)
                         rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
                         log.debug(
-                            "Transcriber: chunk %3d  rms=%6.0f  speech_started=%-5s  "
+                            "Transcriber: chunk %3d  rms=%6.0f  phase=%s  "
                             "consec=%d  silence=%d",
-                            chunk_index, rms, speech_started, consecutive_speech, silence_chunks,
+                            chunk_index, rms,
+                            "2-recording" if speech_started else "1-waiting",
+                            consecutive_speech, silence_chunks,
                         )
 
                         if rms >= self._speech_threshold:
+                            # --- above-threshold chunk ---
                             if speech_first_chunk is None:
                                 speech_first_chunk = chunk_index
                             consecutive_speech += 1
-                            silence_chunks = 0
+                            silence_chunks = 0   # reset Phase 2 silence counter
+
                             if not speech_started and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS:
-                                log.info(
-                                    "Speech detected (rms=%.0f) — recording …%s",
-                                    rms, _mark(),
-                                )
+                                # ---- Phase 1 → Phase 2 transition ----
                                 speech_started = True
+                                log.info("Speech detected, recording …%s", _mark())
                         else:
+                            # --- below-threshold chunk ---
                             consecutive_speech = 0
                             if speech_started:
-                                silence_chunks += 1
+                                silence_chunks += 1   # only count silence in Phase 2
 
                         frames_list.append(samples)
 
-                        if speech_started and silence_chunks >= _SILENCE_CHUNKS_NEEDED:
+                        # Phase 2: sustained silence → end of utterance
+                        if speech_started and silence_chunks >= _END_SILENCE_CHUNKS:
+                            silence_secs = (
+                                silence_chunks * config.AUDIO_CHUNK_SIZE / config.AUDIO_SAMPLE_RATE
+                            )
+                            log.info(
+                                "End of speech detected (%.1fs silence)%s",
+                                silence_secs, _mark(),
+                            )
                             break
 
-                        # Early exit: speech hasn't been confirmed and the caller's wait window expired.
-                        if not speech_started and wait_chunks is not None and chunk_index + 1 >= wait_chunks:
-                            log.debug(
-                                "Transcriber: no speech within %.1f s — returning None",
-                                wait_for_speech_seconds,
+                        # Phase 1: no speech within the wait window → return None
+                        if not speech_started and chunk_index + 1 >= _wait_chunks:
+                            log.info(
+                                "No speech detected within %.1fs — returning None%s",
+                                _wait_secs, _mark(),
                             )
                             _early_return = None
                             break

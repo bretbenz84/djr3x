@@ -298,11 +298,19 @@ SINGLE_WORD_COMMANDS: frozenset[str] = frozenset({
 
 # Whisper-specific recording limits (tighter than the generic caps in the
 # "recording / wake word" section above — shorter recording = lower latency).
-WHISPER_MAX_RECORD_SECONDS   = float(_optional("WHISPER_MAX_RECORD_SECONDS",   "8.0"))
-WHISPER_SILENCE_DURATION     = float(_optional("WHISPER_SILENCE_DURATION",     "0.4"))
-# Silence required before ending a recording — longer than WHISPER_SILENCE_DURATION
-# to avoid cutting off speech in noisy environments or natural mid-sentence pauses.
-TRANSCRIBE_SILENCE_DURATION  = float(_optional("TRANSCRIBE_SILENCE_DURATION",  "1.2"))
+WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",       "8.0"))
+
+# Two-phase silence detection in transcriber.py:
+#
+#   Phase 1 — waiting for speech to begin:
+#     Keep listening for up to TRANSCRIBE_SPEECH_WAIT_SECONDS.  No speech → return None.
+#
+#   Phase 2 — recording active speech:
+#     Once speech is confirmed, require TRANSCRIBE_END_SILENCE_SECONDS of
+#     sustained silence before stopping.  Any audio above the RMS threshold
+#     resets the counter so brief inter-word pauses never cut off an utterance.
+TRANSCRIBE_SPEECH_WAIT_SECONDS   = float(_optional("TRANSCRIBE_SPEECH_WAIT_SECONDS",   "5.0"))
+TRANSCRIBE_END_SILENCE_SECONDS   = float(_optional("TRANSCRIBE_END_SILENCE_SECONDS",   "1.5"))
 
 # Substrings (lowercase) that identify known Whisper hallucination phrases.
 # Any result whose lowercased text contains one of these is silently dropped.
