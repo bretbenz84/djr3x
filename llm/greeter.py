@@ -153,3 +153,50 @@ class Greeter:
             temperature=1.1,   # creative — high variance for fresh greetings
         )
         return response.choices[0].message.content.strip()
+
+    def generate_recall_roast(self, name: str, image_b64: str) -> str:
+        """Return a name-aware Rex roast for a person whose name is already known.
+
+        Two-step process identical to generate():
+          1. Describe the person's appearance from the image (factual, low temperature).
+          2. Generate a roast that opens with their name and references something
+             specific about what Rex can see (creative, high temperature).
+
+        Returns "" on any API error so the caller can fall back to a canned line.
+        """
+        try:
+            description = self._describe(image_b64)
+        except Exception:
+            log.exception("Greeter: recall_roast description step failed")
+            return ""
+
+        if not description:
+            log.warning("Greeter: recall_roast empty description — cannot generate roast")
+            return ""
+
+        log.info("Greeter recall_roast saw: %s", description)
+
+        try:
+            roast = self._roast_with_name(name, description)
+        except Exception:
+            log.exception("Greeter: recall_roast generation step failed")
+            return ""
+
+        log.info("Greeter recall_roast generated: %s", roast)
+        return roast
+
+    def _roast_with_name(self, name: str, description: str) -> str:
+        """Step 2 (recall): generate a name-aware Rex roast from the description."""
+        response = self._client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": config.RECALL_NAME_ROAST_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"Person's name: {name}\nAppearance: {description}",
+                },
+            ],
+            max_tokens=80,
+            temperature=1.1,
+        )
+        return response.choices[0].message.content.strip()

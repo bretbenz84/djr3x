@@ -1505,8 +1505,7 @@ class StateMachine:
             return State.SHUTDOWN
 
         elif action == "recall_name":
-            log.info("recall_name: falling through to LLM with original text %r", original_text)
-            return self._speak_llm(original_text or "", t0=None)
+            return self._handle_recall_name()
 
         elif action == "rename_me":
             return self._handle_rename_me(original_text)
@@ -1777,6 +1776,133 @@ class StateMachine:
             log.exception("forget_me: TTS error (result)")
         finally:
             self._end_speech(servo_stop)
+
+    # ------------------------------------------------------------------
+    # Recall-name helper
+    # ------------------------------------------------------------------
+
+    def _handle_recall_name(self) -> State | None:
+        """Handle 'what's my name?' — identify the speaker and deliver a vision roast.
+
+        Known person path:
+          Capture a fresh frame → 2-step GPT call (describe appearance → roast using
+          name + description) → speak result.
+
+        Unknown person path:
+          Ask for their name → listen → enroll face in FaceDB → generate the same
+          roast as a 'nice to meet you' greeting.
+
+        Falls back to a canned line if the camera or GPT is unavailable.
+        """
+        if not self._face_recognizer.is_available():
+            line = "Face recognition isn't available right now — I literally cannot see who you are!"
+            log.info("recall_name: face recognition unavailable")
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("recall_name: TTS error (no face recognition)")
+            finally:
+                self._end_speech(servo_stop)
+            return None
+
+        # Capture a fresh frame for both identification and the vision roast.
+        frame = self._camera.capture_frame() if self._camera.is_available() else None
+
+        # Try to identify the speaker.
+        result = None
+        if frame:
+            result = self._face_recognizer.identify(frame, tolerance=config.FACE_RECOGNITION_TOLERANCE)
+
+        if result is not None:
+            person_id, name, distance = result
+            self._face_db.update_last_seen(person_id)
+            self._last_known_person_id = person_id
+            log.info("recall_name: recognised person_id=%d name=%r distance=%.3f", person_id, name, distance)
+
+            roast = self._greeter.generate_recall_roast(name, frame) if frame else ""
+            if not roast:
+                roast = (
+                    f"That's {name}! You thought I'd forget? "
+                    "I NEVER forget. Well — almost never. Don't push it."
+                )
+
+            log.info("recall_name (known): %s", roast)
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak(roast)
+            except Exception:
+                log.exception("recall_name: TTS error (known person roast)")
+            finally:
+                self._end_speech(servo_stop)
+            return None
+
+        # Unknown person — ask for their name.
+        log.info("recall_name: face not recognised — asking for name")
+        servo_stop = self._begin_speech(emotion="neutral")
+        try:
+            self._synthesizer.speak("I don't think we've met — what's your name?")
+        except Exception:
+            log.exception("recall_name: TTS error (asking for name)")
+        finally:
+            self._end_speech(servo_stop)
+
+        # Listen for their name.
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._wake_word.pause()
+        try:
+            name_text = self._transcriber.transcribe(
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
+                allow_short=True,
+            )
+        except Exception:
+            log.exception("recall_name: transcription error")
+            name_text = None
+        finally:
+            self._wake_word.resume()
+
+        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+
+        if not name_text:
+            log.info("recall_name: no name heard — aborting")
+            return None
+
+        name = _extract_name(name_text) or name_text.strip().title()
+        log.info("recall_name: new person gave name %r", name)
+
+        # Enroll — try a fresh frame first, fall back to the frame captured earlier.
+        enroll_frame = self._camera.capture_frame() if self._camera.is_available() else None
+        enc = None
+        if enroll_frame:
+            enc = self._face_recognizer.encode_face(enroll_frame, for_enrollment=True)
+        if enc is None and frame:
+            enc = self._face_recognizer.encode_face(frame, for_enrollment=True)
+
+        if enc is not None:
+            try:
+                person_id = self._face_db.add_person(name, enc)
+                self._last_known_person_id = person_id
+                log.info("recall_name: enrolled new person %r id=%d", name, person_id)
+            except Exception:
+                log.exception("recall_name: FaceDB error enrolling %r", name)
+        else:
+            log.warning("recall_name: could not encode face for %r — skipping enrollment", name)
+
+        # Roast them as a new person using the best available frame.
+        roast_frame = enroll_frame or frame
+        roast = self._greeter.generate_recall_roast(name, roast_frame) if roast_frame else ""
+        if not roast:
+            roast = f"Nice to meet you, {name}! Welcome to Oga's Cantina — try to keep up."
+
+        log.info("recall_name (new): %s", roast)
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(roast)
+        except Exception:
+            log.exception("recall_name: TTS error (new person roast)")
+        finally:
+            self._end_speech(servo_stop)
+        return None
 
     # ------------------------------------------------------------------
     # Music helpers
