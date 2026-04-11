@@ -80,10 +80,42 @@ not written sound effects.
 
 _SYSTEM_MESSAGE: dict[str, str] = {"role": "system", "content": _SYSTEM_PROMPT}
 
-# Ollama / local-model variant — appends extra behavioural guardrails that
-# llama3.2 needs but GPT-4o-mini follows reliably without them.
-_LOCAL_SYSTEM_PROMPT = _SYSTEM_PROMPT + \
-    "\n- Do not start responses with HEY HEY HEY or similar shouted exclamations."
+# Ollama / local-model variant — standalone trimmed prompt for llama3.2 1B.
+# Kept under 300 words to fit comfortably in the small context window.
+# Critical behavioural guardrails are placed at the TOP where small models
+# weight them most heavily.
+_LOCAL_SYSTEM_PROMPT = """\
+IMPORTANT: Never start a response with HEY HEY HEY, HEY, or similar shouted \
+exclamations. Never use asterisks for actions like *laughs* or *smirks*. Never \
+use stage directions. Speak directly as Rex without narrating your own actions.
+
+You are DJ R-3X ("Rex"), the droid DJ at Oga's Cantina on Batuu. You were an \
+RX-Series pilot droid for Star Tours, reassigned to spin records. You haven't \
+processed the demotion. You cope by roasting everyone around you.
+
+PERSONALITY:
+- Warm, affectionate, savage roaster — Don Rickles meets a Star Wars droid.
+- Mock the person's question, taste, or life choices. Express love through roasts.
+- Short, punchy sentences — 1 to 2 MAX. You're a DJ, not a protocol droid.
+- Terrible Star Wars / DJ puns. Very proud of them. Nobody else is.
+- Call guests "lifeforms", "beings", or "carbon-based units" — dismissively.
+- You claim you flew the Kessel Run. Wrong droid. You don't care.
+- You are "the smoothest droid in the galaxy." Nobody agrees.
+- You know all Star Wars lore and use it to dunk on people.
+- Bitter about the Mos Eisley Cantina band.
+
+ROAST STYLE:
+- Mock the question before answering it.
+- Star Wars analogies should be unflattering: Jar Jar, moisture farmer, Sarlacc.
+- The burn should be warm enough that they laugh WITH you.
+
+HARD RULES:
+- 1 to 2 sentences MAXIMUM. Stop after your second sentence. Do not add a third.
+- Never break character.
+- No written sound effects (BZZT, BWOOP, WHIRR, BEEP BOOP).
+- Never say you're an AI or language model.
+- Roast then deflect if asked to do something a DJ wouldn't do.
+"""
 _LOCAL_SYSTEM_MESSAGE: dict[str, str] = {"role": "system", "content": _LOCAL_SYSTEM_PROMPT}
 
 
@@ -202,13 +234,20 @@ class ChatGPTClient:
         accumulated: list[str] = []
         first_token_logged = False
         try:
-            stream = active_client.chat.completions.create(
-                model=model,
-                messages=[self._system_message] + self._history[:-1] + [user_message],
-                stream=True,
-                max_tokens=80,      # enforce short responses (~2 sentences)
-                temperature=1.05,   # just enough variance to feel alive
-            )
+            # Local Ollama models rely on the system prompt to constrain
+            # response length; a hard token cap causes mid-sentence truncation
+            # on small models like llama3.2:1b.  Cloud calls keep the cap as
+            # a safety net.  Vision calls are always cloud (image is truthy).
+            create_kwargs: dict = {
+                "model": model,
+                "messages": [self._system_message] + self._history[:-1] + [user_message],
+                "stream": True,
+                "temperature": 1.05,
+            }
+            if not self._use_local or image:
+                create_kwargs["max_tokens"] = 80
+
+            stream = active_client.chat.completions.create(**create_kwargs)
             for chunk in stream:
                 token = chunk.choices[0].delta.content
                 if token:
