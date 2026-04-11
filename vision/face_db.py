@@ -360,6 +360,24 @@ class FaceDB:
         ).fetchone()
         return dict(row) if row is not None else None
 
+    def get_latest_memory_for_local_range(
+        self, person_id: int, key: str, start_day_iso: str, end_day_iso: str
+    ) -> Optional[dict]:
+        """Return the newest memory for *person_id*/*key* within a local date range."""
+        row = self._conn.execute(
+            """SELECT id, category, key, value, raw_quote, created_at,
+                      expires_at, follow_up_after, followed_up
+               FROM memories
+               WHERE person_id = ?
+                 AND key = ?
+                 AND date(created_at, 'localtime') >= ?
+                 AND date(created_at, 'localtime') <= ?
+               ORDER BY created_at DESC
+               LIMIT 1""",
+            (person_id, key, start_day_iso, end_day_iso),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
     def mark_followed_up(self, memory_id: int) -> None:
         """Mark a memory as having been followed up on."""
         with self._conn:

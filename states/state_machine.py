@@ -1354,10 +1354,14 @@ class StateMachine:
         name = self._post_greeting_person_name
         if person_id is None or not name:
             return "no_answer", None
-        existing_plan = self._get_today_plan_memory(person_id)
+        existing_plan = self._get_relevant_plan_memory(person_id)
         if existing_plan is not None:
             self._post_greeting_prompt_used = True
             return self._run_same_day_plan_followup(person_id, name, existing_plan)
+        memory_followup = self._get_post_greeting_memory_candidate(person_id)
+        if memory_followup is not None:
+            self._post_greeting_prompt_used = True
+            return self._run_memory_followup_prompt(person_id, name, memory_followup)
 
         prompts = (
             self._build_plan_question(name),
@@ -1483,20 +1487,107 @@ class StateMachine:
         self._speak_plan_reply(answer)
         return "answered", None
 
-    def _get_today_plan_memory(self, person_id: int) -> dict | None:
-        """Return today's relevant plan memory for this person, if one exists."""
-        weekday = date.today().weekday()
-        key = "weekend_plan" if weekday >= 4 else "today_plan"
-        day_iso = date.today().isoformat()
+    def _run_memory_followup_prompt(
+        self, person_id: int, name: str, memory: dict
+    ) -> tuple[str, State | None]:
+        """Ask about a stored memory when silence leaves room for a follow-up."""
+        prompt = self._build_memory_followup_line(person_id, memory)
+        if not prompt:
+            return "no_answer", None
+        log.info(
+            "Post-greeting prompt for %s: using memory follow-up from memory id=%s: %r",
+            name, memory.get("id"), prompt,
+        )
+
+        servo_stop = self._begin_speech(emotion="neutral")
         try:
+            self._synthesizer.speak(prompt)
+        except Exception:
+            log.exception("Post-greeting prompt: TTS error on memory follow-up")
+            return "no_answer", None
+        finally:
+            self._end_speech(servo_stop)
+
+        if memory.get("follow_up_after") and not memory.get("followed_up"):
+            try:
+                self._face_db.mark_followed_up(memory["id"])
+            except Exception:
+                log.exception("Post-greeting prompt: failed marking memory follow-up as asked")
+
+        answer = self._listen_for_prompt_answer(config.WAKE_GOODBYE_TIMEOUT)
+        if not answer:
+            return "no_answer", None
+
+        cmd = parse(answer, allow_fuzzy=False)
+        if cmd is not None and cmd.action in {
+            "cancel", "program_shutdown", "os_shutdown", "sleep", "idle",
+        }:
+            log.info("Post-greeting memory follow-up interrupted by command %r", cmd.action)
+            return "transition", self._execute_command(cmd, answer)
+
+        self._store_prompt_memory_response(person_id, prompt, answer)
+        self._speak_plan_reply(answer)
+        return "answered", None
+
+    def _get_relevant_plan_memory(self, person_id: int) -> dict | None:
+        """Return the current day's or current weekend's plan memory, if any."""
+        weekday = date.today().weekday()
+        today = date.today()
+        try:
+            if weekday >= 4:
+                friday = today - timedelta(days=weekday - 4)
+                return self._face_db.get_latest_memory_for_local_range(
+                    person_id=person_id,
+                    key="weekend_plan",
+                    start_day_iso=friday.isoformat(),
+                    end_day_iso=today.isoformat(),
+                )
             return self._face_db.get_latest_memory_for_local_day(
                 person_id=person_id,
-                key=key,
-                day_iso=day_iso,
+                key="today_plan",
+                day_iso=today.isoformat(),
             )
         except Exception:
-            log.exception("Post-greeting prompt: failed loading same-day plan memory")
+            log.exception("Post-greeting prompt: failed loading relevant plan memory")
             return None
+
+    def _get_post_greeting_memory_candidate(self, person_id: int) -> dict | None:
+        """Return a memory worth asking about when silence follows a greeting."""
+        try:
+            pending = self._face_db.get_pending_followups(person_id)
+            if pending:
+                return pending[0]
+
+            for memory in self._face_db.get_memories(person_id):
+                if memory.get("category") in {"event", "plan"}:
+                    return memory
+        except Exception:
+            log.exception("Post-greeting prompt: failed loading memory follow-up candidate")
+        return None
+
+    def _store_prompt_memory_response(
+        self, person_id: int, question: str, answer: str
+    ) -> None:
+        """Store an answer to a prompted memory follow-up using the LLM extractor."""
+        try:
+            memory_data = self._llm.extract_memory(question, answer)
+            if not memory_data:
+                return
+            self._face_db.add_memory(
+                person_id=person_id,
+                category=memory_data.get("category", "fact"),
+                key=memory_data.get("key", "followup_response"),
+                value=memory_data.get("value", answer[:200]),
+                raw_quote=answer,
+                expires_at=memory_data.get("expires_at"),
+                follow_up_after=memory_data.get("follow_up_after"),
+            )
+            log.info(
+                "Post-greeting prompt stored follow-up response for person_id=%d: %r",
+                person_id, memory_data.get("value", answer[:200]),
+            )
+        except Exception:
+            log.exception("Post-greeting prompt: failed storing follow-up response")
 
     def _speak_plan_reply(self, answer: str) -> None:
         """Riff on the user's stated plan, then ask one follow-up question."""
