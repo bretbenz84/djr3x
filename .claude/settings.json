@@ -17,7 +17,8 @@
       "Bash(./venv/bin/python3 -c \"import ast; ast.parse\\(open\\('llm/chatgpt.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(python -m py_compile states/state_machine.py)",
       "Bash(python -m py_compile commands/command_list.py)",
-      "Bash(python -m py_compile utils/realworld.py)"
+      "Bash(python -m py_compile utils/realworld.py)",
+      "Bash(pip install:*)"
     ]
   }
 }
