@@ -896,6 +896,12 @@ COMMANDS: list[Command] = [
         action="vision",
     ),
 
+    Command(
+        phrases=["i spy", "lets play i spy", "let's play i spy"],
+        response="",   # not spoken — action=i_spy handled by state machine
+        action="i_spy",
+    ),
+
     # -----------------------------------------------------------------------
     # Sleep mode — Rex collapses into a slumped rest position; wakes on the
     # special 'wakeuprex' wake word.  Response spoken by _dispatch_action.

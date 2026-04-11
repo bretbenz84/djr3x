@@ -63,6 +63,7 @@ from speech.wake_word import WakeWordDetector
 from utils import realworld
 from vision.camera import Camera
 from vision.face_db import FaceDB
+from vision.i_spy import build_round, guess_matches
 from vision.face_recognizer import FaceRecognizer
 
 log = logging.getLogger(__name__)
@@ -108,6 +109,42 @@ _IDLE_CLIPS: list[str] = [
     "Dream.mp3",
     "DJ Pilot.mp3",
     "Astromech Joke.mp3",
+]
+
+_I_SPY_START_LINES: list[str] = [
+    "I Spy? Ohhh, now we're playing preschool in a cantina. Fine. Try to keep up, lifeform.",
+    "An I Spy round? Bold choice for someone with the visual instincts of a stormtrooper.",
+    "All right, lifeform. I will pick the object, you will disappoint me with the guess. Classic format.",
+    "I Spy it is. Let's see whether your eyeballs are decorative or functional.",
+]
+
+_I_SPY_CORRECT_LINES: list[str] = [
+    "Well look at that, you got it. The answer was {answer}. Try not to act too proud about basic object recognition.",
+    "Correct. It was {answer}. A shocking display of competence from this side of the galaxy.",
+    "Yeah, yeah, you nailed it. {answer}. I hate it when the lifeforms are observant.",
+]
+
+_I_SPY_WRONG_LINES: list[str] = [
+    "Nope. It was {answer}. I have seen Jawa scrap piles make better guesses.",
+    "Wrong, glorious and immediate. The answer was {answer}.",
+    "Not even close, lifeform. It was {answer}. You'd lose hide-and-seek to a protocol droid.",
+]
+
+_I_SPY_TIMEOUT_LINES: list[str] = [
+    "Times up. I picked {answer}. Apparently suspense was doing all the heavy lifting here.",
+    "No guess? Fine. It was {answer}. I cannot carry this game and your timing.",
+    "You ran out of time, lifeform. The answer was {answer}. Tragic work.",
+]
+
+_I_SPY_FAIL_LINES: list[str] = [
+    "I tried to play I Spy, but my scene scan went full trash compactor. We'll call that a tactical retreat.",
+    "My optics just fumbled the assignment. No game this round, lifeform.",
+]
+
+_I_SPY_NUDGE_LINES: list[str] = [
+    "Well? Take the guess, lifeform.",
+    "Any time now. The object is not going to identify itself.",
+    "Go ahead. Use those organic eyeballs.",
 ]
 
 
@@ -1829,6 +1866,8 @@ class StateMachine:
         """
         emotion = _action_to_emotion(cmd.action)
         response = cmd.get_response()
+        if not response and not cmd.audio:
+            return self._dispatch_action(cmd.action, original_text)
         log.info("Rex (cmd): %s", response)
         servo_stop = None
         try:
@@ -2014,6 +2053,9 @@ class StateMachine:
         elif action == "tell_weather":
             self._handle_tell_weather(original_text)
 
+        elif action == "i_spy":
+            return self._handle_i_spy()
+
         elif action == "rename_me":
             return self._handle_rename_me(original_text)
 
@@ -2041,6 +2083,138 @@ class StateMachine:
         else:
             log.warning("Unknown action: %r", action)
 
+        return None
+
+    def _handle_i_spy(self) -> State | None:
+        """Run a single-turn I Spy round inside ACTIVE state."""
+        start_line = random.choice(_I_SPY_START_LINES)
+        log.info("I Spy: starting round")
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(start_line)
+        except Exception:
+            log.exception("I Spy: TTS error on intro")
+        finally:
+            self._end_speech(servo_stop)
+
+        if not self._camera.is_available():
+            return self._speak_i_spy_failure()
+
+        restore = self._prepare_i_spy_camera_pose()
+        frame = self._camera.capture_frame()
+        self._restore_servo_pose(restore)
+        if not frame:
+            log.warning("I Spy: camera capture returned no frame")
+            return self._speak_i_spy_failure()
+
+        analysis = self._llm.analyze_i_spy_scene(frame)
+        round_data = build_round(analysis)
+        if round_data is None:
+            log.warning("I Spy: no usable scene analysis returned")
+            return self._speak_i_spy_failure()
+
+        log.info(
+            "I Spy: answer=%r clue=%r scene=%r",
+            round_data.answer, round_data.clue, round_data.scene_description,
+        )
+
+        clue_line = f"I spy {round_data.article} {round_data.clue}. One guess."
+        servo_stop = self._begin_speech(emotion="neutral")
+        try:
+            self._synthesizer.speak(clue_line)
+        except Exception:
+            log.exception("I Spy: TTS error on clue")
+        finally:
+            self._end_speech(servo_stop)
+
+        guess = self._listen_for_i_spy_guess()
+        if guess is None:
+            return None
+        if guess == "":
+            line = random.choice(_I_SPY_TIMEOUT_LINES).format(answer=round_data.answer)
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("I Spy: TTS error on timeout reveal")
+            finally:
+                self._end_speech(servo_stop)
+            return None
+
+        guard_cmd = parse(guess, allow_fuzzy=False)
+        if guard_cmd is not None and guard_cmd.action in {
+            "cancel", "program_shutdown", "os_shutdown", "sleep", "idle",
+        }:
+            log.info("I Spy: interrupted by command %r", guard_cmd.action)
+            return self._execute_command(guard_cmd, guess)
+
+        if guess_matches(guess, round_data.answer):
+            line = random.choice(_I_SPY_CORRECT_LINES).format(answer=round_data.answer)
+            emotion = "excited"
+        else:
+            line = random.choice(_I_SPY_WRONG_LINES).format(answer=round_data.answer)
+            emotion = "neutral"
+
+        servo_stop = self._begin_speech(emotion=emotion)
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("I Spy: TTS error on result")
+        finally:
+            self._end_speech(servo_stop)
+        return None
+
+    def _listen_for_i_spy_guess(self) -> str | None:
+        """Listen for an I Spy guess; '' means both chances timed out."""
+        if not self._transcriber.is_available():
+            return ""
+
+        guess = self._transcribe_i_spy_guess(config.I_SPY_GUESS_TIMEOUT_SECONDS)
+        if guess:
+            log.info("I Spy: guess=%r", guess)
+            return guess
+
+        nudge = random.choice(_I_SPY_NUDGE_LINES)
+        servo_stop = self._begin_speech(emotion="neutral")
+        try:
+            self._synthesizer.speak(nudge)
+        except Exception:
+            log.exception("I Spy: TTS error on nudge")
+        finally:
+            self._end_speech(servo_stop)
+
+        guess = self._transcribe_i_spy_guess(config.WAKE_GOODBYE_TIMEOUT)
+        if guess:
+            log.info("I Spy: guess=%r", guess)
+            return guess
+        return ""
+
+    def _transcribe_i_spy_guess(self, timeout_seconds: float) -> str | None:
+        """Capture one possible I Spy guess."""
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._wake_word.pause()
+        try:
+            return self._transcriber.transcribe(
+                wait_for_speech_seconds=timeout_seconds,
+                allow_short=True,
+            )
+        except Exception:
+            log.exception("I Spy: transcription error while waiting for guess")
+            return ""
+        finally:
+            self._wake_word.resume()
+            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+
+    def _speak_i_spy_failure(self) -> State | None:
+        """Apologize in character and end the I Spy round cleanly."""
+        line = random.choice(_I_SPY_FAIL_LINES)
+        servo_stop = self._begin_speech(emotion="neutral")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("I Spy: TTS error on failure fallback")
+        finally:
+            self._end_speech(servo_stop)
         return None
 
     # ------------------------------------------------------------------
@@ -2405,6 +2579,30 @@ class StateMachine:
         self._servos.set_position(config.SERVO_HEAD_TILT, config.CAMERA_POSE_TILT)
 
         time.sleep(config.CAMERA_POSE_SETTLE_SECS)
+        return restore
+
+    def _prepare_i_spy_camera_pose(self) -> dict[int, int] | None:
+        """Turn dramatically left/right before an I Spy capture."""
+        if self._servos is None:
+            return None
+
+        restore = {
+            config.SERVO_VISOR:     config.SERVO_CHANNELS[config.SERVO_VISOR]["neutral"],
+            config.SERVO_HEAD_PAN:  config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["neutral"],
+            config.SERVO_HEAD_TILT: config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["neutral"],
+        }
+        target_pan = random.choice(
+            [config.I_SPY_POSE_NECK_LEFT, config.I_SPY_POSE_NECK_RIGHT]
+        )
+
+        self._servos.set_channel_speed(config.SERVO_VISOR, config.SERVO_DEFAULT_SPEED)
+        self._servos.set_channel_speed(config.SERVO_HEAD_PAN, config.SERVO_NECK_STARTUP_SPEED)
+        self._servos.set_channel_speed(config.SERVO_HEAD_TILT, config.SERVO_DEFAULT_SPEED)
+        self._servos.set_position(config.SERVO_VISOR, config.CAMERA_POSE_VISOR)
+        self._servos.set_position(config.SERVO_HEAD_PAN, target_pan)
+        self._servos.set_position(config.SERVO_HEAD_TILT, config.I_SPY_POSE_TILT)
+
+        time.sleep(config.I_SPY_POSE_SETTLE_SECS)
         return restore
 
     def _restore_servo_pose(self, restore: dict[int, int] | None) -> None:

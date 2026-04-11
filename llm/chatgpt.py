@@ -468,6 +468,53 @@ class ChatGPTClient:
             log.exception("generate_followup: failed")
             return ""
 
+    def analyze_i_spy_scene(self, image: str) -> dict | None:
+        """Return structured scene data for the I Spy mini-game."""
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Analyze this scene for a short I Spy game. "
+                            "Return JSON with keys: scene_description and visible_objects. "
+                            "scene_description should be a specific 1-2 sentence description. "
+                            "visible_objects must be an array of 5 to 8 clearly visible physical objects "
+                            "ordered from most obvious/common to less obvious. "
+                            "Each object must have keys: name, category, prominent. "
+                            "Use short everyday singular names, 1 to 3 words each. "
+                            "Exclude people, body parts, walls, floors, ceilings, and tiny unreadable items. "
+                            "Categories should be chosen from: furniture, electronics, container, decor, "
+                            "food_drink, tool, clothing, bag, book_paper, toy, fixture, plant, other."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Describe the scene and list good I Spy candidate objects.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image}",
+                                    "detail": "low",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=350,
+                temperature=0.2,
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception:
+            log.exception("analyze_i_spy_scene: failed")
+            return None
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

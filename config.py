@@ -422,6 +422,18 @@ CAMERA_POSE_TILT:  int = int(_optional("CAMERA_POSE_TILT",  str(SERVO_CHANNELS[2
 
 # How long (seconds) to wait after moving to the camera pose before capturing.
 CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "1.8"))
+
+# I Spy camera pose — more dramatic sideways glance before a capture.
+I_SPY_POSE_NECK_LEFT: int = int(_optional("I_SPY_POSE_NECK_LEFT", str(SERVO_CHANNELS[0]["min"] + 700)))
+I_SPY_POSE_NECK_RIGHT: int = int(_optional("I_SPY_POSE_NECK_RIGHT", str(SERVO_CHANNELS[0]["max"] - 700)))
+I_SPY_POSE_TILT: int = int(
+    _optional(
+        "I_SPY_POSE_TILT",
+        str(min(SERVO_CHANNELS[2]["max"], CAMERA_POSE_TILT + 220)),
+    )
+)
+I_SPY_POSE_SETTLE_SECS: float = float(_optional("I_SPY_POSE_SETTLE_SECS", "1.5"))
+I_SPY_GUESS_TIMEOUT_SECONDS: float = float(_optional("I_SPY_GUESS_TIMEOUT_SECONDS", "20.0"))
 FACE_DB_PATH              = Path(_optional("FACE_DB_PATH", str(ASSETS_DIR / "face_db.sqlite")))
 FACE_DEBUG_DIR            = Path(_optional("FACE_DEBUG_DIR", str(ASSETS_DIR / "face_debug")))
 DLIB_SHAPE_PREDICTOR_PATH = Path(_optional("DLIB_SHAPE_PREDICTOR_PATH", str(MODELS_DIR / "shape_predictor_68_face_landmarks.dat")))
