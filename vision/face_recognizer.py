@@ -85,29 +85,52 @@ class FaceRecognizer:
         sp_path = config.DLIB_SHAPE_PREDICTOR_PATH
         fm_path = config.DLIB_FACE_MODEL_PATH
 
+        log.debug("FaceRecognizer: warmup — shape_predictor path = %s", sp_path)
+        log.debug("FaceRecognizer: warmup — face_model path      = %s", fm_path)
+        log.debug("FaceRecognizer: warmup — shape_predictor exists = %s", sp_path.exists())
+        log.debug("FaceRecognizer: warmup — face_model exists      = %s", fm_path.exists())
+
         if not sp_path.exists():
-            log.warning(
-                "FaceRecognizer: shape predictor not found at %s — recognition disabled",
+            log.error(
+                "FaceRecognizer: shape predictor not found at %s — recognition disabled.\n"
+                "  Download: https://github.com/davisking/dlib-models/raw/master/"
+                "shape_predictor_68_face_landmarks.dat.bz2\n"
+                "  Then: bunzip2 shape_predictor_68_face_landmarks.dat.bz2 → assets/models/",
                 sp_path,
             )
             return
         if not fm_path.exists():
-            log.warning(
-                "FaceRecognizer: face model not found at %s — recognition disabled",
+            log.error(
+                "FaceRecognizer: face recognition model not found at %s — recognition disabled.\n"
+                "  This is the ResNet face *encoder* (not the detector).\n"
+                "  Download: https://github.com/davisking/dlib-models/raw/master/"
+                "dlib_face_recognition_resnet_model_v1.dat.bz2\n"
+                "  Then: bunzip2 dlib_face_recognition_resnet_model_v1.dat.bz2 → assets/models/\n"
+                "  Or set DLIB_FACE_MODEL_PATH in .env to override the path.",
                 fm_path,
             )
             return
 
         try:
+            log.debug("FaceRecognizer: loading HOG detector …")
             self._detector = dlib.get_frontal_face_detector()
+            log.debug("FaceRecognizer: loading shape predictor from %s …", sp_path)
             self._shape_predictor = dlib.shape_predictor(str(sp_path))
+            log.debug("FaceRecognizer: loading face encoder from %s …", fm_path)
             self._face_encoder = dlib.face_recognition_model_v1(str(fm_path))
             self._available = True
             log.info(
                 "FaceRecognizer: models loaded (detector + shape predictor + ResNet encoder)"
             )
         except Exception as exc:  # noqa: BLE001
-            log.warning("FaceRecognizer: model load failed — %s", exc)
+            log.error(
+                "FaceRecognizer: model load failed — %s: %s\n"
+                "  shape_predictor path: %s (exists=%s)\n"
+                "  face_model path:      %s (exists=%s)",
+                type(exc).__name__, exc,
+                sp_path, sp_path.exists(),
+                fm_path, fm_path.exists(),
+            )
 
     def is_available(self) -> bool:
         """True if all models loaded successfully."""
