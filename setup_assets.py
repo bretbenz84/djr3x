@@ -28,6 +28,13 @@ REQUIRED_MODELS = [
         "compressed": True,
         "min_size_mb": 0.5,
     },
+    {
+        "name": "dlib Face Recognition ResNet Model",
+        "filename": "dlib_face_recognition_resnet_model_v1.dat",
+        "url": "https://github.com/davisking/dlib-models/raw/master/dlib_face_recognition_resnet_model_v1.dat.bz2",
+        "compressed": True,
+        "min_size_mb": 20,
+    },
 ]
 
 def download_file(url, dest_path):
