@@ -2225,7 +2225,20 @@ class StateMachine:
                 self._end_speech(servo_stop)
             return None
 
-        # Capture a fresh frame for both identification and the vision roast.
+        _SCANNING_FILLERS = (
+            "Let me get a look at you.",
+            "Hold still.",
+            "Scanning. Do not move.",
+            "Cross-referencing my databanks.",
+            "One moment. My memory is rusty.",
+            "Running facial analysis.",
+            "Checking my records.",
+            "Give me a second. I know a lot of faces.",
+        )
+
+        # Capture frame first (fast), then kick off face recognition in the
+        # background so it runs concurrently with the filler TTS rather than
+        # adding to the silence after it.
         if self._camera.is_available():
             _pose = self._prepare_camera_pose()
             frame = self._camera.capture_frame()
@@ -2233,10 +2246,32 @@ class StateMachine:
         else:
             frame = None
 
-        # Try to identify the speaker.
-        result = None
-        if frame:
-            result = self._face_recognizer.identify(frame, tolerance=config.FACE_RECOGNITION_TOLERANCE)
+        face_result: list = [None]
+
+        def _identify() -> None:
+            if frame:
+                face_result[0] = self._face_recognizer.identify(
+                    frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+                )
+
+        face_thread = threading.Thread(
+            target=_identify, daemon=True, name="djr3x-face-identify"
+        )
+        face_thread.start()
+
+        # Speak filler immediately — covers the 2-4 s recognition latency.
+        filler = random.choice(_SCANNING_FILLERS)
+        log.info("recall_name: filler %r", filler)
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(filler)
+        except Exception:
+            log.exception("recall_name: filler TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+        face_thread.join()
+        result = face_result[0]
 
         if result is not None:
             person_id, name, distance = result
