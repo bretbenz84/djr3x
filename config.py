@@ -74,7 +74,7 @@ LOCAL_WHISPER_MODEL: str = _optional("LOCAL_WHISPER_MODEL", "mlx-community/whisp
 
 # Local LLM — Ollama OpenAI-compatible endpoint
 LOCAL_LLM_BASE_URL: str = _optional("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")
-LOCAL_LLM_MODEL:    str = _optional("LOCAL_LLM_MODEL",    "llama3.2")
+LOCAL_LLM_MODEL:    str = _optional("LOCAL_LLM_MODEL",    "llama3.2:1b")
 
 # ---------------------------------------------------------------------------
 # LLM
