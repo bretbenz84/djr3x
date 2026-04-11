@@ -468,6 +468,51 @@ class ChatGPTClient:
             log.exception("generate_followup: failed")
             return ""
 
+    def generate_activity_followup(
+        self, activity_text: str, created_at: str = "", *, same_day: bool = False
+    ) -> str:
+        """Turn a stored activity/plan into a natural Rex-style follow-up question.
+
+        Returns "" on any error.
+        """
+        timing = (
+            "The activity is happening today or this weekend."
+            if same_day
+            else "This is a previously mentioned activity or plan."
+        )
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are DJ R-3X ('Rex'), the snarky cantina droid DJ. "
+                            "Rewrite the stored activity into ONE natural follow-up question in Rex's voice. "
+                            "Do not quote or awkwardly repeat the user's original wording verbatim if it sounds clunky. "
+                            "Turn it into a clean conversational question like asking how it is going, how it went, "
+                            "whether they survived it, or how the trip/project is treating them. "
+                            "Be playful and roasty, but family-safe. One sentence only. "
+                            "No sound effects. No asterisks. Stay in character."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Stored activity: {activity_text}\n"
+                            f"Recorded at: {created_at or 'unknown'}\n"
+                            f"Timing context: {timing}"
+                        ),
+                    },
+                ],
+                max_tokens=70,
+                temperature=0.9,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception:
+            log.exception("generate_activity_followup: failed")
+            return ""
+
     def analyze_i_spy_scene(self, image: str) -> dict | None:
         """Return structured scene data for the I Spy mini-game."""
         try:

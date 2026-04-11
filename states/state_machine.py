@@ -1330,13 +1330,21 @@ class StateMachine:
         name = person["name"] if person else "lifeform"
         value = str(memory.get("value") or "").strip()
         key = str(memory.get("key") or "")
+        raw_quote = str(memory.get("raw_quote") or "").strip()
 
         if memory.get("category") == "plan" or key in {"today_plan", "weekend_plan"}:
+            followup = self._llm.generate_activity_followup(
+                raw_quote or self._short_memory_summary(value),
+                memory.get("created_at", ""),
+                same_day=False,
+            )
+            if followup:
+                return followup
             summary = self._short_memory_summary(value)
             pool = (
-                f"{name}, last time you told me about {summary}. How'd that little adventure go?",
-                f"Hey, {name}, did {summary} actually happen, or was that just optimistic fiction?",
-                f"{name}, I remember this plan about {summary}. Tell me whether it worked out or exploded.",
+                f"{name}, last time you mentioned {summary}. How'd that go?",
+                f"Hey, {name}, how did {summary} turn out?",
+                f"{name}, did {summary} actually happen, or was that just optimistic fiction?",
             )
             return _pick_no_repeat(pool, "plan_memory_followup")
 
@@ -1454,10 +1462,17 @@ class StateMachine:
         self, person_id: int, name: str, memory: dict
     ) -> tuple[str, State | None]:
         """Ask about an already-stored same-day plan instead of re-asking it."""
-        summary = self._short_memory_summary(str(memory.get("value") or ""))
-        prompt = _pick_no_repeat(
-            _PLAN_SAME_DAY_FOLLOWUP_LINES, "plan_same_day_followup"
-        ).format(name=name, summary=summary)
+        source_text = str(memory.get("raw_quote") or "").strip() or str(memory.get("value") or "").strip()
+        prompt = self._llm.generate_activity_followup(
+            source_text,
+            memory.get("created_at", ""),
+            same_day=True,
+        )
+        if not prompt:
+            summary = self._short_memory_summary(str(memory.get("value") or ""))
+            prompt = _pick_no_repeat(
+                _PLAN_SAME_DAY_FOLLOWUP_LINES, "plan_same_day_followup"
+            ).format(name=name, summary=summary)
         log.info(
             "Post-greeting prompt for %s: using same-day follow-up from memory id=%s: %r",
             name, memory.get("id"), prompt,
