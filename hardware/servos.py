@@ -150,6 +150,8 @@ class ServoController:
         Maestro has time to initialise its USB stack before receiving commands.
         """
         port = config.MAESTRO_PORT
+        if not port:  # None or empty string → not configured
+            raise serial.SerialException("MAESTRO_PORT is not configured")
         baud = config.MAESTRO_BAUD
         for attempt in range(1, config.SERIAL_RETRY_ATTEMPTS + 1):
             try:

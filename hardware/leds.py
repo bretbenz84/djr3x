@@ -314,7 +314,7 @@ def _open_serial(
     Returns None immediately (no retry) if port is None — caller has not
     configured this Nano.  Returns None (with a warning) if all attempts fail.
     """
-    if port is None:
+    if not port:  # None or empty string → not configured
         log.info("LEDs: %s Nano not configured — skipping", label)
         return None
 
