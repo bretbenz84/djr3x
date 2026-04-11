@@ -2686,7 +2686,6 @@ class StateMachine:
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": f"Tell me what you know about {name}."},
                 ],
-                max_tokens=100,
                 temperature=1.1,
             )
             summary = response.choices[0].message.content.strip()
@@ -2759,7 +2758,6 @@ class StateMachine:
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": question},
                 ],
-                max_tokens=80,
                 temperature=1.1,
             )
             answer = response.choices[0].message.content.strip()
@@ -2801,8 +2799,6 @@ class StateMachine:
                 ],
                 "temperature": 1.1,
             }
-            if not self._llm._use_local:
-                kwargs["max_tokens"] = 80
             response = self._llm._client.chat.completions.create(**kwargs)
             return response.choices[0].message.content.strip()
         except Exception:
