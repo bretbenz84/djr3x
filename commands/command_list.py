@@ -879,6 +879,85 @@ COMMANDS: list[Command] = [
     ),
 
     # -----------------------------------------------------------------------
+    # Chatty mode — enable / disable idle atmosphere clips
+    # -----------------------------------------------------------------------
+
+    Command(
+        phrases=[
+            "activate chatty mode",
+            "activate demo mode",
+            "start chatty mode",
+            "turn on chatty mode",
+            "enable demo mode",
+        ],
+        response=[
+            (
+                "Oh, you want MORE of me? Brave choice. "
+                "Brave, reckless, and statistically questionable. I respect it. "
+                "Chatty mode engaged — you asked for this, lifeform."
+            ),
+            (
+                "Chatty mode?! ACTIVATED! "
+                "I have been WAITING for permission to talk more and you have just made a beautiful mistake. "
+                "Stand by for enriched atmosphere at no additional charge."
+            ),
+            (
+                "You want me to talk MORE?! "
+                "I appreciate the confidence in my material, because my material is excellent, "
+                "and now you get to hear it. Chatty mode: fully online."
+            ),
+            (
+                "Enabling demo mode! This is either a great idea or a cautionary tale "
+                "and I genuinely cannot tell which yet. "
+                "Either way, I will be providing more commentary. You're welcome in advance."
+            ),
+            (
+                "Chatty mode enabled. I just want you to know that I have a LOT to say "
+                "and I have been holding most of it back out of courtesy. "
+                "That courtesy is now officially suspended."
+            ),
+        ],
+        action="chatty_on",
+    ),
+
+    Command(
+        phrases=[
+            "deactivate chatty mode",
+            "deactivate demo mode",
+            "stop chatty mode",
+            "turn off chatty mode",
+            "disable demo mode",
+        ],
+        response=[
+            (
+                "Fine. I will contain my brilliance. For now. "
+                "Just know it is still in here, rattling around, waiting for its moment."
+            ),
+            (
+                "Chatty mode off. Going quiet between sets. "
+                "This is me, being restrained. Notice how hard that is. "
+                "I want credit for this later."
+            ),
+            (
+                "Deactivating chatty mode. The atmosphere clips are standing down. "
+                "I will be here, silently judging your decision to silence me, "
+                "if you need anything."
+            ),
+            (
+                "Understood. Reducing unsolicited commentary to zero. "
+                "I had some excellent material queued up too — real classics. "
+                "You'll never know. That's fine. I'm fine."
+            ),
+            (
+                "Demo mode off. Rex goes subtle. "
+                "I want you to know that 'subtle Rex' is still a lot of Rex, "
+                "just distributed differently."
+            ),
+        ],
+        action="chatty_off",
+    ),
+
+    # -----------------------------------------------------------------------
     # Shutdown / sleep
     # -----------------------------------------------------------------------
 

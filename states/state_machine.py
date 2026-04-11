@@ -163,8 +163,13 @@ class StateMachine:
         self._music_tracks: list[Path] = _scan_music()
         self._music_index: int = 0
 
-        # Idle atmosphere clips — disabled by "stop talking" command, re-enabled
-        # automatically the next time the wake word activates Rex.
+        # Chatty mode — must be explicitly enabled to hear idle atmosphere clips.
+        # Default off so Rex sits silently in IDLE unless the operator enables it.
+        self._chatty_mode: bool = False
+
+        # Per-session idle clip mute — disabled by "stop talking" command,
+        # re-enabled automatically the next time the wake word fires.
+        # Clips only play when BOTH this AND _chatty_mode are True.
         self._idle_clips_enabled: bool = True
 
         # Tracks the person_id of the last face-recognised visitor so that a
@@ -447,8 +452,9 @@ class StateMachine:
                 )
                 return
 
-            # Timer fired — play a random idle clip (if not muted by user).
-            if not self._idle_clips_enabled:
+            # Timer fired — play a random idle clip only when chatty mode is
+            # enabled AND the per-session mute hasn't been triggered.
+            if not self._chatty_mode or not self._idle_clips_enabled:
                 continue
 
             clip_path = config.ASSETS_DIR / "audio" / random.choice(_IDLE_CLIPS)
@@ -1679,6 +1685,16 @@ class StateMachine:
             self._idle_clips_enabled = False
             log.info("Idle atmosphere clips disabled by voice command")
             return State.IDLE
+
+        elif action == "chatty_on":
+            self._chatty_mode = True
+            log.info("Chatty mode enabled")
+            return None   # response already spoken by command_list
+
+        elif action == "chatty_off":
+            self._chatty_mode = False
+            log.info("Chatty mode disabled")
+            return None   # response already spoken by command_list
 
         elif action == "program_shutdown":
             # Stop the Python program cleanly — no OS halt.
