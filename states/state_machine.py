@@ -182,6 +182,11 @@ class StateMachine:
         # in front of the camera.  Cleared whenever we return to IDLE.
         self._last_wake_frame: str | None = None
 
+        # Alternates the initial wake audio cue between "Hi There.mp3" (False)
+        # and "This is your cap.mp3" (True) on successive wake activations.
+        # Ensures only ONE clip plays per wake — never both in the same activation.
+        self._no_face_clip_toggle: bool = False
+
         # Session-greeting state — tracks who was greeted and how many times
         # the wake word has fired since boot.  Used by the 5-case greeting logic:
         #   _session_wake_count == 0   → Case 1 (first wake since boot)
@@ -835,12 +840,18 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def _play_initial_wake_clip(self) -> bool:
-        """Play the canned wake clip once at the start of the wake flow.
+        """Play the canned wake clip, alternating between the two clips on
+        successive wake activations so only ONE ever plays per wake.
+
+        Toggle False → "Hi There.mp3"  (then flips to True)
+        Toggle True  → "This is your cap.mp3"  (then flips to False)
 
         Returns True if the clip was played, False if it was unavailable or
         playback failed before audio could be queued.
         """
-        clip_path = config.ASSETS_DIR / "audio" / "Hi There.mp3"
+        clip_name = "This is your cap.mp3" if self._no_face_clip_toggle else "Hi There.mp3"
+        self._no_face_clip_toggle = not self._no_face_clip_toggle
+        clip_path = config.ASSETS_DIR / "audio" / clip_name
         if not clip_path.exists():
             return False
 
@@ -957,7 +968,7 @@ class StateMachine:
                 name, bother_count,
             )
 
-            # GPT-4o personalized greeting; hide latency behind holding clip.
+            # GPT-4o personalized greeting — initial clip already played above.
             greeting_result: list[str | None] = [None]
 
             def _gen_known() -> None:
@@ -970,11 +981,8 @@ class StateMachine:
             )
             gen_thread.start()
 
-            _HOLDING_CLIP = config.ASSETS_DIR / "audio" / "This is your cap.mp3"
             servo_stop = self._begin_speech(emotion="excited")
             try:
-                if _HOLDING_CLIP.exists():
-                    self._player.play_file(_HOLDING_CLIP)
                 gen_thread.join(timeout=15.0)
                 if greeting_result[0]:
                     self._synthesizer.speak(greeting_result[0])
@@ -993,7 +1001,7 @@ class StateMachine:
         if status in ("no_match", "db_empty"):
             log.info("Wake greeting: first wake — unknown face, running appearance roast + enrollment")
 
-            # GPT-4o appearance-based roast; hide latency behind holding clip.
+            # GPT-4o appearance-based roast — initial clip already played above.
             unknown_result: list[str | None] = [None]
 
             def _gen_unknown() -> None:
@@ -1004,18 +1012,14 @@ class StateMachine:
             )
             gen_thread2.start()
 
-            _HOLDING_CLIP = config.ASSETS_DIR / "audio" / "This is your cap.mp3"
             _CANNED_TTS = (
                 "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
-                "HEY HEY HEY! A lifeform! Bold of you to show up looking like THAT.",
+                "A lifeform! Bold of you to show up looking like THAT.",
                 "Oh, it's you. Oga's Cantina — where even the questionable guests are welcome!",
                 "Well well well, look what the Ronto dragged in. Welcome, I guess.",
             )
-            _CANNED_AUDIO = config.ASSETS_DIR / "audio" / "Hi There.mp3"
             servo_stop = self._begin_speech(emotion="excited")
             try:
-                if _HOLDING_CLIP.exists():
-                    self._player.play_file(_HOLDING_CLIP)
                 gen_thread2.join(timeout=15.0)
                 if unknown_result[0]:
                     self._synthesizer.speak(unknown_result[0])
@@ -1026,14 +1030,10 @@ class StateMachine:
                 self._end_speech(servo_stop)
 
             if not unknown_result[0]:
-                log.info("Wake greeting: GPT failed — canned fallback for unknown face")
+                log.info("Wake greeting: GPT failed — canned TTS fallback for unknown face")
                 servo_stop = self._begin_speech(emotion="excited")
                 try:
-                    if _CANNED_AUDIO.exists():
-                        self._player.play_file(_CANNED_AUDIO)
-                        self._player.wait_for_speech(timeout=10.0)
-                    else:
-                        self._synthesizer.speak(random.choice(_CANNED_TTS))
+                    self._synthesizer.speak(random.choice(_CANNED_TTS))
                 except Exception:
                     log.exception("Wake greeting: first wake unknown-face canned fallback error")
                 finally:
