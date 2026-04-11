@@ -1346,6 +1346,26 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
+        # If someone was already greeted this session, immediately ask what the
+        # new person thinks of them — the mic opens right after so they can answer.
+        if self._session_greeted_person_id is not None:
+            prev_person = self._face_db.get_person(self._session_greeted_person_id)
+            prev_name = prev_person.get("name") if prev_person else None
+            if prev_name:
+                log.info(
+                    "Wake greeting: enrollment handoff — new person '%s' meets session person '%s'",
+                    name, prev_name,
+                )
+                handoff = self._greeter.generate_handoff(name, prev_name)
+                if handoff:
+                    servo_stop = self._begin_speech(emotion="excited")
+                    try:
+                        self._synthesizer.speak(handoff)
+                    except Exception:
+                        log.exception("Wake greeting: enrollment handoff TTS error")
+                    finally:
+                        self._end_speech(servo_stop)
+
     # ------------------------------------------------------------------
     # State — SLEEP
     # ------------------------------------------------------------------
