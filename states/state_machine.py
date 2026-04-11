@@ -1347,6 +1347,13 @@ class StateMachine:
         name = self._post_greeting_person_name
         if person_id is None or not name:
             return "no_answer", None
+        if self._already_answered_plan_today(person_id):
+            log.info(
+                "Post-greeting prompt suppressed for %s (person_id=%d): plan already answered today",
+                name, person_id,
+            )
+            self._post_greeting_prompt_used = True
+            return "no_answer", None
 
         prompts = (
             self._build_plan_question(name),
@@ -1434,6 +1441,20 @@ class StateMachine:
             )
         except Exception:
             log.exception("Post-greeting prompt: failed to store plan memory")
+
+    def _already_answered_plan_today(self, person_id: int) -> bool:
+        """Return True if today's relevant plan prompt was already answered."""
+        weekday = date.today().weekday()
+        key = "weekend_plan" if weekday >= 4 else "today_plan"
+        try:
+            return self._face_db.has_memory_for_local_day(
+                person_id=person_id,
+                key=key,
+                day_iso=date.today().isoformat(),
+            )
+        except Exception:
+            log.exception("Post-greeting prompt: failed checking same-day plan memory")
+            return False
 
     def _speak_plan_reply(self, answer: str) -> None:
         """Riff on the user's stated plan, then ask one follow-up question."""

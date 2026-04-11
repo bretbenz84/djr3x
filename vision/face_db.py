@@ -325,6 +325,24 @@ class FaceDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def has_memory_for_local_day(self, person_id: int, key: str, day_iso: str) -> bool:
+        """Return True when a person already has a memory with *key* on *day_iso*.
+
+        day_iso must be in YYYY-MM-DD form and is matched in local time so the
+        post-greeting "what are you doing today / this weekend?" prompt does not
+        repeat after the person already answered once that day.
+        """
+        row = self._conn.execute(
+            """SELECT 1
+               FROM memories
+               WHERE person_id = ?
+                 AND key = ?
+                 AND date(created_at, 'localtime') = ?
+               LIMIT 1""",
+            (person_id, key, day_iso),
+        ).fetchone()
+        return row is not None
+
     def mark_followed_up(self, memory_id: int) -> None:
         """Mark a memory as having been followed up on."""
         with self._conn:
