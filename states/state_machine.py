@@ -988,6 +988,18 @@ class StateMachine:
             )
             gen_thread.start()
 
+            # Speak a filler phrase while the GPT call is in flight (~2s latency).
+            if gen_thread.is_alive():
+                _filler = _pick_no_repeat(_GREETING_FILLERS, "greeting_filler")
+                log.info("Wake greeting: GPT filler %r", _filler)
+                _fs = self._begin_speech(emotion="excited")
+                try:
+                    self._synthesizer.speak(_filler)
+                except Exception:
+                    log.exception("Wake greeting: GPT filler TTS error")
+                finally:
+                    self._end_speech(_fs)
+
             servo_stop = self._begin_speech(emotion="excited")
             try:
                 gen_thread.join(timeout=15.0)
@@ -1020,6 +1032,18 @@ class StateMachine:
                 target=_gen_unknown, daemon=True, name="djr3x-greeter"
             )
             gen_thread2.start()
+
+            # Speak a filler phrase while the GPT call is in flight (~2s latency).
+            if gen_thread2.is_alive():
+                _filler2 = _pick_no_repeat(_GREETING_FILLERS, "greeting_filler")
+                log.info("Wake greeting: GPT filler (unknown) %r", _filler2)
+                _fs2 = self._begin_speech(emotion="excited")
+                try:
+                    self._synthesizer.speak(_filler2)
+                except Exception:
+                    log.exception("Wake greeting: GPT filler TTS error (unknown)")
+                finally:
+                    self._end_speech(_fs2)
 
             _CANNED_TTS = (
                 "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
@@ -3003,6 +3027,18 @@ _SHUTDOWN_INTERRUPT_LINES = (
     "Never mind who you are, powering down!",
     "Fine, forget the pleasantries — shutting down!",
     "Oh, so mysterious! Fine, powering down then.",
+)
+
+# Short filler phrases spoken while the GPT greeting call is in flight (~2s).
+# Covers the silence between face recognition completing and the LLM response arriving.
+_GREETING_FILLERS: tuple[str, ...] = (
+    "Uh... uh...",
+    "One sec.",
+    "Hold on.",
+    "Processing... processing...",
+    "Just a moment.",
+    "Let me think...",
+    "Give me a beat.",
 )
 
 # Unknown-face prompt — played when Rex sees a face he doesn't recognise and
