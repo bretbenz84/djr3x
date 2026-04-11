@@ -1120,8 +1120,9 @@ class StateMachine:
                 name, self._last_greeted_person_id,
             )
             prev_name: str | None = None
-            if self._last_greeted_person_id is not None:
-                prev_person = self._face_db.get_person(self._last_greeted_person_id)
+            prev_id = self._last_greeted_person_id or self._session_greeted_person_id
+            if prev_id is not None:
+                prev_person = self._face_db.get_person(prev_id)
                 if prev_person:
                     prev_name = prev_person.get("name")
 
@@ -1324,8 +1325,9 @@ class StateMachine:
 
             if enc is not None:
                 try:
-                    self._face_db.add_person(name, enc)
-                    log.info("Enrollment complete: %r stored in FaceDB", name)
+                    new_person_id = self._face_db.add_person(name, enc)
+                    log.info("Enrollment complete: %r stored in FaceDB (id=%d)", name, new_person_id)
+                    self._last_greeted_person_id = new_person_id
                 except Exception:
                     log.exception("Enrollment: FaceDB error storing %r", name)
             else:
