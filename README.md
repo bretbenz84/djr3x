@@ -1,21 +1,22 @@
 # DJ-R3X Controller
 
-An interactive animatronic controller for a DJ-R3X (Rex) build, running on Raspberry Pi 4.
+An interactive animatronic controller for a DJ-R3X (Rex) build, running on Raspberry Pi 4 or macOS Apple Silicon.
 Rex responds to voice commands, engages in AI-powered conversation, reacts to music,
 uses computer vision to greet and roast people, and remembers who you are.
+
+Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Silicon builds run transcription and LLM locally. Text to Speech is handled by ElevenLabs on both platforms.
 
 ## Hardware
 
 | Component | Description |
 |-----------|-------------|
-| Raspberry Pi 4 | Main controller (user: bbenziger) |
+| Raspberry Pi 4 | Main controller |
 | Pololu Maestro Mini 18 | Servo controller via USB serial (/dev/ttyACM0) |
 | Arduino Uno | Head LED controller — mouth PCB + eye LEDs (/dev/ttyACM2) |
-| Arduino Nano (pending) | Chest light panel controller |
+| Arduino Nano | Chest light panel controller (/dev/ttyUSB0) |
 | ReSpeaker Lite | USB microphone array for wake word and transcription |
 | Speakers + Stereo Amp | Audio output via 3.5mm jack |
-| Webcam (j5 JVU430) | Computer vision for person detection and greetings |
-| ELP-USBFHD01M-L21 | 1080p wide angle camera (ordered — for face recognition) |
+| ELP-USBFHD01M-L21 | 1080p wide angle camera, mounted in head (/dev/video0) |
 | Custom Mouth PCB | 80x WS2812B NeoPixels — emotion-based center-out pulse animation |
 | Eye PCB | 2x WS2812B NeoPixels with natural random blink animation |
 
@@ -24,9 +25,9 @@ uses computer vision to greet and roast people, and remembers who you are.
 | Channel | Name | Notes |
 |---------|------|-------|
 | 0 | Neck | Left/right rotation |
-| 1 | Headlift | Up/down — lower values = head down |
-| 2 | Headtilt | Forward/back tilt — lower values = tilt up |
-| 3 | Visor | Open/close — lower values = closed/eyes covered |
+| 1 | Headlift | Up/down — higher values = head up |
+| 2 | Headtilt | Forward/back tilt — inverted, lower = up |
+| 3 | Visor | Open/close — inverted, lower = closed/eyes covered |
 | 4 | Elbow | Left arm |
 | 5 | Hand | Left hand |
 | 6 | Pokerarm | Right arm |
@@ -34,31 +35,44 @@ uses computer vision to greet and roast people, and remembers who you are.
 
 ## Architecture
 
+### AI Backend Selection (Automatic by Platform)
+
+| Component | Raspberry Pi | macOS Apple Silicon |
+|-----------|-------------|---------------------|
+| Transcription | OpenAI Whisper API | Local mlx-whisper (whisper-small-mlx) |
+| LLM | OpenAI GPT-4o-mini | Local Ollama llama3.2 |
+| Vision queries | OpenAI GPT-4o | OpenAI GPT-4o (always cloud) |
+| TTS | ElevenLabs streaming | ElevenLabs streaming |
+
 ### Audio Pipeline
 - Wake word detected by OpenWakeWord (4 models: `Dee-Jay_Rex`, `Hey_DJ_Rex`, `Hey_rex`, `Yo_robot`)
 - Audio captured via ReSpeaker Lite (PipeWire device, stereo mixdown to mono)
-- Speech transcribed via OpenAI Whisper API with hallucination filtering
-- Single-word command whitelist bypasses minimum word filter
-- Command parser checks transcription: exact match → prefix match → fuzzy match (0.82 threshold) → LLM fallback
+- Two-phase silence detection: 5s wait for speech to start, 1.5s sustained silence to end recording
+- Speech transcribed via Whisper API (Pi) or local mlx-whisper (Mac)
+- Hallucination filtering with phrase blocklist
+- Command parser: exact match → prefix match → fuzzy match (0.82 threshold) → LLM fallback
+- Semantic exclusion: "my name" never matches "your name" regardless of fuzzy score
+- Multiple response variations per command (5 variations, anti-repeat shuffle)
 - If matched: execute local command or speak canned response
-- If no match: stream to ChatGPT gpt-4o-mini → ElevenLabs → speakers
+- If no match: stream to ChatGPT/Ollama → ElevenLabs → speakers
 - Mouth PCB emotion pulse driven by speech audio RMS level in real time
 
 ### Wake Greeting Pipeline
-- Wake word fires → capture image → run face recognition
-- **Known person**: greet by name with roast tier based on visit count
-- **Unknown person**: run scanning line concurrently with dlib processing → GPT-4o roast greeting → ask name → enroll face + name in database
-- **Empty database**: scanning line + enrollment flow
-- Alternating pattern for unknown: hi-there audio clip / GPT-4o personalized roast
+- Wake word fires → camera pose preparation (visor opens, neck centers, 0.5s settle) → capture image → run face recognition
+- **Known person**: greet by name with GPT-4o roast referencing appearance and visit count
+- **Unknown person**: roast line → ask name → enroll face + name in database → GPT-4o roast as new person
+- **Empty database**: enrollment flow
 
 ### Vision Pipeline
 - Vision intent detection on transcribed text
-- If visual query detected: capture fresh frame → send to GPT-4o with query
+- If visual query detected: camera pose preparation → capture fresh frame → send to GPT-4o with query
+- Vision always uses GPT-4o cloud API regardless of platform
 - Rex answers naturally without narrating that he is looking at an image
 
 ### Face Recognition
 - dlib ResNet model generates 128-dimension face encodings
 - SQLite database stores people, encodings, visit counts, first/last seen
+- "who am I" / "what's my name" → face DB lookup → GPT-4o roast using name + appearance
 - Voice commands: `call me [name]`, `forget me`, `rename me`, `my name is [name]`
 - Refusal detection: anonymous responses handled with roast lines
 - Command detection during name capture: shutdown commands work mid-enrollment
@@ -66,19 +80,21 @@ uses computer vision to greet and roast people, and remembers who you are.
 ### Servo Behavior
 - **Idle**: independent random movements — neck pan, headlift, visor drift, arms
 - **Speech reactive**: head, visor, elbow, hand move based on audio RMS intensity
+- **Camera pose**: visor to max, neck to neutral before any image capture
 - **Emotion states**: excited (head up, visor open, fast), sad (head down, visor closed, slow)
 - **Wake greeting**: hand wave animation concurrent with greeting audio
 - **Startup animation**: slumped pose → neck looks around → head rises → visor opens
 - **Shutdown animation**: gradual droop to slumped pose → visor closes
 
 ### LED System
-- Arduino Uno receives ASCII serial commands from Pi via USB
+- Arduino Uno (head) receives ASCII serial commands from Pi via USB
 - **Mouth**: 80x WS2812B NeoPixels — emotion-based center-outward pulse animation
   - `SPEAK:{emotion}` sets color scheme (neutral=amber, happy=cyan, excited=yellow, sad=blue, angry=red)
   - `SPEAK_LEVEL:{0-255}` drives pulse speed and brightness from audio RMS
-  - Pulse radiates from center pixels (D36/D37/D44/D45) outward through 5 zone rings
+  - Pulse radiates from center pixels outward through 5 zone rings
 - **Eyes**: 2x WS2812B NeoPixels with natural random blink (100-400ms blink, 2-8s interval, 10% double blink)
 - Mouth only illuminates during speech — never during music
+- Arduino Nano (chest): 98 WS2811 LEDs — RandomBlocks2 default, emotion-based modes via serial commands
 
 ### State Machine
 
@@ -89,7 +105,7 @@ uses computer vision to greet and roast people, and remembers who you are.
 | SHUTDOWN | Shutdown speech, hyperdrive audio + slumped animation concurrent, clean exit |
 
 ### Startup Sequence
-1. 5s USB device enumeration wait
+1. USB device enumeration (skipped in interactive mode)
 2. `light_speed.mp3` + servo startup animation (concurrent)
 3. `Roger Control.mp3` spoken intro with mouth LEDs and servo animation
 4. Startup chime
@@ -106,22 +122,23 @@ uses computer vision to greet and roast people, and remembers who you are.
 | Component | Technology |
 |-----------|------------|
 | Wake word | OpenWakeWord (4 custom trained .onnx models) |
-| Transcription | OpenAI Whisper API (whisper-1) |
-| LLM | OpenAI GPT-4o-mini (text) / GPT-4o (vision + face description) |
+| Transcription | OpenAI Whisper API (Pi) / local mlx-whisper (Mac) |
+| LLM | OpenAI GPT-4o-mini (Pi) / local Ollama llama3.2 (Mac) |
+| Vision | OpenCV + GPT-4o (always cloud) |
 | Voice synthesis | ElevenLabs streaming TTS (Rex voice clone from Star Tours audio) |
 | Face recognition | dlib ResNet + SQLite via FaceDB |
 | Servo control | Pololu compact serial protocol |
-| LED control | FastLED on Arduino Uno via serial |
+| LED control | FastLED on Arduino Uno/Nano via serial |
 | Audio | PipeWire / sounddevice (Debian Trixie) |
-| Vision | OpenCV + GPT-4o |
 
 ## Voice Commands
 
 | Command | Phrases | Action |
 |---------|---------|--------|
+| Recall name | "who am I", "what's my name", "do you know me" | Face DB lookup + GPT-4o roast |
 | Rename | "call me [name]", "my name is [name]", "rename me to [name]" | Updates face database |
 | Forget me | "forget me", "delete me", "forget my face" | Removes from database (with confirmation) |
-| Cancel | "cancel", "nevermind", "forget it", "i was talking to someone else" | Returns to IDLE |
+| Cancel | "cancel", "nevermind", "forget it" | Returns to IDLE |
 | Shutdown | "shut down", "exit program", "shut down rex" | Stops Python program |
 | Power down | "power down", "turn off", "goodbye forever" | OS shutdown (if enabled) |
 | Vision | "what do you see", "what am I wearing", "take a picture" | Captures image → GPT-4o |
@@ -132,32 +149,40 @@ uses computer vision to greet and roast people, and remembers who you are.
 djr3x/
 ├── main.py                 # Entry point
 ├── config.py               # All constants and environment variables
+├── platform_utils.py       # Platform detection (Pi vs macOS Apple Silicon)
+├── setup_assets.py         # Downloads required model files
 ├── audio/
 │   ├── player.py           # Speech and music playback, RMS tracking
 │   └── recorder.py         # Mic input
 ├── speech/
-│   ├── wake_word.py        # OpenWakeWord dual model detection
-│   ├── transcriber.py      # Whisper API transcription
+│   ├── wake_word.py        # OpenWakeWord detection (4 models)
+│   ├── transcriber.py      # Whisper API or local mlx-whisper transcription
 │   └── synthesizer.py      # ElevenLabs streaming TTS
 ├── commands/
-│   ├── parser.py           # Exact and fuzzy command matching
-│   └── command_list.py     # 25 commands, 119 phrases
+│   ├── parser.py           # Exact, prefix, fuzzy matching + semantic exclusions
+│   └── command_list.py     # 25+ commands, 5 variations each
 ├── llm/
-│   ├── chatgpt.py          # Streaming GPT-4o-mini/GPT-4o
+│   ├── chatgpt.py          # Streaming GPT-4o-mini / Ollama
 │   ├── greeter.py          # Personalized vision-based wake greetings
 │   └── vision_intent.py    # Detects visually oriented queries
 ├── hardware/
 │   ├── servos.py           # Maestro serial control
-│   └── leds.py             # Arduino Nano serial LED commands
+│   └── leds.py             # Arduino serial LED commands
 ├── states/
 │   └── state_machine.py    # IDLE/ACTIVE/SHUTDOWN state machine
 ├── sequences/
 │   └── animations.py       # Startup, shutdown, emotion sequences
 ├── vision/
-│   └── camera.py           # OpenCV webcam capture
+│   ├── camera.py           # OpenCV webcam capture
+│   ├── face_recognizer.py  # dlib face detection and encoding
+│   └── face_db.py          # SQLite face database
+├── arduino/
+│   ├── head_nano/          # Arduino Uno sketch — 82 NeoPixels
+│   └── chest_nano/         # Arduino Nano sketch — 98 WS2811 LEDs
 └── assets/
-    ├── audio/              # Cached responses, music, chime
-    └── models/             # Wake word .onnx models
+    ├── audio/              # Sound effects, idle clips, startup audio
+    ├── music/              # Idle music tracks (gitignored)
+    └── models/             # Wake word .onnx files + dlib model files
 ```
 
 ## Installation
@@ -170,7 +195,7 @@ pip install -r requirements.txt
 python3 setup_assets.py
 ```
 
-`setup_assets.py` downloads required model files (~100MB) and fixes known Python 3.11+ compatibility issues automatically.
+`setup_assets.py` downloads required model files (~120MB) and fixes known Python 3.11+ compatibility issues automatically.
 
 ### Raspberry Pi — additional dependencies
 ```bash
@@ -187,12 +212,30 @@ pip install dlib --extra-index-url https://www.piwheels.org/simple
 brew install portaudio ffmpeg cmake
 ```
 
-### Arduino sketch
+For local transcription on macOS:
+```bash
+pip install mlx-whisper
+```
+
+For local LLM on macOS:
+```bash
+brew install ollama
+ollama serve
+ollama pull llama3.2
+```
+
+### Arduino sketches
 ```bash
 arduino-cli core install arduino:avr
 arduino-cli lib install "FastLED"
+
+# Head Uno
 arduino-cli compile --fqbn arduino:avr:uno arduino/head_nano
 arduino-cli upload --fqbn arduino:avr:uno --port /dev/ttyACM2 arduino/head_nano
+
+# Chest Nano
+arduino-cli compile --fqbn arduino:avr:nano:cpu=atmega328 arduino/chest_nano
+arduino-cli upload --fqbn arduino:avr:nano:cpu=atmega328 --port /dev/ttyUSB0 arduino/chest_nano
 ```
 
 ## Environment Variables (.env)
@@ -206,9 +249,8 @@ ELEVENLABS_API_KEY=your_key_here
 ELEVENLABS_VOICE_ID=your_voice_id_here
 
 # Audio devices
-AUDIO_INPUT_DEVICE=3
-AUDIO_OUTPUT_DEVICE=0
-MIC_CHANNELS=2
+AUDIO_INPUT_DEVICE=3        # Pi: ReSpeaker=3 | Mac: MacBook mic=1
+AUDIO_OUTPUT_DEVICE=0       # Pi: 3.5mm jack=0 | Mac: leave blank
 
 # Wake word models
 WAKE_WORD_MODEL_1=assets/models/Dee-Jay_Rex.onnx
@@ -217,10 +259,10 @@ WAKE_WORD_MODEL_3=assets/models/Hey_rex.onnx
 WAKE_WORD_MODEL_4=assets/models/Yo_robot.onnx
 WAKE_WORD_THRESHOLD=0.60
 
-# Hardware ports
+# Hardware ports (leave blank to skip gracefully)
 MAESTRO_PORT=/dev/ttyACM0
 NANO_HEAD_PORT=/dev/ttyACM2
-#NANO_CHEST_PORT=/dev/ttyUSB1
+NANO_CHEST_PORT=/dev/ttyUSB0
 
 # Feature flags
 ENABLE_OS_SHUTDOWN=false
@@ -230,6 +272,13 @@ SERVO_SAFE_MODE=true
 FACE_RECOGNITION_TOLERANCE=0.6
 SYNTHESIZER_VOLUME_GAIN=1.5
 NOISE_FLOOR_MULTIPLIER=2.0
+
+# Local AI (macOS Apple Silicon — auto-detected, override if needed)
+# USE_LOCAL_TRANSCRIPTION=true
+# USE_LOCAL_LLM=true
+# LOCAL_WHISPER_MODEL=mlx-community/whisper-small-mlx
+# LOCAL_LLM_MODEL=llama3.2
+# LOCAL_LLM_BASE_URL=http://localhost:11434/v1
 ```
 
 ## Running
@@ -240,7 +289,7 @@ cd ~/djr3x
 source venv/bin/activate
 python3 main.py
 
-# As a service
+# As a service (Pi only)
 sudo systemctl enable djr3x
 sudo systemctl start djr3x
 
@@ -252,37 +301,45 @@ journalctl -u djr3x -f
 
 ### Working
 - [x] Wake word detection (4 models)
-- [x] Whisper transcription with hallucination filtering
-- [x] Command parser (exact + prefix + fuzzy matching)
+- [x] Two-phase transcription silence detection
+- [x] Whisper API transcription with hallucination filtering
+- [x] Local mlx-whisper transcription on macOS Apple Silicon
+- [x] Command parser (exact + prefix + fuzzy matching, semantic exclusions)
+- [x] Multiple response variations per command (5 variations, anti-repeat shuffle)
 - [x] ChatGPT streaming responses with Rex roaster personality
+- [x] Local Ollama llama3.2 on macOS Apple Silicon
+- [x] Platform detection — automatic backend selection Pi vs Mac
 - [x] ElevenLabs voice synthesis with volume gain
-- [x] Computer vision — intent based photo capture
+- [x] Computer vision — intent based photo capture with GPT-4o
+- [x] Camera pose preparation before image capture
 - [x] Personalized wake greeting — GPT-4o roasts based on appearance
-- [x] Face recognition with SQLite database
-- [x] Known person greetings with visit counter roast tiers
+- [x] Face recognition with dlib ResNet + SQLite database
+- [x] Known person greetings with visit counter and roast tiers
+- [x] Unknown person enrollment with roast on first meeting
+- [x] Recall name command — face DB lookup + GPT-4o roast
 - [x] Name enrollment, rename, forget me voice commands
-- [x] Cancel/nevermind returns to IDLE immediately
+- [x] Cancel/nevermind returns to IDLE
 - [x] Servo idle animations (neck, headlift, visor, arms)
 - [x] Speech reactive servo movement with emotions
-- [x] Startup animation — neck looks around, head rises
-- [x] Shutdown animation — gradual slumped pose
-- [x] Startup audio: light_speed.mp3 + Roger Control.mp3
-- [x] Shutdown audio: hyperdrive_down.mp3 concurrent with animation
+- [x] Startup and shutdown animations with concurrent audio
 - [x] Idle audio clips with mouth LED and servo sync
 - [x] Mouth LED emotion-based center-out pulse animation
 - [x] Eye LEDs with natural random blink timing
+- [x] Chest LED Arduino sketch with emotion-based lighting
+- [x] ELP 1080p camera installed and working
+- [x] Fast startup when hardware ports are blank
+- [x] setup_assets.py — downloads all required model files
 - [x] systemd service with boot retry logic
 - [x] PipeWire audio on Debian Trixie
-
-### In Progress
-- [ ] Face enrollment frame capture timing fix
-- [ ] ELP camera installation (camera ordered)
+- [x] macOS Apple Silicon development environment
 
 ### Pending
-- [ ] Head tracking with ELP camera
-- [ ] Conversation memory per person
-- [ ] Chest Nano Arduino sketch
-- [ ] udev rules for fixed USB device names
+- [ ] Head tracking with ELP camera (face position → neck servo)
+- [ ] Conversation memory per person (per-person GPT summary in SQLite)
+- [ ] udev rules for fixed USB device names on Pi
+- [ ] Dance mode (beat-synced servo sequences)
+- [ ] Mecanum wheel base (future)
+- [ ] Local TTS voice cloning (revisit when MLX TTS matures)
 
 ## Platform Notes
 
@@ -292,7 +349,9 @@ journalctl -u djr3x -f
 - Serial ports: Maestro=`/dev/ttyACM0`, Head Nano=`/dev/ttyACM2`, Chest Nano=`/dev/ttyUSB0`
 
 ### macOS (Apple Silicon)
-- Run `python3 setup_assets.py` after pip install — it patches `face_recognition_models` for Python 3.11+ automatically
+- Run `python3 setup_assets.py` after pip install — patches `face_recognition_models` for Python 3.11+ automatically
 - Set `AUDIO_INPUT_DEVICE=1` (MacBook Air Microphone) and leave `AUDIO_OUTPUT_DEVICE=` blank
-- Serial ports will be blank when hardware is not connected — Rex runs in software-only mode
+- Serial ports left blank — Rex runs in software-only mode without hardware
+- Ollama must be running before starting Rex: `ollama serve`
+- mlx-whisper must be installed separately: `pip install mlx-whisper`
 - Camera index 0 = built-in FaceTime camera (or USB webcam if FaceTime is unavailable)

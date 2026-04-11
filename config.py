@@ -8,6 +8,7 @@ Loads .env and exposes all project-wide constants. No other module reads
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from platform_utils import get_platform
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -53,6 +54,27 @@ ELEVENLABS_API_KEY  = _require("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = _require("ELEVENLABS_VOICE_ID")
 OPENAI_TIMEOUT_SECONDS = float(_optional("OPENAI_TIMEOUT_SECONDS", "30"))
 ELEVENLABS_TIMEOUT_SECONDS = float(_optional("ELEVENLABS_TIMEOUT_SECONDS", "60"))
+
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
+
+PLATFORM = get_platform()   # 'macos_silicon' or 'pi'
+
+# When True, use local mlx-whisper instead of the Whisper API.
+USE_LOCAL_TRANSCRIPTION: bool = _optional("USE_LOCAL_TRANSCRIPTION", "").lower() in ("1", "true", "yes") \
+    if _optional("USE_LOCAL_TRANSCRIPTION") else (PLATFORM == "macos_silicon")
+
+# When True, use local Ollama instead of OpenAI GPT for text chat.
+USE_LOCAL_LLM: bool = _optional("USE_LOCAL_LLM", "").lower() in ("1", "true", "yes") \
+    if _optional("USE_LOCAL_LLM") else (PLATFORM == "macos_silicon")
+
+# Local transcription — mlx-whisper (Apple Silicon only)
+LOCAL_WHISPER_MODEL: str = _optional("LOCAL_WHISPER_MODEL", "mlx-community/whisper-small-mlx")
+
+# Local LLM — Ollama OpenAI-compatible endpoint
+LOCAL_LLM_BASE_URL: str = _optional("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")
+LOCAL_LLM_MODEL:    str = _optional("LOCAL_LLM_MODEL",    "llama3.2")
 
 # ---------------------------------------------------------------------------
 # LLM

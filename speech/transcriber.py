@@ -59,16 +59,24 @@ _STALL_CHUNKS: int = max(
 
 
 class Transcriber:
-    """Cloud speech-to-text using OpenAI Whisper.
+    """Speech-to-text — either local mlx-whisper (Apple Silicon) or OpenAI Whisper API.
 
     Not thread-safe: only one transcribe() call may run at a time.
     """
 
     def __init__(self) -> None:
-        self._client = OpenAI(
-            api_key=config.OPENAI_API_KEY,
-            timeout=config.OPENAI_TIMEOUT_SECONDS,
-        )
+        self._use_local: bool = config.USE_LOCAL_TRANSCRIPTION
+        self._mlx_model = None   # loaded in warmup() when _use_local is True
+
+        if self._use_local:
+            log.info("Transcriber: using local mlx-whisper (Apple Silicon)")
+        else:
+            self._client = OpenAI(
+                api_key=config.OPENAI_API_KEY,
+                timeout=config.OPENAI_TIMEOUT_SECONDS,
+            )
+            log.info("Transcriber: using Whisper API")
+
         # Speech detection threshold — may be overridden by calibrate_noise_floor().
         self._speech_threshold: int = config.TRANSCRIBE_SPEECH_THRESHOLD
 
@@ -77,17 +85,38 @@ class Transcriber:
     # ------------------------------------------------------------------
 
     def is_available(self) -> bool:
-        """Always True — Whisper is accessed via the OpenAI API; no local
-        model files are required."""
+        """Always True — both backends are expected to be reachable."""
         return True
 
     def warmup(self) -> None:
-        """No-op — Whisper requires no local model loading.
+        """Load mlx-whisper model on Apple Silicon; no-op for the API path.
 
-        Kept so the startup sequence in StateMachine.start() can call
-        warmup() uniformly across all subsystems without special-casing
-        the transcriber.
+        Falls back to the Whisper API if mlx_whisper cannot be imported so
+        the program still runs on macOS without the optional dependency.
         """
+        if not self._use_local:
+            return
+        try:
+            import mlx_whisper  # type: ignore[import]
+            log.info(
+                "Transcriber: loading mlx-whisper model %s …",
+                config.LOCAL_WHISPER_MODEL,
+            )
+            self._mlx_model = mlx_whisper.load_models.load_model(
+                config.LOCAL_WHISPER_MODEL
+            )
+            log.info("Transcriber: mlx-whisper model loaded")
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "Transcriber: mlx-whisper unavailable (%s) — falling back to Whisper API",
+                exc,
+            )
+            self._use_local = False
+            self._mlx_model = None
+            self._client = OpenAI(
+                api_key=config.OPENAI_API_KEY,
+                timeout=config.OPENAI_TIMEOUT_SECONDS,
+            )
 
     def calibrate_noise_floor(
         self,
@@ -374,8 +403,10 @@ class Transcriber:
                 return ""
 
         log.info(
-            "Silence detected — sending %.1f s audio to Whisper …%s",
-            audio_duration, _mark(),
+            "Silence detected — transcribing %.1f s audio (%s) …%s",
+            audio_duration,
+            "mlx-whisper" if self._use_local else "Whisper API",
+            _mark(),
         )
 
         buf = io.BytesIO()
@@ -388,21 +419,41 @@ class Transcriber:
 
         t_api = time.monotonic()
         try:
-            result = self._client.audio.transcriptions.create(
-                model="whisper-1",
-                file=("audio.wav", buf.read()),
-                language=config.WHISPER_LANGUAGE,
-            )
-            text = result.text.strip()
+            if self._use_local:
+                import mlx_whisper  # type: ignore[import]
+                import tempfile, os
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    tmp.write(buf.read())
+                    tmp_path = tmp.name
+                try:
+                    result = mlx_whisper.transcribe(
+                        tmp_path,
+                        path_or_hf_repo=config.LOCAL_WHISPER_MODEL,
+                        language=config.WHISPER_LANGUAGE or None,
+                    )
+                    text = (result.get("text") or "").strip()
+                finally:
+                    os.unlink(tmp_path)
+                log.info(
+                    "mlx-whisper transcription complete (%.1f s)%s",
+                    time.monotonic() - t_api, _mark(),
+                )
+            else:
+                result = self._client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=("audio.wav", buf.read()),
+                    language=config.WHISPER_LANGUAGE,
+                )
+                text = result.text.strip()
+                log.info(
+                    "Whisper API transcription complete (%.1f s)%s",
+                    time.monotonic() - t_api, _mark(),
+                )
         except Exception:
-            log.exception("Whisper transcription API error")
+            log.exception("Transcription error")
             return ""
 
-        log.info(
-            "Whisper transcription complete (API %.1f s)%s",
-            time.monotonic() - t_api, _mark(),
-        )
-        log.debug("Whisper result: %r", text)
+        log.debug("Transcription result: %r", text)
         return _filter_hallucination(text, allow_short=allow_short)
 
 

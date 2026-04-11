@@ -88,6 +88,9 @@ def _print_banner(status: dict) -> None:
     music = status["music_tracks"]
     music_detail = f"({music} track{'s' if music != 1 else ''})" if music else "(no tracks)"
 
+    transcriber_backend = "mlx-whisper (local)" if config.USE_LOCAL_TRANSCRIPTION else "Whisper API"
+    llm_backend         = f"Ollama {config.LOCAL_LLM_MODEL} (local)" if config.USE_LOCAL_LLM else f"GPT-4o-mini"
+
     lines = [
         "",
         sep,
@@ -99,7 +102,9 @@ def _print_banner(status: dict) -> None:
         f"  Head LEDs  (Nano)  {_hw(status['head_leds'])}   {config.NANO_HEAD_PORT}",
         thin,
         f"  Wake word          {_hw(status['wake_word'])}   {wake_detail}",
-        f"  Transcriber        {_hw(status['transcriber'])}   Whisper",
+        f"  Transcription      {_hw(status['transcriber'])}   {transcriber_backend}",
+        f"  LLM                {'READY    '}   {llm_backend}",
+        f"  TTS                {'READY    '}   ElevenLabs",
         f"  Camera             {_hw(status['camera'])}",
         f"  Face recognition   {_hw(status['face_recognition'])}",
         f"  Music library      {'READY    ' if music else 'EMPTY    '}   {music_detail}",

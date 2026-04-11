@@ -86,13 +86,46 @@ _SYSTEM_MESSAGE: dict[str, str] = {"role": "system", "content": _SYSTEM_PROMPT}
 # ---------------------------------------------------------------------------
 
 class ChatGPTClient:
-    """Streaming GPT-4o-mini client with conversation history for DJ-R3X."""
+    """Streaming LLM client with conversation history for DJ-R3X.
+
+    Text chat uses either local Ollama (macOS Apple Silicon) or OpenAI GPT-4o-mini.
+    Vision (image) queries always go to the real OpenAI GPT-4o API regardless of
+    platform, because local models do not support multimodal input.
+    """
 
     def __init__(self) -> None:
-        self._client = OpenAI(
+        # Vision queries always use the real OpenAI API + gpt-4o.
+        self._vision_client = OpenAI(
             api_key=config.OPENAI_API_KEY,
             timeout=config.OPENAI_TIMEOUT_SECONDS,
         )
+
+        # Text-chat client — Ollama or OpenAI depending on platform.
+        if config.USE_LOCAL_LLM:
+            try:
+                self._client = OpenAI(
+                    base_url=config.LOCAL_LLM_BASE_URL,
+                    api_key="ollama",
+                    timeout=config.OPENAI_TIMEOUT_SECONDS,
+                )
+                # Probe the endpoint so we can fall back before the first real call.
+                self._client.models.list()
+                self._chat_model: str = config.LOCAL_LLM_MODEL
+                self._use_local = True
+                log.info("LLM: using local Ollama %s (Apple Silicon)", config.LOCAL_LLM_MODEL)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "LLM: Ollama unavailable (%s) — falling back to OpenAI GPT-4o-mini", exc
+                )
+                self._client = self._vision_client
+                self._chat_model = config.OPENAI_MODEL
+                self._use_local = False
+        else:
+            self._client = self._vision_client
+            self._chat_model = config.OPENAI_MODEL
+            self._use_local = False
+            log.info("LLM: using OpenAI %s", config.OPENAI_MODEL)
+
         self._history: list[dict[str, str]] = []
 
     # ------------------------------------------------------------------
@@ -143,11 +176,14 @@ class ChatGPTClient:
                     },
                 ],
             }
-            model = "gpt-4o"   # gpt-4o-mini does not support vision
-            log.debug("chat_stream: multipart content block constructed, model=gpt-4o")
+            # Vision always uses the real OpenAI API + gpt-4o (local models lack vision).
+            active_client = self._vision_client
+            model = "gpt-4o"
+            log.debug("chat_stream: multipart content block constructed, model=gpt-4o (cloud)")
         else:
             user_message = {"role": "user", "content": user_text}
-            model = config.OPENAI_MODEL
+            active_client = self._client
+            model = self._chat_model
             log.debug("chat_stream: text-only content block, model=%s", model)
 
         # History stores text-only for the user turn so it stays compact and
@@ -157,7 +193,7 @@ class ChatGPTClient:
         accumulated: list[str] = []
         first_token_logged = False
         try:
-            stream = self._client.chat.completions.create(
+            stream = active_client.chat.completions.create(
                 model=model,
                 messages=[_SYSTEM_MESSAGE] + self._history[:-1] + [user_message],
                 stream=True,
