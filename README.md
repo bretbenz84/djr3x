@@ -159,37 +159,32 @@ djr3x/
     ├── audio/              # Cached responses, music, chime
     └── models/             # Wake word .onnx models
 ```
+
 ## Installation
 
-### System dependencies
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3-dev portaudio19-dev libportaudio2 libasound2-dev \
-  ffmpeg sox libsox-fmt-all git curl cmake
-```
-
-### Python environment
+### Quick Setup (all platforms)
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+python3 setup_assets.py
 ```
 
-### dlib (required for face recognition — compiles from source, ~30 min on Pi 4)
+`setup_assets.py` downloads required model files (~100MB) and fixes known Python 3.11+ compatibility issues automatically.
+
+### Raspberry Pi — additional dependencies
 ```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3-dev portaudio19-dev libportaudio2 libasound2-dev \
+  ffmpeg sox libsox-fmt-all git curl cmake
+
+# dlib compiles from source on Pi — use piwheels to save ~30 minutes
 pip install dlib --extra-index-url https://www.piwheels.org/simple
-pip install git+https://github.com/ageitgey/face_recognition_models
 ```
 
-### Vosk model (local speech — optional, replaced by Whisper)
-No longer required.
-
-### dlib models (required for face recognition)
+### macOS (Apple Silicon) — additional dependencies
 ```bash
-cd assets/models
-wget http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
-wget http://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2
-bunzip2 *.bz2
+brew install portaudio ffmpeg cmake
 ```
 
 ### Arduino sketch
@@ -289,59 +284,15 @@ journalctl -u djr3x -f
 - [ ] Chest Nano Arduino sketch
 - [ ] udev rules for fixed USB device names
 
-## macOS Setup Notes
+## Platform Notes
 
-After installing requirements, `face_recognition_models` may fail with `ModuleNotFoundError: No module named 'pkg_resources'` on Python 3.11+. Fix it by running:
+### Raspberry Pi
+- Audio via PipeWire on Debian Trixie — set `AUDIO_INPUT_DEVICE=3` for ReSpeaker Lite
+- dlib installs from piwheels as a prebuilt wheel — no compilation needed
+- Serial ports: Maestro=`/dev/ttyACM0`, Head Nano=`/dev/ttyACM2`, Chest Nano=`/dev/ttyUSB0`
 
-```bash
-python3 fix_face_recognition.py
-```
-
-**Option 2 — Create a setup script (better):**
-
-```bash
-code ~/djr3x/fix_face_recognition.py
-```
-
-```python
-#!/usr/bin/env python3
-"""Fix face_recognition_models pkg_resources issue on Python 3.11+ / macOS"""
-import site
-import os
-
-path = site.getsitepackages()[0] + '/face_recognition_models/__init__.py'
-
-if not os.path.exists(path):
-    print('face_recognition_models not found — run pip install -r requirements.txt first')
-    exit(1)
-
-new_content = '''# -*- coding: utf-8 -*-
-__author__ = """Adam Geitgey"""
-__email__ = 'ageitgey@gmail.com'
-__version__ = '0.1.0'
-import os
-_models_dir = os.path.join(os.path.dirname(__file__), "models")
-def pose_predictor_model_location():
-    return os.path.join(_models_dir, "shape_predictor_68_face_landmarks.dat")
-def pose_predictor_five_point_model_location():
-    return os.path.join(_models_dir, "shape_predictor_5_face_landmarks.dat")
-def face_recognition_model_location():
-    return os.path.join(_models_dir, "dlib_face_recognition_resnet_model_v1.dat")
-def cnn_face_detector_model_location():
-    return os.path.join(_models_dir, "mmod_human_face_detector.dat")
-'''
-
-open(path, 'w').write(new_content)
-print('face_recognition_models patched successfully')
-```
-
-Then commit it:
-```bash
-git add fix_face_recognition.py
-git commit -m "add fix script for face_recognition_models on Python 3.11+ macOS"
-git push
-```
-
-**Option 3 — Add it to requirements.txt as a post-install note** — less ideal since pip can't run arbitrary code.
-
-Option 2 is the cleanest — anyone cloning the repo on Mac just runs `python3 fix_face_recognition.py` after `pip install -r requirements.txt`.
+### macOS (Apple Silicon)
+- Run `python3 setup_assets.py` after pip install — it patches `face_recognition_models` for Python 3.11+ automatically
+- Set `AUDIO_INPUT_DEVICE=1` (MacBook Air Microphone) and leave `AUDIO_OUTPUT_DEVICE=` blank
+- Serial ports will be blank when hardware is not connected — Rex runs in software-only mode
+- Camera index 0 = built-in FaceTime camera (or USB webcam if FaceTime is unavailable)
