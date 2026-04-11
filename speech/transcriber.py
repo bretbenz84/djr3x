@@ -98,28 +98,39 @@ class Transcriber:
             return
         try:
             import mlx_whisper  # type: ignore[import]
+            import mlx.core as mx  # type: ignore[import]
+            from mlx_whisper.transcribe import ModelHolder  # type: ignore[import]
             from huggingface_hub import snapshot_download  # type: ignore[import]
+
             log.info(
                 "Transcriber: loading mlx-whisper model %s …",
                 config.LOCAL_WHISPER_MODEL,
             )
-            # Resolve (and download if needed) the model to a local snapshot
-            # directory.  Storing this path means every subsequent transcribe()
-            # call passes a filesystem path rather than a HuggingFace repo name,
-            # so mlx_whisper skips the network revision check entirely.
+            # Resolve the model to a local snapshot directory once.  All
+            # subsequent calls pass this filesystem path so snapshot_download
+            # is never contacted again.
             self._mlx_model_path: str = snapshot_download(config.LOCAL_WHISPER_MODEL)
-            # Pre-load weights into MLX memory so the first utterance doesn't pay
-            # the model-init cost.
-            mlx_whisper.load_models.load_model(self._mlx_model_path)
-            log.info(
-                "Transcriber: mlx-whisper model loaded from %s", self._mlx_model_path
+
+            # Load the weights and inject them directly into ModelHolder —
+            # the class-level cache that mlx_whisper.transcribe() consults.
+            # Without this, the first transcribe() call finds ModelHolder.model
+            # is None and re-loads from disk (and re-contacts HuggingFace if
+            # given a repo name).  Setting it here means every call is a cache
+            # hit from the start.
+            self._mlx_model = mlx_whisper.load_models.load_model(
+                self._mlx_model_path, dtype=mx.float16
             )
+            ModelHolder.model = self._mlx_model
+            ModelHolder.model_path = self._mlx_model_path
+
+            log.info("Transcriber: mlx-whisper model loaded and cached in ModelHolder")
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "Transcriber: mlx-whisper unavailable (%s) — falling back to Whisper API",
                 exc,
             )
             self._use_local = False
+            self._mlx_model = None
             self._mlx_model_path = ""
             self._client = OpenAI(
                 api_key=config.OPENAI_API_KEY,
