@@ -18,7 +18,8 @@
       "Bash(python -m py_compile states/state_machine.py)",
       "Bash(python -m py_compile commands/command_list.py)",
       "Bash(python -m py_compile utils/realworld.py)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(python3 -c \"from commands.command_list import COMMANDS, PHRASE_INDEX; print\\('OK —', len\\(COMMANDS\\), 'commands'\\)\")"
     ]
   }
 }

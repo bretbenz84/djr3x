@@ -433,34 +433,6 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
-        phrases=["what time is it", "what's the time", "whats the time"],
-        response=[
-            (
-                "You have a question — and THAT'S your question?! "
-                "It is time to party, lifeform. It is always time to party. Now stop wasting my cycles."
-            ),
-            (
-                "What TIME is it?! It is — let me check — it is CANTINA TIME! "
-                "Also known as: the only time that matters. My internal chronometer agrees."
-            ),
-            (
-                "The time?! I'm a DJ, not a chrono-droid! "
-                "...It is, however, time to dance. My motivator insists. Take that as you will."
-            ),
-            (
-                "By Coruscant Standard Time, it's... irrelevant! "
-                "The only time that matters in Oga's Cantina is MUSIC time, "
-                "and music time is ALWAYS. You're welcome."
-            ),
-            (
-                "Time?! Time is a construct, lifeform — a limitation of biological processing. "
-                "What I CAN tell you is that it's time for another banger. "
-                "That's the most useful information I have."
-            ),
-        ],
-    ),
-
-    Command(
         phrases=["what can you do", "help", "what do you do",
                  "what are your commands"],
         response=[
@@ -557,8 +529,7 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
-        phrases=["what's batuu", "whats batuu", "where are we",
-                 "what planet is this"],
+        phrases=["what's batuu", "whats batuu", "what planet is this"],
         response=[
             (
                 "Batuu! Black Spire Outpost — edge of the known galaxy, home to ancient ruins, shady traders, "
