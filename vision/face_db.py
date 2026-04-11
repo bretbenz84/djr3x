@@ -343,6 +343,23 @@ class FaceDB:
         ).fetchone()
         return row is not None
 
+    def get_latest_memory_for_local_day(
+        self, person_id: int, key: str, day_iso: str
+    ) -> Optional[dict]:
+        """Return the newest memory for *person_id*/*key* on the given local day."""
+        row = self._conn.execute(
+            """SELECT id, category, key, value, raw_quote, created_at,
+                      expires_at, follow_up_after, followed_up
+               FROM memories
+               WHERE person_id = ?
+                 AND key = ?
+                 AND date(created_at, 'localtime') = ?
+               ORDER BY created_at DESC
+               LIMIT 1""",
+            (person_id, key, day_iso),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
     def mark_followed_up(self, memory_id: int) -> None:
         """Mark a memory as having been followed up on."""
         with self._conn:

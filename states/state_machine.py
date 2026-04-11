@@ -141,6 +141,13 @@ _PLAN_REPLY_LINES: tuple[str, ...] = (
     "So we're doing {summary}. Is this for fun, survival, or a terrible promise you made earlier?",
 )
 
+_PLAN_SAME_DAY_FOLLOWUP_LINES: tuple[str, ...] = (
+    "So, {name}, how's {summary} going? Be honest. I can handle disappointment.",
+    "{name}, are you actually doing {summary}, or was that just aspirational theater?",
+    "Checking in, {name}. Did {summary} turn into a productive day, or a full cantina-grade fiasco?",
+    "{name}, how's that whole {summary} situation treating you so far?",
+)
+
 _I_SPY_START_LINES: list[str] = [
     "I Spy? Ohhh, now we're playing preschool in a cantina. Fine. Try to keep up, lifeform.",
     "An I Spy round? Bold choice for someone with the visual instincts of a stormtrooper.",
@@ -1347,13 +1354,10 @@ class StateMachine:
         name = self._post_greeting_person_name
         if person_id is None or not name:
             return "no_answer", None
-        if self._already_answered_plan_today(person_id):
-            log.info(
-                "Post-greeting prompt suppressed for %s (person_id=%d): plan already answered today",
-                name, person_id,
-            )
+        existing_plan = self._get_today_plan_memory(person_id)
+        if existing_plan is not None:
             self._post_greeting_prompt_used = True
-            return "no_answer", None
+            return self._run_same_day_plan_followup(person_id, name, existing_plan)
 
         prompts = (
             self._build_plan_question(name),
@@ -1442,19 +1446,57 @@ class StateMachine:
         except Exception:
             log.exception("Post-greeting prompt: failed to store plan memory")
 
-    def _already_answered_plan_today(self, person_id: int) -> bool:
-        """Return True if today's relevant plan prompt was already answered."""
+    def _run_same_day_plan_followup(
+        self, person_id: int, name: str, memory: dict
+    ) -> tuple[str, State | None]:
+        """Ask about an already-stored same-day plan instead of re-asking it."""
+        summary = self._short_memory_summary(str(memory.get("value") or ""))
+        prompt = _pick_no_repeat(
+            _PLAN_SAME_DAY_FOLLOWUP_LINES, "plan_same_day_followup"
+        ).format(name=name, summary=summary)
+        log.info(
+            "Post-greeting prompt for %s: using same-day follow-up from memory id=%s: %r",
+            name, memory.get("id"), prompt,
+        )
+
+        servo_stop = self._begin_speech(emotion="neutral")
+        try:
+            self._synthesizer.speak(prompt)
+        except Exception:
+            log.exception("Post-greeting prompt: TTS error on same-day follow-up")
+            return "no_answer", None
+        finally:
+            self._end_speech(servo_stop)
+
+        answer = self._listen_for_prompt_answer(config.WAKE_GOODBYE_TIMEOUT)
+        if not answer:
+            return "no_answer", None
+
+        cmd = parse(answer, allow_fuzzy=False)
+        if cmd is not None and cmd.action in {
+            "cancel", "program_shutdown", "os_shutdown", "sleep", "idle",
+        }:
+            log.info("Post-greeting same-day follow-up interrupted by command %r", cmd.action)
+            return "transition", self._execute_command(cmd, answer)
+
+        self._store_plan_memory(person_id, name, answer)
+        self._speak_plan_reply(answer)
+        return "answered", None
+
+    def _get_today_plan_memory(self, person_id: int) -> dict | None:
+        """Return today's relevant plan memory for this person, if one exists."""
         weekday = date.today().weekday()
         key = "weekend_plan" if weekday >= 4 else "today_plan"
+        day_iso = date.today().isoformat()
         try:
-            return self._face_db.has_memory_for_local_day(
+            return self._face_db.get_latest_memory_for_local_day(
                 person_id=person_id,
                 key=key,
-                day_iso=date.today().isoformat(),
+                day_iso=day_iso,
             )
         except Exception:
-            log.exception("Post-greeting prompt: failed checking same-day plan memory")
-            return False
+            log.exception("Post-greeting prompt: failed loading same-day plan memory")
+            return None
 
     def _speak_plan_reply(self, answer: str) -> None:
         """Riff on the user's stated plan, then ask one follow-up question."""
