@@ -853,6 +853,58 @@ COMMANDS: list[Command] = [
     ),
 
     # -----------------------------------------------------------------------
+    # Real-world awareness — time, date, location, weather
+    # -----------------------------------------------------------------------
+
+    Command(
+        phrases=[
+            "what time is it",
+            "what is the time",
+            "do you know what time it is",
+            "give me the time",
+            "what time do you have",
+        ],
+        response="",   # not spoken — action=tell_time handled by state machine
+        action="tell_time",
+    ),
+
+    Command(
+        phrases=[
+            "what day is it",
+            "what is today",
+            "what is the date",
+            "what day of the week is it",
+            "what month is it",
+        ],
+        response="",   # not spoken — action=tell_date handled by state machine
+        action="tell_date",
+    ),
+
+    Command(
+        phrases=[
+            "where are we",
+            "where are you",
+            "what is our location",
+            "where in the galaxy are we",
+            "what city are we in",
+        ],
+        response="",   # not spoken — action=tell_location handled by state machine
+        action="tell_location",
+    ),
+
+    Command(
+        phrases=[
+            "what is the weather",
+            "what is it like outside",
+            "is it hot outside",
+            "will it rain today",
+            "what is the forecast",
+        ],
+        response="",   # not spoken — action=tell_weather handled by state machine
+        action="tell_weather",
+    ),
+
+    # -----------------------------------------------------------------------
     # Vision — these are forwarded to the LLM with a live camera frame;
     # the response field is never spoken (action="vision" bypasses TTS).
     # They live here so the fuzzy parser catches close matches reliably.

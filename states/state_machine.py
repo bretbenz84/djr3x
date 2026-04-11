@@ -60,6 +60,7 @@ from sequences.animations import AnimationPlayer
 from speech.synthesizer import Synthesizer
 from speech.transcriber import Transcriber
 from speech.wake_word import WakeWordDetector
+from utils import realworld
 from vision.camera import Camera
 from vision.face_db import FaceDB
 from vision.face_recognizer import FaceRecognizer
@@ -1977,6 +1978,18 @@ class StateMachine:
         elif action == "recall_preference":
             self._handle_recall_preference(original_text)
 
+        elif action == "tell_time":
+            self._handle_tell_time(original_text)
+
+        elif action == "tell_date":
+            self._handle_tell_date(original_text)
+
+        elif action == "tell_location":
+            self._handle_tell_location(original_text)
+
+        elif action == "tell_weather":
+            self._handle_tell_weather(original_text)
+
         elif action == "rename_me":
             return self._handle_rename_me(original_text)
 
@@ -2767,6 +2780,181 @@ class StateMachine:
             log.exception("recall_preference: TTS error")
         finally:
             self._end_speech(servo_stop)
+
+    # ------------------------------------------------------------------
+    # Real-world awareness helpers
+    # ------------------------------------------------------------------
+
+    def _llm_simple(self, system: str, user: str) -> str:
+        """One-shot non-streaming local-LLM call — no history, no person context.
+
+        Uses self._llm._client (Ollama on Mac, OpenAI mini on Pi) and
+        self._llm._chat_model.  max_tokens is omitted for local models so
+        responses are never truncated mid-sentence.
+        """
+        try:
+            kwargs: dict = {
+                "model": self._llm._chat_model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ],
+                "temperature": 1.1,
+            }
+            if not self._llm._use_local:
+                kwargs["max_tokens"] = 80
+            response = self._llm._client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content.strip()
+        except Exception:
+            log.exception("_llm_simple: LLM call failed")
+            return ""
+
+    def _speak_simple(self, text: str, emotion: str = "excited") -> None:
+        """Speak *text* via ElevenLabs TTS with servo animation."""
+        servo_stop = self._begin_speech(emotion=emotion)
+        try:
+            self._synthesizer.speak(text)
+        except Exception:
+            log.exception("_speak_simple: TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+    _REX_SYSTEM = (
+        "You are DJ R-3X (Rex), the droid DJ at Oga's Cantina on Batuu. "
+        "Answer in Rex's snarky cantina DJ style. "
+        "No written sound effects. Stay in character. "
+        "IMPORTANT: Maximum 2 sentences. Stop after your second sentence."
+    )
+
+    def _handle_tell_time(self, original_text: str | None = None) -> None:
+        """Announce the current time in Rex style."""
+        current_time = realworld.get_current_time()
+        holiday      = realworld.get_holiday()
+
+        if holiday:
+            prompt = (
+                f"Announce that it is {current_time} and that today is {holiday}. "
+                f"Ask if the person is doing anything for it. Snarky Rex style. 1-2 sentences."
+            )
+        else:
+            prompt = (
+                f"Announce that the time is {current_time}. "
+                f"Make a Rex-style joke about it — e.g. whether the person is early, late, or clueless. "
+                f"1 sentence."
+            )
+
+        log.info("tell_time: time=%r holiday=%r", current_time, holiday)
+        line = self._llm_simple(self._REX_SYSTEM, prompt)
+        if not line:
+            line = f"It is {current_time}. Whether that means anything to you is entirely your problem."
+        self._speak_simple(line)
+
+    def _handle_tell_date(self, original_text: str | None = None) -> None:
+        """Announce today's date in Rex style."""
+        date_info = realworld.get_current_date()
+        holiday   = realworld.get_holiday()
+        formatted = date_info["formatted"]
+
+        if holiday:
+            prompt = (
+                f"Announce that today is {formatted} and that it is {holiday}. "
+                f"Ask what the person is doing to celebrate. Rex style, 1-2 sentences."
+            )
+        else:
+            prompt = (
+                f"Announce that today is {formatted}. "
+                f"Make a Rex joke about the passage of time, the day of the week, or the month. "
+                f"Something like 'Time is meaningless in hyperspace but here we are.' 1-2 sentences."
+            )
+
+        log.info("tell_date: formatted=%r holiday=%r", formatted, holiday)
+        line = self._llm_simple(self._REX_SYSTEM, prompt)
+        if not line:
+            line = f"It is {formatted}. Time marches on whether you are ready or not."
+        self._speak_simple(line)
+
+    def _handle_tell_location(self, original_text: str | None = None) -> None:
+        """Announce current location in Rex style."""
+        location = realworld.get_location()
+
+        if location:
+            city   = location["city"]
+            region = location["region"]
+            prompt = (
+                f"Announce that you are in {city}, {region}. "
+                f"Make a Rex joke about the city or region — be specific if you know anything about it. "
+                f"Rex cantina DJ style, 1-2 sentences."
+            )
+            log.info("tell_location: city=%r region=%r", city, region)
+            line = self._llm_simple(self._REX_SYSTEM, prompt)
+            if not line:
+                line = f"Sensors say we are in {city}, {region}. I have logged it. I am unimpressed."
+        else:
+            line = (
+                "My navigation systems are offline. "
+                "Could be anywhere. Probably not Tatooine — not enough sand."
+            )
+            log.info("tell_location: location unavailable — using canned line")
+
+        self._speak_simple(line)
+
+    def _handle_tell_weather(self, original_text: str | None = None) -> None:
+        """Announce current weather in Rex style."""
+        location = realworld.get_location()
+
+        if not location:
+            line = (
+                "My atmospheric sensors are down. "
+                "Assume it is whatever weather ruins your plans."
+            )
+            log.info("tell_weather: location unavailable — using canned line")
+            self._speak_simple(line)
+            return
+
+        weather = realworld.get_weather(location["lat"], location["lon"])
+
+        if not weather:
+            line = (
+                "My atmospheric sensors are down. "
+                "Assume it is whatever weather ruins your plans."
+            )
+            log.info("tell_weather: weather fetch failed — using canned line")
+            self._speak_simple(line)
+            return
+
+        city        = location["city"]
+        temp_f      = weather["temp_f"]
+        description = weather["description"]
+        wind_mph    = weather["wind_mph"]
+
+        if "rain" in description or "drizzle" in description or "shower" in description:
+            tone_hint = (
+                "Rex complains about the rain like it personally offended him. "
+                "Very dramatic, very betrayed."
+            )
+        elif temp_f > 95:
+            tone_hint = (
+                "It is dangerously hot. Rex MUST make a Tatooine reference. "
+                "Mandatory. Non-negotiable."
+            )
+        else:
+            tone_hint = "Rex makes a snarky observation about the conditions."
+
+        prompt = (
+            f"Announce the weather in {city}: {temp_f}°F, {description}, wind {wind_mph} mph. "
+            f"{tone_hint} Rex cantina DJ style, 1-2 sentences."
+        )
+        log.info(
+            "tell_weather: city=%r temp=%d description=%r wind=%d",
+            city, temp_f, description, wind_mph,
+        )
+        line = self._llm_simple(self._REX_SYSTEM, prompt)
+        if not line:
+            line = (
+                f"It is {temp_f} degrees and {description} in {city}. "
+                f"Dress accordingly or do not — I am a DJ, not your mother."
+            )
+        self._speak_simple(line)
 
     # ------------------------------------------------------------------
     # Music helpers
