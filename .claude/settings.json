@@ -10,7 +10,8 @@
       "Bash(venv/bin/python -c ':*)",
       "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; print\\('OK -', len\\(PHRASE_INDEX\\), 'phrases'\\)\")",
       "Bash(python3 -c ':*)",
-      "Bash(./venv/bin/python3 -c \"from commands.command_list import COMMANDS; cmds = [c for c in COMMANDS if c.action in \\('chatty_on','chatty_off'\\)]; [print\\(c.action, c.phrases\\) for c in cmds]\")"
+      "Bash(./venv/bin/python3 -c \"from commands.command_list import COMMANDS; cmds = [c for c in COMMANDS if c.action in \\('chatty_on','chatty_off'\\)]; [print\\(c.action, c.phrases\\) for c in cmds]\")",
+      "Bash(./venv/bin/python3 -c \"from llm.chatgpt import ChatGPTClient; print\\('import OK'\\)\")"
     ]
   }
 }

@@ -80,6 +80,12 @@ not written sound effects.
 
 _SYSTEM_MESSAGE: dict[str, str] = {"role": "system", "content": _SYSTEM_PROMPT}
 
+# Ollama / local-model variant — appends extra behavioural guardrails that
+# llama3.2 needs but GPT-4o-mini follows reliably without them.
+_LOCAL_SYSTEM_PROMPT = _SYSTEM_PROMPT + \
+    "\n- Do not start responses with HEY HEY HEY or similar shouted exclamations."
+_LOCAL_SYSTEM_MESSAGE: dict[str, str] = {"role": "system", "content": _LOCAL_SYSTEM_PROMPT}
+
 
 # ---------------------------------------------------------------------------
 # ChatGPTClient
@@ -112,6 +118,7 @@ class ChatGPTClient:
                 self._client.models.list()
                 self._chat_model: str = config.LOCAL_LLM_MODEL
                 self._use_local = True
+                self._system_message = _LOCAL_SYSTEM_MESSAGE
                 log.info("LLM: using local Ollama %s (Apple Silicon)", config.LOCAL_LLM_MODEL)
             except Exception as exc:  # noqa: BLE001
                 log.warning(
@@ -120,10 +127,12 @@ class ChatGPTClient:
                 self._client = self._vision_client
                 self._chat_model = config.OPENAI_MODEL
                 self._use_local = False
+                self._system_message = _SYSTEM_MESSAGE
         else:
             self._client = self._vision_client
             self._chat_model = config.OPENAI_MODEL
             self._use_local = False
+            self._system_message = _SYSTEM_MESSAGE
             log.info("LLM: using OpenAI %s", config.OPENAI_MODEL)
 
         self._history: list[dict[str, str]] = []
@@ -195,7 +204,7 @@ class ChatGPTClient:
         try:
             stream = active_client.chat.completions.create(
                 model=model,
-                messages=[_SYSTEM_MESSAGE] + self._history[:-1] + [user_message],
+                messages=[self._system_message] + self._history[:-1] + [user_message],
                 stream=True,
                 max_tokens=80,      # enforce short responses (~2 sentences)
                 temperature=1.05,   # just enough variance to feel alive
