@@ -1,0 +1,12 @@
+"filename", "language", "JSON with Comments", "Python", "pip requirements", "comment", "blank", "total"
+"/Users/bbenziger/djr3x/.claude/settings.json", "JSON with Comments", 5, 0, 0, 0, 0, 5
+"/Users/bbenziger/djr3x/commands/command_list.py", "Python", 0, 107, 0, 3, 10, 120
+"/Users/bbenziger/djr3x/config.py", "Python", 0, 13, 0, 3, 2, 18
+"/Users/bbenziger/djr3x/llm/chatgpt.py", "Python", 0, 179, 0, 32, 11, 222
+"/Users/bbenziger/djr3x/requirements.txt", "pip requirements", 0, 0, 1, 0, 0, 1
+"/Users/bbenziger/djr3x/states/state_machine.py", "Python", 0, 711, 0, 57, 105, 873
+"/Users/bbenziger/djr3x/utils/__init__.py", "Python", 0, 0, 0, 0, 1, 1
+"/Users/bbenziger/djr3x/utils/realworld.py", "Python", 0, 124, 0, 66, 33, 223
+"/Users/bbenziger/djr3x/vision/face_db.py", "Python", 0, 73, 0, 28, 7, 108
+"/Users/bbenziger/djr3x/vision/i_spy.py", "Python", 0, 139, 0, 7, 29, 175
+"Total", "-", 5, 1346, 1, 196, 198, 1746

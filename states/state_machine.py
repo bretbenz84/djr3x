@@ -45,7 +45,7 @@ import os
 import random
 import threading
 import time
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import config
@@ -110,6 +110,36 @@ _IDLE_CLIPS: list[str] = [
     "DJ Pilot.mp3",
     "Astromech Joke.mp3",
 ]
+
+_PLAN_QUESTION_WEEKDAY: tuple[str, ...] = (
+    "{name}, what are you doing today besides wandering over here like a lost tourist on Batuu?",
+    "All right, {name}, what's on today's agenda? Try to make it sound less tragic than it probably is.",
+    "{name}, what are you up to today, and please tell me it beats staring at walls.",
+)
+
+_PLAN_QUESTION_FRIDAY: tuple[str, ...] = (
+    "{name}, it's Friday. What are the weekend plans, and do they involve better judgment than usual?",
+    "Friday, {name}. What are you doing this weekend, besides making bold choices with your free time?",
+    "{name}, weekend planning check. What chaos are you scheduling for the next couple of days?",
+)
+
+_PLAN_QUESTION_WEEKEND: tuple[str, ...] = (
+    "{name}, it's the weekend. What are you getting up to, and why does it already sound questionable?",
+    "Weekend status check, {name}. What are you doing with it besides bothering a retired pilot droid?",
+    "{name}, what is the weekend plan? Make it good. Or at least make it funny.",
+)
+
+_PLAN_QUESTION_NUDGES: tuple[str, ...] = (
+    "No plan? That's bleak even for this cantina. What are you doing today?",
+    "Still waiting, lifeform. What is the move today or this weekend?",
+    "Anytime now. I asked what you're up to, not for a vow of silence.",
+)
+
+_PLAN_REPLY_LINES: tuple[str, ...] = (
+    "Oh, {summary}? Bold. Is this a real plan, or did your day just lose a bet?",
+    "{summary}, huh? That's either productive or deeply suspicious. Which is it?",
+    "So we're doing {summary}. Is this for fun, survival, or a terrible promise you made earlier?",
+)
 
 _I_SPY_START_LINES: list[str] = [
     "I Spy? Ohhh, now we're playing preschool in a cantina. Fine. Try to keep up, lifeform.",
@@ -239,6 +269,9 @@ class StateMachine:
         # Used only for roast wording; resets automatically when the date changes.
         self._recognized_today_date: date = date.today()
         self._recognized_today_counts: dict[int, int] = {}
+        self._post_greeting_person_id: int | None = None
+        self._post_greeting_person_name: str | None = None
+        self._post_greeting_prompt_used: bool = False
 
         # Animation player — shares hardware refs with the rest of the machine
         self._animations = AnimationPlayer(self._servos, self._leds)
@@ -638,6 +671,20 @@ class StateMachine:
                     self._transition_to(State.IDLE)
                     return
 
+                if (
+                    self._post_greeting_person_id is not None
+                    and not self._post_greeting_prompt_used
+                ):
+                    status, next_state = self._run_post_greeting_plan_prompt()
+                    if next_state is not None:
+                        if next_state == State.IDLE:
+                            self._play_return_to_idle_chime()
+                        self._transition_to(next_state)
+                        return
+                    if status == "answered":
+                        after_response = True
+                        continue
+
                 # First listen — prompt with "are you there?"
                 prompt = random.choice(_ARE_YOU_THERE_PHRASES)
                 log.info("No speech on first listen — prompting: %r", prompt)
@@ -842,6 +889,9 @@ class StateMachine:
         if new_state in (State.IDLE, State.SLEEP):
             self._last_known_person_id = None
             self._last_wake_frame = None
+            self._post_greeting_person_id = None
+            self._post_greeting_person_name = None
+            self._post_greeting_prompt_used = False
             self._llm.clear_person_context()
             # Global mouth safety: guarantee mouth is off whenever Rex returns
             # to IDLE or SLEEP, regardless of what the LED state machine thinks.
@@ -1001,6 +1051,9 @@ class StateMachine:
             self._last_known_person_id = person_id
             self._session_greeted_person_id = person_id
             self._last_greeted_person_id = person_id
+            self._post_greeting_person_id = person_id
+            self._post_greeting_person_name = name
+            self._post_greeting_prompt_used = False
 
             # Inject memories into LLM context for this session.
             _ctx = self._face_db.get_memories_as_context(person_id)
@@ -1168,6 +1221,9 @@ class StateMachine:
 
         # Face recognized — inject memory context for this person.
         person_id, name, _dist = result
+        self._post_greeting_person_id = person_id
+        self._post_greeting_person_name = name
+        self._post_greeting_prompt_used = False
         _ctx = self._face_db.get_memories_as_context(person_id)
         if _ctx:
             self._llm.set_person_context(_ctx)
@@ -1248,9 +1304,7 @@ class StateMachine:
         if not pending:
             return
         memory = pending[0]   # at most one follow-up per wake
-        followup = self._llm.generate_followup(
-            memory["value"], memory.get("created_at", "")
-        )
+        followup = self._build_memory_followup_line(person_id, memory)
         if not followup:
             return
         log.info("Wake: follow-up for memory id=%d: %r", memory["id"], followup)
@@ -1262,6 +1316,157 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
         self._face_db.mark_followed_up(memory["id"])
+
+    def _build_memory_followup_line(self, person_id: int, memory: dict) -> str:
+        """Return a deterministic follow-up line for recent plan memories."""
+        person = self._face_db.get_person(person_id)
+        name = person["name"] if person else "lifeform"
+        value = str(memory.get("value") or "").strip()
+        key = str(memory.get("key") or "")
+
+        if memory.get("category") == "plan" or key in {"today_plan", "weekend_plan"}:
+            summary = self._short_memory_summary(value)
+            pool = (
+                f"{name}, last time you told me about {summary}. How'd that little adventure go?",
+                f"Hey, {name}, did {summary} actually happen, or was that just optimistic fiction?",
+                f"{name}, I remember this plan about {summary}. Tell me whether it worked out or exploded.",
+            )
+            return _pick_no_repeat(pool, "plan_memory_followup")
+
+        return self._llm.generate_followup(value, memory.get("created_at", ""))
+
+    def _run_post_greeting_plan_prompt(self) -> tuple[str, State | None]:
+        """Ask a known person what they're doing, store the answer, and riff on it.
+
+        Returns:
+          ("answered", None) when a usable reply was heard,
+          ("no_answer", None) when both prompts timed out,
+          ("transition", State.X) when an interrupting command handled the flow.
+        """
+        person_id = self._post_greeting_person_id
+        name = self._post_greeting_person_name
+        if person_id is None or not name:
+            return "no_answer", None
+
+        prompts = (
+            self._build_plan_question(name),
+            _pick_no_repeat(_PLAN_QUESTION_NUDGES, "plan_question_nudge"),
+        )
+        self._post_greeting_prompt_used = True
+
+        for prompt in prompts:
+            log.info("Post-greeting prompt for %s: %r", name, prompt)
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(prompt)
+            except Exception:
+                log.exception("Post-greeting prompt: TTS error")
+            finally:
+                self._end_speech(servo_stop)
+
+            answer = self._listen_for_prompt_answer(config.WAKE_GOODBYE_TIMEOUT)
+            if not answer:
+                continue
+
+            cmd = parse(answer, allow_fuzzy=False)
+            if cmd is not None and cmd.action in {
+                "cancel", "program_shutdown", "os_shutdown", "sleep", "idle",
+            }:
+                log.info("Post-greeting prompt interrupted by command %r", cmd.action)
+                return "transition", self._execute_command(cmd, answer)
+
+            self._store_plan_memory(person_id, name, answer)
+            self._speak_plan_reply(answer)
+            return "answered", None
+
+        return "no_answer", None
+
+    def _build_plan_question(self, name: str) -> str:
+        """Return a day-appropriate plan question for a known person."""
+        weekday = date.today().weekday()
+        if weekday == 4:
+            pool = _PLAN_QUESTION_FRIDAY
+            key = "plan_question_friday"
+        elif weekday in (5, 6):
+            pool = _PLAN_QUESTION_WEEKEND
+            key = "plan_question_weekend"
+        else:
+            pool = _PLAN_QUESTION_WEEKDAY
+            key = "plan_question_weekday"
+        return _pick_no_repeat(pool, key).format(name=name)
+
+    def _listen_for_prompt_answer(self, timeout_seconds: float) -> str | None:
+        """Listen once for a prompted reply."""
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._wake_word.pause()
+        try:
+            return self._transcriber.transcribe(
+                wait_for_speech_seconds=timeout_seconds,
+                allow_short=False,
+            )
+        except Exception:
+            log.exception("Prompt answer transcription error")
+            return None
+        finally:
+            self._wake_word.resume()
+            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+
+    def _store_plan_memory(self, person_id: int, name: str, answer: str) -> None:
+        """Store a post-greeting plan/activity answer as a memory row."""
+        weekday = date.today().weekday()
+        key = "weekend_plan" if weekday >= 4 else "today_plan"
+        summary = self._summarize_plan_answer(answer)
+        follow_up_after = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+        value = f"said their plan was {summary}"
+
+        try:
+            self._face_db.add_memory(
+                person_id=person_id,
+                category="plan",
+                key=key,
+                value=value,
+                raw_quote=answer,
+                follow_up_after=follow_up_after,
+            )
+            log.info(
+                "Post-greeting memory stored for %s (person_id=%d): %r -> %r follow_up=%s",
+                name, person_id, answer, value, follow_up_after,
+            )
+        except Exception:
+            log.exception("Post-greeting prompt: failed to store plan memory")
+
+    def _speak_plan_reply(self, answer: str) -> None:
+        """Riff on the user's stated plan, then ask one follow-up question."""
+        summary = self._short_memory_summary(self._summarize_plan_answer(answer))
+        line = _pick_no_repeat(_PLAN_REPLY_LINES, "plan_reply").format(summary=summary)
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("Post-greeting prompt: TTS error on reply")
+        finally:
+            self._end_speech(servo_stop)
+
+    @staticmethod
+    def _summarize_plan_answer(answer: str) -> str:
+        """Keep a spoken plan compact enough for memory/follow-up reuse."""
+        text = answer.strip().rstrip(".!?")
+        if not text:
+            return "something mysterious"
+        if len(text) > 120:
+            text = text[:120].rstrip(",;: ")
+        return text
+
+    @staticmethod
+    def _short_memory_summary(value: str) -> str:
+        """Trim memory text into a phrase fit for a short question."""
+        text = value.strip().rstrip(".!?")
+        prefixes = ("said their plan was ", "plans to ", "is planning ")
+        lower = text.lower()
+        for prefix in prefixes:
+            if lower.startswith(prefix):
+                return text[len(prefix):].strip()
+        return text
 
     def _run_enrollment_interview(self, name: str) -> None:
         """Ask 5 random questions, store answers as memories, react to each.
