@@ -1971,6 +1971,12 @@ class StateMachine:
         elif action == "recall_name":
             return self._handle_recall_name()
 
+        elif action == "recall_memories":
+            self._handle_recall_memories(original_text)
+
+        elif action == "recall_preference":
+            self._handle_recall_preference(original_text)
+
         elif action == "rename_me":
             return self._handle_rename_me(original_text)
 
@@ -2549,6 +2555,218 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
         return None
+
+    # ------------------------------------------------------------------
+    # Recall memories helpers
+    # ------------------------------------------------------------------
+
+    _MEMORY_FILLERS: tuple[str, ...] = (
+        "Let me check my files.",
+        "Consulting my extensive dossier.",
+        "Pulling up what I have on you.",
+        "Checking my records. This may take a moment.",
+        "I have notes on you somewhere.",
+    )
+
+    def _recall_face_with_filler(self) -> tuple[int | None, str | None, str | None]:
+        """Shared setup for recall_memories / recall_preference.
+
+        Captures a frame, starts face recognition in background, speaks a filler
+        phrase to cover the latency, then returns (person_id, name, frame).
+        person_id and name are None when the face is not recognised.
+        """
+        if not self._face_recognizer.is_available():
+            return None, None, None
+
+        if self._camera.is_available():
+            _pose = self._prepare_camera_pose()
+            frame = self._camera.capture_frame()
+            self._restore_servo_pose(_pose)
+        else:
+            frame = None
+
+        face_result: list = [None]
+
+        def _identify() -> None:
+            if frame:
+                face_result[0] = self._face_recognizer.identify(
+                    frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+                )
+
+        face_thread = threading.Thread(
+            target=_identify, daemon=True, name="djr3x-face-identify"
+        )
+        face_thread.start()
+
+        filler = random.choice(self._MEMORY_FILLERS)
+        log.info("recall: filler %r", filler)
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(filler)
+        except Exception:
+            log.exception("recall: filler TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+        face_thread.join()
+        result = face_result[0]
+
+        if result is None:
+            return None, None, frame
+
+        person_id, name, distance = result
+        self._face_db.update_last_seen(person_id)
+        self._last_known_person_id = person_id
+        log.info("recall: recognised person_id=%d name=%r distance=%.3f", person_id, name, distance)
+        return person_id, name, frame
+
+    def _handle_recall_memories(self, original_text: str | None = None) -> None:
+        """Tell the person what Rex knows about them from stored memories."""
+        person_id, name, _frame = self._recall_face_with_filler()
+
+        if person_id is None:
+            line = (
+                "I do not have a file on you. "
+                "Come back when I know who you are."
+            )
+            log.info("recall_memories: face not recognised — speaking canned line")
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("recall_memories: TTS error (not recognised)")
+            finally:
+                self._end_speech(servo_stop)
+            return
+
+        memories_ctx = self._face_db.get_memories_as_context(person_id)
+
+        if not memories_ctx:
+            line = (
+                "I know your face. Beyond that you are a mystery. "
+                "Try talking to me more."
+            )
+            log.info("recall_memories: no memories stored for person_id=%d", person_id)
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("recall_memories: TTS error (no memories)")
+            finally:
+                self._end_speech(servo_stop)
+            return
+
+        # Generate a Rex-style summary of the stored memories via GPT.
+        summary = ""
+        try:
+            system_msg = (
+                f"You are Rex, the droid DJ at Oga's Cantina on Batuu. "
+                f"Summarize what you know about {name} in 2-3 sentences in your "
+                f"snarky cantina DJ style. Reference specific details. "
+                f"Here are your notes: {memories_ctx}. "
+                f"Make it feel like you have been paying attention even if you "
+                f"find it mildly annoying that you have."
+            )
+            response = self._llm._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": f"Tell me what you know about {name}."},
+                ],
+                max_tokens=100,
+                temperature=1.1,
+            )
+            summary = response.choices[0].message.content.strip()
+            log.info("recall_memories: summary for %r: %s", name, summary)
+        except Exception:
+            log.exception("recall_memories: GPT summary failed — using fallback")
+
+        if not summary:
+            summary = (
+                f"I know things about {name}. Interesting things. "
+                "That is all I am going to say about that."
+            )
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(summary)
+        except Exception:
+            log.exception("recall_memories: TTS error (summary)")
+        finally:
+            self._end_speech(servo_stop)
+
+    def _handle_recall_preference(self, original_text: str | None = None) -> None:
+        """Answer a specific preference question using stored memories."""
+        person_id, name, _frame = self._recall_face_with_filler()
+
+        if person_id is None:
+            line = (
+                "I do not have a file on you. "
+                "Come back when I know who you are."
+            )
+            log.info("recall_preference: face not recognised — speaking canned line")
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("recall_preference: TTS error (not recognised)")
+            finally:
+                self._end_speech(servo_stop)
+            return
+
+        memories_ctx = self._face_db.get_memories_as_context(person_id)
+        question = original_text or "what are my preferences"
+
+        # Build the GPT prompt — include a fallback instruction for when the
+        # specific preference is not on file so Rex stays in character.
+        system_msg = (
+            f"You are Rex, the droid DJ at Oga's Cantina on Batuu. "
+            f"Based on what you know about {name}, answer this question: {question}. "
+        )
+        if memories_ctx:
+            system_msg += (
+                f"Your notes: {memories_ctx}. "
+                f"Answer in Rex style, one sentence. "
+                f"If the specific preference is not in your notes, admit you do not know "
+                f"but make a joke about it — for example: 'I do not have that on file. "
+                f"You should have talked more during your intake interview.'"
+            )
+        else:
+            system_msg += (
+                "You have no notes on this person yet. "
+                "Tell them in Rex style that you do not have that information and they "
+                "should talk to you more. One sentence."
+            )
+
+        answer = ""
+        try:
+            response = self._llm._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": question},
+                ],
+                max_tokens=80,
+                temperature=1.1,
+            )
+            answer = response.choices[0].message.content.strip()
+            log.info("recall_preference: answer for %r: %s", name, answer)
+        except Exception:
+            log.exception("recall_preference: GPT call failed — using fallback")
+
+        if not answer:
+            answer = (
+                "I do not have that on file. "
+                "You should have talked more during your intake interview."
+            )
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(answer)
+        except Exception:
+            log.exception("recall_preference: TTS error")
+        finally:
+            self._end_speech(servo_stop)
 
     # ------------------------------------------------------------------
     # Music helpers

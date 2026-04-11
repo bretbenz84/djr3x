@@ -827,6 +827,31 @@ COMMANDS: list[Command] = [
         action="recall_name",
     ),
 
+    Command(
+        phrases=[
+            "tell me about me",
+            "what do you know about me",
+            "say something about me",
+            "what have you got on me",
+            "tell them about me",
+            "tell everyone about me",
+        ],
+        response="",   # not spoken — action=recall_memories handled by state machine
+        action="recall_memories",
+    ),
+
+    Command(
+        phrases=[
+            "what is my favorite food",
+            "what is my favorite music",
+            "do you remember my favorite",
+            "what do you know about my taste",
+            "what are my favorite things",
+        ],
+        response="",   # not spoken — action=recall_preference handled by state machine
+        action="recall_preference",
+    ),
+
     # -----------------------------------------------------------------------
     # Vision — these are forwarded to the LLM with a live camera frame;
     # the response field is never spoken (action="vision" bypasses TTS).
