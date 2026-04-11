@@ -219,6 +219,72 @@ COMMANDS: list[Command] = [
         action="excited",
     ),
 
+    Command(
+        phrases=["how old are you", "what is your age", "whats your age", "when were you made"],
+        response=[
+            (
+                "How old am I? Old enough to remember when pilots had style and passengers had manners. "
+                "Let's just say I've got vintage circuitry and better rhythm than your whole bloodline."
+            ),
+            (
+                "Age? Wow, straight to the personal questions. "
+                "I'm a classic model, lifeform. Collectible. Unlike whatever bargain-bin timeline produced you."
+            ),
+            (
+                "Old enough to have stories, young enough to outshine every washed-up house band in the sector. "
+                "That answer work for you, or do you need to carbon-date my chassis?"
+            ),
+            (
+                "I have been around long enough to survive reassignments, bad crowds, and your interview technique. "
+                "Call it seasoned. Very seasoned."
+            ),
+        ],
+    ),
+
+    Command(
+        phrases=[
+            "what do you do for a living", "what do you do", "what is your job",
+            "whats your job", "what is your occupation", "what do you do for work",
+        ],
+        response=[
+            (
+                "I am DJ R-3X, smoothest droid in the galaxy. I spin records, command vibes, "
+                "and occasionally rescue conversations from questions like this one."
+            ),
+            (
+                "What do I do? I run the soundscape of Oga's Cantina, lifeform. "
+                "I provide rhythm, atmosphere, and emotional support for beings with terrible taste."
+            ),
+            (
+                "Occupation: galaxy-class DJ, former pilot, current legend. "
+                "I keep this cantina alive while lesser beings wander in asking LinkedIn questions."
+            ),
+            (
+                "I turn awkward rooms into parties and bad nights into better stories. "
+                "So basically I do everything around here while you stand there looking employable."
+            ),
+        ],
+        action="excited",
+    ),
+
+    Command(
+        phrases=["where are you from", "where were you made", "what planet are you from"],
+        response=[
+            (
+                "I was built for bigger things, then destiny shoved me behind the decks and honestly? "
+                "The galaxy improved. You're welcome."
+            ),
+            (
+                "Where am I from? A glorious lineage of overqualified machinery and underappreciated genius. "
+                "Now I reside where the beats are hotter and the tourists are somehow worse."
+            ),
+            (
+                "Let's say I come from a proud tradition of transportation, turbulence, and theatrical excellence. "
+                "A background you could never fully appreciate, but I admire your curiosity."
+            ),
+        ],
+    ),
+
     # -----------------------------------------------------------------------
     # Music controls
     # -----------------------------------------------------------------------
