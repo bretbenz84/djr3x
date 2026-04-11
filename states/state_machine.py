@@ -148,6 +148,20 @@ _PLAN_SAME_DAY_FOLLOWUP_LINES: tuple[str, ...] = (
     "{name}, how's that whole {summary} situation treating you so far?",
 )
 
+_PROMPT_COMMAND_ACTIONS: set[str] = {
+    "cancel",
+    "program_shutdown",
+    "os_shutdown",
+    "sleep",
+    "idle",
+    "forget_me",
+    "wipe_memory",
+    "rename_me",
+    "recall_name",
+    "recall_memories",
+    "recall_preference",
+}
+
 _I_SPY_START_LINES: list[str] = [
     "I Spy? Ohhh, now we're playing preschool in a cantina. Fine. Try to keep up, lifeform.",
     "An I Spy round? Bold choice for someone with the visual instincts of a stormtrooper.",
@@ -1392,9 +1406,7 @@ class StateMachine:
                 continue
 
             cmd = parse(answer, allow_fuzzy=False)
-            if cmd is not None and cmd.action in {
-                "cancel", "program_shutdown", "os_shutdown", "sleep", "idle",
-            }:
+            if cmd is not None and cmd.action in _PROMPT_COMMAND_ACTIONS:
                 log.info("Post-greeting prompt interrupted by command %r", cmd.action)
                 return "transition", self._execute_command(cmd, answer)
 
@@ -1492,9 +1504,7 @@ class StateMachine:
             return "no_answer", None
 
         cmd = parse(answer, allow_fuzzy=False)
-        if cmd is not None and cmd.action in {
-            "cancel", "program_shutdown", "os_shutdown", "sleep", "idle",
-        }:
+        if cmd is not None and cmd.action in _PROMPT_COMMAND_ACTIONS:
             log.info("Post-greeting same-day follow-up interrupted by command %r", cmd.action)
             return "transition", self._execute_command(cmd, answer)
 
@@ -1534,9 +1544,7 @@ class StateMachine:
             return "no_answer", None
 
         cmd = parse(answer, allow_fuzzy=False)
-        if cmd is not None and cmd.action in {
-            "cancel", "program_shutdown", "os_shutdown", "sleep", "idle",
-        }:
+        if cmd is not None and cmd.action in _PROMPT_COMMAND_ACTIONS:
             log.info("Post-greeting memory follow-up interrupted by command %r", cmd.action)
             return "transition", self._execute_command(cmd, answer)
 
