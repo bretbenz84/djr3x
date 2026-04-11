@@ -98,21 +98,29 @@ class Transcriber:
             return
         try:
             import mlx_whisper  # type: ignore[import]
+            from huggingface_hub import snapshot_download  # type: ignore[import]
             log.info(
                 "Transcriber: loading mlx-whisper model %s …",
                 config.LOCAL_WHISPER_MODEL,
             )
-            self._mlx_model = mlx_whisper.load_models.load_model(
-                config.LOCAL_WHISPER_MODEL
+            # Resolve (and download if needed) the model to a local snapshot
+            # directory.  Storing this path means every subsequent transcribe()
+            # call passes a filesystem path rather than a HuggingFace repo name,
+            # so mlx_whisper skips the network revision check entirely.
+            self._mlx_model_path: str = snapshot_download(config.LOCAL_WHISPER_MODEL)
+            # Pre-load weights into MLX memory so the first utterance doesn't pay
+            # the model-init cost.
+            mlx_whisper.load_models.load_model(self._mlx_model_path)
+            log.info(
+                "Transcriber: mlx-whisper model loaded from %s", self._mlx_model_path
             )
-            log.info("Transcriber: mlx-whisper model loaded")
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "Transcriber: mlx-whisper unavailable (%s) — falling back to Whisper API",
                 exc,
             )
             self._use_local = False
-            self._mlx_model = None
+            self._mlx_model_path = ""
             self._client = OpenAI(
                 api_key=config.OPENAI_API_KEY,
                 timeout=config.OPENAI_TIMEOUT_SECONDS,
@@ -428,7 +436,10 @@ class Transcriber:
                 try:
                     result = mlx_whisper.transcribe(
                         tmp_path,
-                        path_or_hf_repo=config.LOCAL_WHISPER_MODEL,
+                        # Pass the local snapshot directory, not the HuggingFace
+                        # repo name — this skips the remote revision check so
+                        # every call uses the already-loaded in-memory weights.
+                        path_or_hf_repo=self._mlx_model_path,
                         language=config.WHISPER_LANGUAGE or None,
                     )
                     text = (result.get("text") or "").strip()
