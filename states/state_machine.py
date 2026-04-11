@@ -2132,6 +2132,13 @@ class StateMachine:
         servo setup and the mouth-trigger thread arm as late as possible —
         after any pre-speak logic and right before audio is queued.
         """
+        if cmd.action in {"program_shutdown", "os_shutdown"}:
+            log.info(
+                "Shutdown command matched (%s) — skipping command TTS and using shutdown sequence only",
+                cmd.action,
+            )
+            return self._dispatch_action(cmd.action, original_text)
+
         emotion = _action_to_emotion(cmd.action)
         response = cmd.get_response()
         if not response and not cmd.audio:
