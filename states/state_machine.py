@@ -702,7 +702,7 @@ class StateMachine:
                             self._play_return_to_idle_chime()
                         self._transition_to(next_state)
                         return
-                    if status == "answered":
+                    if status != "no_answer":
                         after_response = True
                         continue
 
