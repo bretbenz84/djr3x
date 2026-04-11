@@ -182,10 +182,15 @@ class StateMachine:
         # in front of the camera.  Cleared whenever we return to IDLE.
         self._last_wake_frame: str | None = None
 
-        # Greeting toggle — alternates between canned ("Hi There.mp3") and
-        # personalized (GPT-4o + camera) on successive wake word activations.
-        # False → canned first, then flips to True for personalized, and so on.
-        self._greeting_toggle: bool = False
+        # Session-greeting state — tracks who was greeted and how many times
+        # the wake word has fired since boot.  Used by the 5-case greeting logic:
+        #   _session_wake_count == 0   → Case 1 (first wake since boot)
+        #   _session_greeted_person_id → person_id set at first recognized greeting
+        #   _last_greeted_person_id    → most recently greeted person
+        # These are never reset mid-session; only re-initialized at __init__.
+        self._session_greeted_person_id: int | None = None
+        self._session_wake_count: int = 0
+        self._last_greeted_person_id: int | None = None
 
         # Per-day count of how many times each recognized person has woken Rex.
         # Used only for roast wording; resets automatically when the date changes.
@@ -851,188 +856,291 @@ class StateMachine:
             self._end_speech(servo_stop)
 
     def _play_wake_greeting(self) -> None:
-        """Greet the user on wake word.
+        """Greet the user on wake word activation.
 
-        Priority:
-          1. Face recognition available + camera available:
-             - KNOWN person  → personalised known-person greeting (no toggle consumed)
-             - UNKNOWN person → existing alternating canned/personalized path, then
-                               offer to learn their name
-          2. No face recognition → existing alternating canned/personalized path as before
+        Routes to one of five cases based on session state and face recognition:
 
-        Always completes (audio finishes and any name-learning exchange is done)
-        before returning so the caller can open the mic immediately afterwards.
+          Case 1 — First wake since boot: full recognition + personalized GPT greeting.
+          Case 2 — Same person as last greeted: occasional brief remark (25%) or silent.
+          Case 3 — Different known person: GPT handoff comment referencing previous person.
+          Case 4 — Unknown person: stranger snark line + enrollment flow.
+          Case 5 — No face detected (any wake): fully silent.
+
+        Always completes before returning so the caller can open the mic immediately.
         """
-        played_initial_wake_clip = self._play_initial_wake_clip()
-
+        # Capture frame first — used for both first and subsequent wakes.
         frame: str | None = None
         if self._camera.is_available():
             _pose = self._prepare_camera_pose()
             frame = self._camera.capture_frame()
             self._restore_servo_pose(_pose)
             if frame:
-                self._last_wake_frame = frame   # save for enrollment fallback
+                self._last_wake_frame = frame
 
-        # ------------------------------------------------------------------
-        # Try face recognition
-        # ------------------------------------------------------------------
-        if frame and self._face_recognizer.is_available():
-            n_people = len(self._face_db.list_people())
-            print(f"Face scan: {n_people} people in database")
+        is_first_wake = (self._session_wake_count == 0)
 
-            _SCANNING_LINES = [
-                "Hmmmmm... interesting. Lifeform identity scan complete.",
-                "Scanning... scanning... oh. It is you.",
-                "Identity scan in progress... calculating... scan complete.",
-                "Hold still... analyzing lifeform... done.",
-                "Running biometric scan... fascinating specimen.",
-            ]
-            _RECOGNITION_FILLER_LINES = [
-                "Uh... hang on... hang on... I'm looking...",
-                "Um... let's see... yeah... still processing...",
-                "Okay... okay... hold still... almost got it...",
-                "Hmmm... let's see here... give me a second...",
-                "Hang on... just a tiny second... thinking... thinking...",
-            ]
-            _NO_FACE_LINES = [
-                "Uh... I can't even see your face from here.",
-                "Hard to identify a lifeform when there is no lifeform in frame.",
-                "I would scan you, but your face is doing an excellent job of not being on camera.",
-                "No face detected. Very mysterious. Very unhelpful.",
-                "You want the full identity routine? First I need an actual face to look at.",
-            ]
+        if is_first_wake:
+            # Case 1: play initial clip then do full personalized greeting
+            self._play_initial_wake_clip()
+            self._play_first_wake_greeting(frame)
+        else:
+            # Cases 2–5: silent face scan, minimal speech
+            self._play_subsequent_wake_greeting(frame)
 
-            if n_people == 0:
-                # Empty database — definitely heading to enrollment.  Hide the
-                # 2-4 s dlib latency behind the scanning audio line by running
-                # face recognition and TTS concurrently.
-                face_result: list = [("no_face", None)]
+        self._session_wake_count += 1
 
-                def _identify_empty() -> None:
-                    face_result[0] = self._face_recognizer.identify_with_status(
-                        frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
-                    )
+    def _play_first_wake_greeting(self, frame: str | None) -> None:
+        """Case 1: first wake since boot — full face recognition + personalized greeting.
 
-                face_thread = threading.Thread(
-                    target=_identify_empty, daemon=True, name="djr3x-face-identify"
+        Known person  → GPT-4o roast by name + appearance + visit count.
+        Unknown face  → GPT-4o appearance roast + enrollment flow.
+        No face / no recognition → nothing (Hi There clip was already played).
+        """
+        if not (frame and self._face_recognizer.is_available()):
+            return
+
+        _RECOGNITION_FILLER_LINES = (
+            "Uh... hang on... hang on... I'm looking...",
+            "Um... let's see... yeah... still processing...",
+            "Okay... okay... hold still... almost got it...",
+            "Hmmm... let's see here... give me a second...",
+            "Hang on... just a tiny second... thinking... thinking...",
+        )
+
+        # Run recognition concurrently; if it takes >0.25 s play a filler line
+        # to hide the dlib latency rather than standing in silence.
+        face_result: list = [("no_face", None)]
+
+        def _identify() -> None:
+            face_result[0] = self._face_recognizer.identify_with_status(
+                frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+            )
+
+        face_thread = threading.Thread(
+            target=_identify, daemon=True, name="djr3x-face-identify"
+        )
+        face_thread.start()
+        face_thread.join(timeout=0.25)
+
+        if face_thread.is_alive():
+            filler = random.choice(_RECOGNITION_FILLER_LINES)
+            log.info("Wake greeting: first wake — face recognition filler %r", filler)
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak(filler)
+            except Exception:
+                log.exception("Wake greeting: first wake filler TTS error")
+            finally:
+                self._end_speech(servo_stop)
+
+        face_thread.join()
+        status, result = face_result[0]
+
+        # ---- Known person ------------------------------------------------
+        if result is not None:
+            person_id, name, _dist = result
+            self._face_db.update_last_seen(person_id)
+
+            today = date.today()
+            if today != self._recognized_today_date:
+                self._recognized_today_date = today
+                self._recognized_today_counts.clear()
+            bother_count = self._recognized_today_counts.get(person_id, 0) + 1
+            self._recognized_today_counts[person_id] = bother_count
+
+            self._last_known_person_id = person_id
+            self._session_greeted_person_id = person_id
+            self._last_greeted_person_id = person_id
+
+            log.info(
+                "Wake greeting: first wake — known person '%s' (visit count today=%d)",
+                name, bother_count,
+            )
+
+            # GPT-4o personalized greeting; hide latency behind holding clip.
+            greeting_result: list[str | None] = [None]
+
+            def _gen_known() -> None:
+                greeting_result[0] = self._greeter.generate_known_person_greeting(
+                    name, bother_count, frame
                 )
-                face_thread.start()
 
-                scanning_line = random.choice(_SCANNING_LINES)
-                log.info("Wake greeting: empty DB — playing scanning line concurrently — %r", scanning_line)
+            gen_thread = threading.Thread(
+                target=_gen_known, daemon=True, name="djr3x-greeter"
+            )
+            gen_thread.start()
+
+            _HOLDING_CLIP = config.ASSETS_DIR / "audio" / "This is your cap.mp3"
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                if _HOLDING_CLIP.exists():
+                    self._player.play_file(_HOLDING_CLIP)
+                gen_thread.join(timeout=15.0)
+                if greeting_result[0]:
+                    self._synthesizer.speak(greeting_result[0])
+            except Exception:
+                log.exception("Wake greeting: first wake known-person greeter error")
+                gen_thread.join(timeout=1.0)
+            finally:
+                self._end_speech(servo_stop)
+
+            if not greeting_result[0]:
+                log.info("Wake greeting: GPT failed — canned fallback for known person")
+                self._play_known_person_greeting(name, bother_count)
+            return
+
+        # ---- Unknown face ------------------------------------------------
+        if status in ("no_match", "db_empty"):
+            log.info("Wake greeting: first wake — unknown face, running appearance roast + enrollment")
+
+            # GPT-4o appearance-based roast; hide latency behind holding clip.
+            unknown_result: list[str | None] = [None]
+
+            def _gen_unknown() -> None:
+                unknown_result[0] = self._greeter.generate(frame)
+
+            gen_thread2 = threading.Thread(
+                target=_gen_unknown, daemon=True, name="djr3x-greeter"
+            )
+            gen_thread2.start()
+
+            _HOLDING_CLIP = config.ASSETS_DIR / "audio" / "This is your cap.mp3"
+            _CANNED_TTS = (
+                "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
+                "HEY HEY HEY! A lifeform! Bold of you to show up looking like THAT.",
+                "Oh, it's you. Oga's Cantina — where even the questionable guests are welcome!",
+                "Well well well, look what the Ronto dragged in. Welcome, I guess.",
+            )
+            _CANNED_AUDIO = config.ASSETS_DIR / "audio" / "Hi There.mp3"
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                if _HOLDING_CLIP.exists():
+                    self._player.play_file(_HOLDING_CLIP)
+                gen_thread2.join(timeout=15.0)
+                if unknown_result[0]:
+                    self._synthesizer.speak(unknown_result[0])
+            except Exception:
+                log.exception("Wake greeting: first wake unknown-face greeter error")
+                gen_thread2.join(timeout=1.0)
+            finally:
+                self._end_speech(servo_stop)
+
+            if not unknown_result[0]:
+                log.info("Wake greeting: GPT failed — canned fallback for unknown face")
                 servo_stop = self._begin_speech(emotion="excited")
                 try:
-                    self._synthesizer.speak(scanning_line)
+                    if _CANNED_AUDIO.exists():
+                        self._player.play_file(_CANNED_AUDIO)
+                        self._player.wait_for_speech(timeout=10.0)
+                    else:
+                        self._synthesizer.speak(random.choice(_CANNED_TTS))
                 except Exception:
-                    log.exception("Wake greeting: scanning line TTS error")
+                    log.exception("Wake greeting: first wake unknown-face canned fallback error")
                 finally:
                     self._end_speech(servo_stop)
 
-                face_thread.join()
-                status, result = face_result[0]
-                if status == "db_empty":
-                    print("Face scan: database empty — no comparison possible")
-                elif status == "no_face":
-                    print("Face scan: NO FACE DETECTED")
+            self._learn_new_person(frame)
 
-            else:
-                # Database has known people — run recognition without any scanning
-                # line so a recognised person gets an instant greeting.
-                face_result2: list = [("no_face", None)]
+        # ---- No face detected — Hi There clip already played; nothing more ----
 
-                def _identify_known() -> None:
-                    face_result2[0] = self._face_recognizer.identify_with_status(
-                        frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
-                    )
+    def _play_subsequent_wake_greeting(self, frame: str | None) -> None:
+        """Cases 2–5: a subsequent wake in the same session.
 
-                face_thread2 = threading.Thread(
-                    target=_identify_known, daemon=True, name="djr3x-face-identify"
-                )
-                face_thread2.start()
-                face_thread2.join(timeout=0.25)
-                if face_thread2.is_alive():
-                    filler_line = random.choice(_RECOGNITION_FILLER_LINES)
-                    log.info(
-                        "Wake greeting: face recognition still running — playing filler line — %r",
-                        filler_line,
-                    )
-                    servo_stop = self._begin_speech(emotion="excited")
-                    try:
-                        self._synthesizer.speak(filler_line)
-                    except Exception:
-                        log.exception("Wake greeting: filler-line TTS error")
-                    finally:
-                        self._end_speech(servo_stop)
-                face_thread2.join()
-                status, result = face_result2[0]
+        Runs face recognition silently (no filler phrases). Routes to:
+          Case 2 — same person: 25% chance of brief remark, otherwise silent.
+          Case 3 — different known person: GPT handoff comment.
+          Case 4 — unknown person: stranger snark + enrollment.
+          Case 5 — no face / no recognition: fully silent.
+        """
+        if not (frame and self._face_recognizer.is_available()):
+            # Case 5: no camera or face recognition unavailable
+            return
 
-                if status == "match" and result is not None:
-                    _pid, rname, rdist = result
-                    print(
-                        f"Face scan: RECOGNIZED {rname} (distance {rdist:.3f}, "
-                        f"threshold {config.FACE_RECOGNITION_TOLERANCE})"
-                    )
-                elif status == "no_match":
-                    print(
-                        f"Face scan: UNKNOWN (no match within threshold "
-                        f"{config.FACE_RECOGNITION_TOLERANCE} — see logs for closest)"
-                    )
-                    # Unknown person in a non-empty DB — play scanning line now as
-                    # a natural transition into the enrollment exchange.
-                    scanning_line = random.choice(_SCANNING_LINES)
-                    log.info("Wake greeting: unknown person — playing scanning line — %r", scanning_line)
-                    servo_stop = self._begin_speech(emotion="excited")
-                    try:
-                        self._synthesizer.speak(scanning_line)
-                    except Exception:
-                        log.exception("Wake greeting: scanning line TTS error")
-                    finally:
-                        self._end_speech(servo_stop)
-                elif status == "no_face":
-                    print("Face scan: NO FACE DETECTED")
+        _BRIEF_REMARKS = (
+            "Still here.",
+            "You again.",
+            "Back so soon.",
+            "Miss me?",
+            "Oh, it's you.",
+            "Again. Really.",
+            "You know I can see you, right.",
+            "I have not forgotten you are here.",
+        )
+        _STRANGER_LINES = (
+            "Oh look. A new lifeform has wandered in.",
+            "Well this is unexpected. A stranger appears.",
+            "I do not recognize you. Interesting.",
+            "New face detected. My database is judging you.",
+            "I have no record of you. That can change.",
+        )
 
-            if result is not None:
-                person_id, name, distance = result
-                self._face_db.update_last_seen(person_id)
-                today = date.today()
-                if today != self._recognized_today_date:
-                    self._recognized_today_date = today
-                    self._recognized_today_counts.clear()
-                bother_count = self._recognized_today_counts.get(person_id, 0) + 1
-                self._recognized_today_counts[person_id] = bother_count
-                self._last_known_person_id = person_id
-                self._play_known_person_greeting(name, bother_count)
-                return
+        # Silent recognition — no filler, no scanning commentary.
+        status, result = self._face_recognizer.identify_with_status(
+            frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+        )
 
-            if status == "no_face":
-                line = random.choice(_NO_FACE_LINES)
-                log.info("Wake greeting: no face detected — %r", line)
+        if result is None:
+            if status == "no_match":
+                # Case 4: unknown person — snark + enrollment
+                log.info("Wake greeting: case 4 — unknown face, running stranger snark + enrollment")
+                line = random.choice(_STRANGER_LINES)
+                servo_stop = self._begin_speech(emotion="excited")
+                try:
+                    self._synthesizer.speak(line)
+                except Exception:
+                    log.exception("Wake greeting: case 4 stranger-line TTS error")
+                finally:
+                    self._end_speech(servo_stop)
+                self._last_greeted_person_id = None   # enrollment is async; ID unavailable
+                self._learn_new_person(frame)
+            # else: no_face / db_empty / unavailable — Case 5, proceed silently
+            return
+
+        # Face recognized.
+        person_id, name, _dist = result
+
+        if person_id == self._last_greeted_person_id:
+            # Case 2: same person as last greeted
+            if random.random() < 0.25:
+                line = random.choice(_BRIEF_REMARKS)
+                log.info("Wake greeting: case 2 — same person '%s', brief remark %r", name, line)
                 servo_stop = self._begin_speech(emotion="neutral")
                 try:
                     self._synthesizer.speak(line)
                 except Exception:
-                    log.exception("Wake greeting: no-face TTS error")
+                    log.exception("Wake greeting: case 2 remark TTS error")
                 finally:
                     self._end_speech(servo_stop)
-                return
-
-            # Unknown face — fall through to the existing alternating path,
-            # then offer to learn the person's name.
-            log.info("Wake greeting: face detected but unknown — running standard greeting")
-            self._play_alternating_greeting(
-                frame,
-                suppress_canned_greeting=played_initial_wake_clip,
+            else:
+                log.info("Wake greeting: case 2 — same person '%s', silent", name)
+        else:
+            # Case 3: different known person than last greeted
+            log.info(
+                "Wake greeting: case 3 — new person '%s' (prev_id=%s)",
+                name, self._last_greeted_person_id,
             )
-            self._learn_new_person(frame)
-            return
+            prev_name: str | None = None
+            if self._last_greeted_person_id is not None:
+                prev_person = self._face_db.get_person(self._last_greeted_person_id)
+                if prev_person:
+                    prev_name = prev_person.get("name")
 
-        # ------------------------------------------------------------------
-        # No face recognition (or no camera frame) — existing alternating path
-        # ------------------------------------------------------------------
-        self._play_alternating_greeting(
-            frame,
-            suppress_canned_greeting=played_initial_wake_clip,
-        )
+            if prev_name:
+                handoff = self._greeter.generate_handoff(name, prev_name)
+                if handoff:
+                    servo_stop = self._begin_speech(emotion="excited")
+                    try:
+                        self._synthesizer.speak(handoff)
+                    except Exception:
+                        log.exception("Wake greeting: case 3 handoff TTS error")
+                    finally:
+                        self._end_speech(servo_stop)
+            else:
+                # No previous known person — brief canned known-person greeting
+                self._play_known_person_greeting(name, 1)
+
+            self._last_greeted_person_id = person_id
+            self._face_db.update_last_seen(person_id)
 
     def _play_known_person_greeting(self, name: str, bother_count: int) -> None:
         """Speak a personalised greeting for a recognised returning visitor."""
@@ -1066,76 +1174,6 @@ class StateMachine:
             self._synthesizer.speak(line)
         except Exception:
             log.exception("Wake greeting: known-person TTS error")
-        finally:
-            self._end_speech(servo_stop)
-
-    def _play_alternating_greeting(
-        self,
-        frame: str | None,
-        suppress_canned_greeting: bool = False,
-    ) -> None:
-        """Alternates between canned and personalized greetings, unchanged from before."""
-        do_personalized = self._greeting_toggle and self._camera.is_available() and frame
-        self._greeting_toggle = not self._greeting_toggle
-
-        if do_personalized:
-            log.info("Wake greeting: attempting personalized greeting")
-            _HOLDING_CLIP = config.ASSETS_DIR / "audio" / "This is your cap.mp3"
-            greeting_result: list[str | None] = [None]
-
-            def _generate_personalized() -> None:
-                if frame:
-                    greeting_result[0] = self._greeter.generate(frame)
-
-            greeter_thread = threading.Thread(
-                target=_generate_personalized,
-                daemon=True,
-                name="djr3x-greeter",
-            )
-            greeter_thread.start()
-
-            servo_stop = self._begin_speech(emotion="excited")
-            try:
-                if _HOLDING_CLIP.exists():
-                    self._player.play_file(_HOLDING_CLIP)
-                greeter_thread.join(timeout=15.0)
-                if greeting_result[0]:
-                    try:
-                        self._synthesizer.speak(greeting_result[0])
-                    except Exception:
-                        log.exception("Wake greeting: TTS error")
-            except Exception:
-                log.exception("Wake greeting: personalized path error")
-                greeter_thread.join(timeout=1.0)
-            finally:
-                self._end_speech(servo_stop)
-
-            if greeting_result[0]:
-                return
-            log.info("Wake greeting: personalized path failed — falling back to canned")
-
-        # Canned greeting
-        if suppress_canned_greeting:
-            log.info("Wake greeting: canned clip already played earlier — skipping replay")
-            return
-
-        _CANNED_AUDIO = config.ASSETS_DIR / "audio" / "Hi There.mp3"
-        _CANNED_TTS = [
-            "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
-            "HEY HEY HEY! A lifeform! Bold of you to show up looking like THAT.",
-            "Oh, it's you. Oga's Cantina — where even the questionable guests are welcome!",
-            "Well well well, look what the Ronto dragged in. Welcome, I guess.",
-            "HEY! You actually came back! I honestly didn't think you would. Impressed.",
-        ]
-        servo_stop = self._begin_speech(emotion="excited")
-        try:
-            if _CANNED_AUDIO.exists():
-                self._player.play_file(_CANNED_AUDIO)
-                self._player.wait_for_speech(timeout=10.0)
-            else:
-                self._synthesizer.speak(random.choice(_CANNED_TTS))
-        except Exception:
-            log.exception("Wake greeting: canned greeting error")
         finally:
             self._end_speech(servo_stop)
 

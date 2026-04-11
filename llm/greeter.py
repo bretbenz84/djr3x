@@ -204,3 +204,102 @@ class Greeter:
             temperature=1.1,
         )
         return response.choices[0].message.content.strip()
+
+    def generate_known_person_greeting(
+        self, name: str, visit_count: int, image_b64: str
+    ) -> str:
+        """Return a personalized Rex roast for a recognized person at session start.
+
+        Incorporates their name, visible appearance, and today's visit count so
+        the greeting adjusts from warm welcome (first visit) to exasperated
+        affection (many visits).
+
+        Returns "" on any API error so the caller can fall back to a canned line.
+        """
+        try:
+            description = self._describe(image_b64)
+        except Exception:
+            log.exception("Greeter: known_person_greeting description step failed")
+            return ""
+
+        if not description:
+            log.warning("Greeter: known_person_greeting empty description — falling back")
+            return ""
+
+        log.info("Greeter known_person_greeting saw: %s", description)
+
+        try:
+            roast = self._roast_known_person(name, visit_count, description)
+        except Exception:
+            log.exception("Greeter: known_person_greeting roast step failed")
+            return ""
+
+        log.info("Greeter known_person_greeting generated: %s", roast)
+        return roast
+
+    def _roast_known_person(self, name: str, visit_count: int, description: str) -> str:
+        """Generate a roast for a recognized person incorporating their visit count."""
+        if visit_count <= 1:
+            visit_note = f"This is {name}'s first greeting of the day."
+        elif visit_count < 5:
+            visit_note = (
+                f"{name} has activated Rex {visit_count} times today already — "
+                f"the persistence is noted."
+            )
+        else:
+            visit_note = (
+                f"{name} has triggered Rex {visit_count} times today. "
+                f"The commitment is both impressive and deeply concerning."
+            )
+        response = self._client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": config.RECALL_NAME_ROAST_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Person's name: {name}\n"
+                        f"Visit context: {visit_note}\n"
+                        f"Appearance: {description}"
+                    ),
+                },
+            ],
+            max_tokens=80,
+            temperature=1.1,
+        )
+        return response.choices[0].message.content.strip()
+
+    def generate_handoff(self, new_name: str, prev_name: str) -> str:
+        """Return a snarky Rex remark welcoming new_name after prev_name was greeted.
+
+        Used in Case 3 when a different known person activates Rex. Rex makes a
+        one-sentence comment to new_name that references prev_name.
+
+        Returns "" on any API error.
+        """
+        try:
+            response = self._client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f'You are DJ R-3X ("Rex"), the droid DJ at Oga\'s Cantina on Batuu.\n'
+                            f"{prev_name} just stepped aside. {new_name} is stepping up.\n"
+                            f"Generate ONE punchy Rex-style remark TO {new_name} that references "
+                            f"{prev_name} — for example ask what they think of them, comment on "
+                            f"the transition, or make a snarky observation about the switch.\n"
+                            f"Max one sentence. Warm cantina-DJ energy. "
+                            f"No written sound effects. Stay in character as Rex."
+                        ),
+                    },
+                ],
+                max_tokens=60,
+                temperature=1.1,
+            )
+            result = response.choices[0].message.content.strip()
+            log.info("Greeter handoff generated: %s", result)
+            return result
+        except Exception:
+            log.exception("Greeter: handoff failed")
+            return ""
