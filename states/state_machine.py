@@ -1112,7 +1112,22 @@ class StateMachine:
                 finally:
                     self._end_speech(servo_stop)
             else:
-                log.info("Wake greeting: case 2 — same person '%s', silent", name)
+                _ACK_LINES = (
+                    "Yeah.",
+                    "Mm.",
+                    "What.",
+                    "Go ahead.",
+                    "Listening.",
+                )
+                ack = random.choice(_ACK_LINES)
+                log.info("Wake greeting: case 2 — same person '%s', ack %r", name, ack)
+                servo_stop = self._begin_speech(emotion="neutral")
+                try:
+                    self._synthesizer.speak(ack)
+                except Exception:
+                    log.exception("Wake greeting: case 2 ack TTS error")
+                finally:
+                    self._end_speech(servo_stop)
         else:
             # Case 3: different known person than last greeted
             log.info(
