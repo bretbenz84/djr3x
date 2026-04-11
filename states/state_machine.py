@@ -1113,13 +1113,18 @@ class StateMachine:
                     self._end_speech(servo_stop)
             else:
                 _ACK_LINES = (
-                    "Yeah.",
-                    "Mm.",
-                    "What.",
-                    "Go ahead.",
                     "Listening.",
+                    "You rang.",
+                    "Ugh. You again.",
+                    "What now.",
+                    "Go ahead.",
+                    "Still here.",
+                    "Yeah?",
+                    "Make it quick.",
+                    "Oh 'tis you.",
+                    "Speak.",
                 )
-                ack = random.choice(_ACK_LINES)
+                ack = _pick_no_repeat(_ACK_LINES, "case2_ack")
                 log.info("Wake greeting: case 2 — same person '%s', ack %r", name, ack)
                 servo_stop = self._begin_speech(emotion="neutral")
                 try:
