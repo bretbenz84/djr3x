@@ -499,7 +499,7 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
-        phrases=["what can you do", "help", "what do you do",
+        phrases=["what can you do", "help",
                  "what are your commands"],
         response=[
             (
