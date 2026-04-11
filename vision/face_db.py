@@ -47,6 +47,21 @@ CREATE TABLE IF NOT EXISTS face_encodings (
 );
 """
 
+_CREATE_MEMORIES = """
+CREATE TABLE IF NOT EXISTS memories (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id        INTEGER REFERENCES people(id) ON DELETE CASCADE,
+    category         TEXT,
+    key              TEXT,
+    value            TEXT,
+    raw_quote        TEXT,
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at       TIMESTAMP,
+    follow_up_after  TIMESTAMP,
+    followed_up      BOOLEAN DEFAULT FALSE
+);
+"""
+
 
 class FaceDB:
     """SQLite-backed store for known-person face encodings."""
@@ -73,6 +88,7 @@ class FaceDB:
         with self._conn:
             self._conn.execute(_CREATE_PEOPLE)
             self._conn.execute(_CREATE_ENCODINGS)
+            self._conn.execute(_CREATE_MEMORIES)
 
     def _log_startup_stats(self) -> None:
         """Log people/encoding counts so we can confirm the DB persisted correctly."""
@@ -250,6 +266,98 @@ class FaceDB:
             self._conn.execute("DELETE FROM face_encodings")
             self._conn.execute("DELETE FROM people")
         log.info("FaceDB: deleted all people and encodings")
+
+    # ------------------------------------------------------------------
+    # Memory API
+    # ------------------------------------------------------------------
+
+    def add_memory(
+        self,
+        person_id: int,
+        category: str,
+        key: str,
+        value: str,
+        raw_quote: str,
+        expires_at: Optional[str] = None,
+        follow_up_after: Optional[str] = None,
+    ) -> int:
+        """Insert a new memory for a person. Returns the new memory id."""
+        with self._conn:
+            cur = self._conn.execute(
+                """INSERT INTO memories
+                   (person_id, category, key, value, raw_quote, expires_at, follow_up_after)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (person_id, category, key, value, raw_quote, expires_at, follow_up_after),
+            )
+        memory_id: int = cur.lastrowid  # type: ignore[assignment]
+        log.info(
+            "FaceDB: added memory for person_id=%d [%s/%s]: %r (id=%d)",
+            person_id, category, key, value, memory_id,
+        )
+        return memory_id
+
+    def get_memories(self, person_id: int) -> list[dict]:
+        """Return all non-expired memories for a person, newest first."""
+        rows = self._conn.execute(
+            """SELECT id, category, key, value, raw_quote, created_at,
+                      expires_at, follow_up_after, followed_up
+               FROM memories
+               WHERE person_id = ?
+                 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+               ORDER BY created_at DESC""",
+            (person_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_pending_followups(self, person_id: int) -> list[dict]:
+        """Return memories whose follow_up_after time has passed and haven't been asked."""
+        rows = self._conn.execute(
+            """SELECT id, category, key, value, raw_quote, created_at,
+                      expires_at, follow_up_after
+               FROM memories
+               WHERE person_id = ?
+                 AND follow_up_after IS NOT NULL
+                 AND follow_up_after <= CURRENT_TIMESTAMP
+                 AND followed_up = FALSE
+                 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+               ORDER BY follow_up_after ASC""",
+            (person_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_followed_up(self, memory_id: int) -> None:
+        """Mark a memory as having been followed up on."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE memories SET followed_up = TRUE WHERE id = ?", (memory_id,)
+            )
+        log.debug("FaceDB: marked memory id=%d as followed up", memory_id)
+
+    def get_memories_as_context(self, person_id: int) -> str:
+        """Return a single formatted string of all memories suitable for a GPT system prompt.
+
+        Example: "Brett likes Italian food. Brett has a dog named Max."
+        Returns "" if no memories exist.
+        """
+        person = self.get_person(person_id)
+        if not person:
+            return ""
+        name = person["name"]
+        memories = self.get_memories(person_id)
+        if not memories:
+            return ""
+        sentences: list[str] = []
+        for m in memories:
+            value = m["value"].strip()
+            if not value:
+                continue
+            # Prepend person's name if the sentence doesn't already start with it.
+            if not value.lower().startswith(name.lower()):
+                value = f"{name} {value}"
+            if not value.endswith("."):
+                value += "."
+            sentences.append(value)
+        return " ".join(sentences)
 
     def close(self) -> None:
         self._conn.close()

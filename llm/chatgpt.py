@@ -18,6 +18,7 @@ History management:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Iterator, Optional
@@ -169,6 +170,10 @@ class ChatGPTClient:
 
         self._history: list[dict[str, str]] = []
 
+        # Injected memory context for the currently recognized person.
+        # Prepended to the system prompt when set; cleared on IDLE.
+        self._person_context: str = ""
+
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -234,13 +239,26 @@ class ChatGPTClient:
         accumulated: list[str] = []
         first_token_logged = False
         try:
+            # Build effective system message — prepend person memory context when set.
+            if self._person_context:
+                effective_system: dict[str, str] = {
+                    "role": "system",
+                    "content": (
+                        f"Here is what you know about the person you are talking to: "
+                        f"{self._person_context}\n\n"
+                        + self._system_message["content"]
+                    ),
+                }
+            else:
+                effective_system = self._system_message
+
             # Local Ollama models rely on the system prompt to constrain
             # response length; a hard token cap causes mid-sentence truncation
             # on small models like llama3.2:1b.  Cloud calls keep the cap as
             # a safety net.  Vision calls are always cloud (image is truthy).
             create_kwargs: dict = {
                 "model": model,
-                "messages": [self._system_message] + self._history[:-1] + [user_message],
+                "messages": [effective_system] + self._history[:-1] + [user_message],
                 "stream": True,
                 "temperature": 1.05,
             }
@@ -292,6 +310,163 @@ class ChatGPTClient:
     def history_turns(self) -> int:
         """Number of complete user/assistant exchange pairs in history."""
         return len(self._history) // 2
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def set_person_context(self, memories_string: str) -> None:
+        """Inject a memory summary for the current person into every system prompt."""
+        self._person_context = memories_string
+        log.debug("ChatGPT: person context set (%d chars)", len(memories_string))
+
+    def clear_person_context(self) -> None:
+        """Remove the injected memory context (called on IDLE entry)."""
+        self._person_context = ""
+        log.debug("ChatGPT: person context cleared")
+
+    # ------------------------------------------------------------------
+    # Utility — structured one-shot calls (always use cloud OpenAI for
+    # reliable JSON output; never stream; not added to conversation history)
+    # ------------------------------------------------------------------
+
+    def extract_memory(self, question: str, answer: str) -> dict | None:
+        """Extract a structured memory from a Q&A exchange.
+
+        Returns a dict with keys: category, key, value, expires_at,
+        follow_up_after — or None on any error.
+        """
+        from datetime import date
+        today = date.today().isoformat()
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            f"Today's date is {today}. "
+                            "Extract a memory from this answer. Return JSON with keys: "
+                            "category (one of: preference/event/plan/fact/relationship), "
+                            "key (snake_case label, e.g. favorite_food), "
+                            "value (clean one-sentence summary), "
+                            "expires_at (ISO-8601 date if time-sensitive, else null), "
+                            "follow_up_after (ISO-8601 date one day after a planned event, else null)."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question asked: {question}\nAnswer: {answer}",
+                    },
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=150,
+                temperature=0.2,
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception:
+            log.exception("extract_memory: failed")
+            return None
+
+    def react_to_answer(self, question: str, answer: str) -> str:
+        """Return a short Rex-style one-sentence reaction to an enrollment answer.
+
+        Always uses cloud OpenAI for speed and consistency.
+        Returns "" on any error.
+        """
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are DJ R-3X ('Rex'), the snarky cantina droid DJ. "
+                            "React to this answer in ONE short, punchy sentence. "
+                            "Warm, affectionate roast energy. No asterisks. No sound effects."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {question}\nAnswer: {answer}",
+                    },
+                ],
+                max_tokens=60,
+                temperature=1.1,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception:
+            log.exception("react_to_answer: failed")
+            return ""
+
+    def check_memorable(self, message: str) -> dict | None:
+        """Check whether a conversational message contains a memorable fact/preference/plan.
+
+        Returns dict with 'memorable' bool key (plus memory fields if True),
+        or None on error.
+        """
+        from datetime import date
+        today = date.today().isoformat()
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            f"Today's date is {today}. "
+                            "Does this message contain a memorable fact, preference, plan, or event "
+                            "worth storing for future reference? "
+                            'If yes return JSON: {"memorable": true, "category": ..., "key": ..., '
+                            '"value": ..., "expires_at": ..., "follow_up_after": ...}. '
+                            'If no return {"memorable": false}. '
+                            "category: preference/event/plan/fact/relationship. "
+                            "key: snake_case. value: clean one-sentence summary. "
+                            "expires_at: ISO date if time-sensitive else null. "
+                            "follow_up_after: ISO date one day after a planned event else null."
+                        ),
+                    },
+                    {"role": "user", "content": f"Message: {message}"},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=150,
+                temperature=0.1,
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception:
+            log.exception("check_memorable: failed")
+            return None
+
+    def generate_followup(self, memory_value: str, created_at: str) -> str:
+        """Generate a Rex-style follow-up question about a stored memory.
+
+        Returns "" on any error.
+        """
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are DJ R-3X ('Rex'), the snarky cantina droid DJ. "
+                            "Ask a natural follow-up question about this past event or plan "
+                            "in Rex's snarky DJ style. One sentence only. "
+                            "No sound effects. No asterisks. Stay in character."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Past memory: {memory_value} (recorded on {created_at})",
+                    },
+                ],
+                max_tokens=60,
+                temperature=1.1,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception:
+            log.exception("generate_followup: failed")
+            return ""
 
     # ------------------------------------------------------------------
     # Internal

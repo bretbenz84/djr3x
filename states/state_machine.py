@@ -804,6 +804,7 @@ class StateMachine:
         if new_state in (State.IDLE, State.SLEEP):
             self._last_known_person_id = None
             self._last_wake_frame = None
+            self._llm.clear_person_context()
             # Global mouth safety: guarantee mouth is off whenever Rex returns
             # to IDLE or SLEEP, regardless of what the LED state machine thinks.
             self._leds.stop_mouth()
@@ -963,6 +964,11 @@ class StateMachine:
             self._session_greeted_person_id = person_id
             self._last_greeted_person_id = person_id
 
+            # Inject memories into LLM context for this session.
+            _ctx = self._face_db.get_memories_as_context(person_id)
+            if _ctx:
+                self._llm.set_person_context(_ctx)
+
             log.info(
                 "Wake greeting: first wake — known person '%s' (visit count today=%d)",
                 name, bother_count,
@@ -995,6 +1001,8 @@ class StateMachine:
             if not greeting_result[0]:
                 log.info("Wake greeting: GPT failed — canned fallback for known person")
                 self._play_known_person_greeting(name, bother_count)
+
+            self._maybe_speak_followup(person_id)
             return
 
         # ---- Unknown face ------------------------------------------------
@@ -1096,8 +1104,11 @@ class StateMachine:
             # else: no_face / db_empty / unavailable — Case 5, proceed silently
             return
 
-        # Face recognized.
+        # Face recognized — inject memory context for this person.
         person_id, name, _dist = result
+        _ctx = self._face_db.get_memories_as_context(person_id)
+        if _ctx:
+            self._llm.set_person_context(_ctx)
 
         if person_id == self._last_greeted_person_id:
             # Case 2: same person as last greeted
@@ -1133,6 +1144,7 @@ class StateMachine:
                     log.exception("Wake greeting: case 2 ack TTS error")
                 finally:
                     self._end_speech(servo_stop)
+            self._maybe_speak_followup(person_id)
         else:
             # Case 3: different known person than last greeted
             log.info(
@@ -1162,6 +1174,137 @@ class StateMachine:
 
             self._last_greeted_person_id = person_id
             self._face_db.update_last_seen(person_id)
+            self._maybe_speak_followup(person_id)
+
+    def _maybe_speak_followup(self, person_id: int) -> None:
+        """If a pending follow-up exists for this person, ask it and mark it done."""
+        try:
+            pending = self._face_db.get_pending_followups(person_id)
+        except Exception:
+            log.exception("_maybe_speak_followup: DB error")
+            return
+        if not pending:
+            return
+        memory = pending[0]   # at most one follow-up per wake
+        followup = self._llm.generate_followup(
+            memory["value"], memory.get("created_at", "")
+        )
+        if not followup:
+            return
+        log.info("Wake: follow-up for memory id=%d: %r", memory["id"], followup)
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(followup)
+        except Exception:
+            log.exception("Wake: follow-up TTS error")
+        finally:
+            self._end_speech(servo_stop)
+        self._face_db.mark_followed_up(memory["id"])
+
+    def _run_enrollment_interview(self, name: str) -> None:
+        """Ask 5 random questions, store answers as memories, react to each.
+
+        Called after a new person is enrolled.  Guards against shutdown events
+        between questions.  Memories are stored under self._last_greeted_person_id
+        which the background enrollment thread sets once the DB write completes.
+        """
+        if not config.ENROLLMENT_INTERVIEW_ENABLED:
+            return
+
+        _QUESTION_POOL = (
+            "What kind of music do you like?",
+            "What is your favorite food?",
+            "Do you have any pets? What are their names?",
+            "What do you do for work?",
+            "Where are you from originally?",
+            "Do you have a favorite Star Wars character?",
+            "What are you up to this weekend?",
+            "What is your favorite drink?",
+            "Do you have any kids?",
+            "What is your favorite movie?",
+        )
+        _CLOSING_LINES = (
+            "Good. I will file that away. Do not expect me to use it wisely.",
+            "Excellent. All noted. I make no promises about how I use this.",
+            "Logged. You have just made me significantly more dangerous at small talk.",
+            "Filed. Somewhere in my databanks, beneath every cantina song ever written.",
+        )
+
+        questions = random.sample(_QUESTION_POOL, 5)
+
+        for question in questions:
+            if self._shutdown_event.is_set():
+                return
+
+            # Ask the question.
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak(question)
+            except Exception:
+                log.exception("Enrollment interview: TTS error asking %r", question)
+            finally:
+                self._end_speech(servo_stop)
+
+            # Listen for the answer.
+            self._leds.set_head_effect(config.LED_CMD_LISTENING)
+            self._wake_word.pause()
+            try:
+                answer = self._transcriber.transcribe(
+                    wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
+                    allow_short=False,
+                )
+            except Exception:
+                log.exception("Enrollment interview: transcription error")
+                answer = None
+            finally:
+                self._wake_word.resume()
+            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+
+            if not answer:
+                log.info("Enrollment interview: no answer for %r — skipping", question)
+                continue
+
+            log.info("Enrollment interview: Q=%r  A=%r", question, answer)
+
+            # Store memory (keyed by person_id from enrollment thread).
+            person_id = self._last_greeted_person_id
+            if person_id is not None:
+                memory_data = self._llm.extract_memory(question, answer)
+                if memory_data:
+                    try:
+                        self._face_db.add_memory(
+                            person_id=person_id,
+                            category=memory_data.get("category", "fact"),
+                            key=memory_data.get("key", "unknown"),
+                            value=memory_data.get("value", answer[:200]),
+                            raw_quote=answer,
+                            expires_at=memory_data.get("expires_at"),
+                            follow_up_after=memory_data.get("follow_up_after"),
+                        )
+                    except Exception:
+                        log.exception("Enrollment interview: failed to store memory")
+
+            # React to the answer before moving to next question.
+            reaction = self._llm.react_to_answer(question, answer)
+            if reaction:
+                servo_stop = self._begin_speech(emotion="excited")
+                try:
+                    self._synthesizer.speak(reaction)
+                except Exception:
+                    log.exception("Enrollment interview: TTS error reacting")
+                finally:
+                    self._end_speech(servo_stop)
+
+        # Closing line.
+        if not self._shutdown_event.is_set():
+            closing = random.choice(_CLOSING_LINES)
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak(closing)
+            except Exception:
+                log.exception("Enrollment interview: TTS error closing")
+            finally:
+                self._end_speech(servo_stop)
 
     def _play_known_person_greeting(self, name: str, bother_count: int) -> None:
         """Speak a personalised greeting for a recognised returning visitor."""
@@ -1385,6 +1528,10 @@ class StateMachine:
                         log.exception("Wake greeting: enrollment handoff TTS error")
                     finally:
                         self._end_speech(servo_stop)
+
+        # Enrollment interview — ask a few questions and store memories.
+        # Runs after welcome + handoff so the conversation flows naturally.
+        self._run_enrollment_interview(name)
 
     # ------------------------------------------------------------------
     # State — SLEEP
@@ -1710,6 +1857,38 @@ class StateMachine:
             else:
                 # Exception before _begin_speech — ensure wake word not stuck suppressed.
                 self._wake_word.suppressed = False
+
+        # Part 5 — passive memory extraction: silently check if the user's
+        # message is worth remembering.  Runs in a background thread so it
+        # never delays the conversation.
+        person_id = self._last_known_person_id
+        if person_id is not None and text:
+            _text_snapshot = text  # capture for closure
+
+            def _passive_extract() -> None:
+                try:
+                    data = self._llm.check_memorable(_text_snapshot)
+                    if data and data.get("memorable"):
+                        self._face_db.add_memory(
+                            person_id=person_id,
+                            category=data.get("category", "fact"),
+                            key=data.get("key", "unknown"),
+                            value=data.get("value", _text_snapshot[:200]),
+                            raw_quote=_text_snapshot,
+                            expires_at=data.get("expires_at"),
+                            follow_up_after=data.get("follow_up_after"),
+                        )
+                        log.info(
+                            "Passive memory: stored for person_id=%d — %s",
+                            person_id, data.get("value"),
+                        )
+                except Exception:
+                    log.exception("Passive memory extraction failed")
+
+            threading.Thread(
+                target=_passive_extract, daemon=True, name="djr3x-memory"
+            ).start()
+
         return None
 
     # ------------------------------------------------------------------
@@ -2277,6 +2456,9 @@ class StateMachine:
             person_id, name, distance = result
             self._face_db.update_last_seen(person_id)
             self._last_known_person_id = person_id
+            memories_ctx = self._face_db.get_memories_as_context(person_id)
+            if memories_ctx:
+                self._llm.set_person_context(memories_ctx)
             log.info("recall_name: recognised person_id=%d name=%r distance=%.3f", person_id, name, distance)
 
             roast = self._greeter.generate_recall_roast(name, frame) if frame else ""

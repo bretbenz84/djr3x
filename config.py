@@ -249,7 +249,7 @@ TRANSCRIBE_SPEECH_THRESHOLD_MIN    = int(_optional("TRANSCRIBE_SPEECH_THRESHOLD_
 TRANSCRIBE_SPEECH_THRESHOLD_MAX    = int(_optional("TRANSCRIBE_SPEECH_THRESHOLD_MAX",    "800"))  # ceiling — noisy room can't silence Rex
 TRANSCRIBE_MIN_WHISPER_SECONDS     = float(_optional("TRANSCRIBE_MIN_WHISPER_SECONDS",   "0.5"))  # skip normal-path Whisper calls for ultra-short clips
 TRANSCRIBE_MIN_VOICED_CHUNKS       = int(_optional("TRANSCRIBE_MIN_VOICED_CHUNKS",       "5"))    # minimum above-threshold chunks before a normal-path clip is worth transcribing
-SILENCE_DURATION             = 1.2  # seconds of silence to end capture
+SILENCE_DURATION             = 1.0  # seconds of silence to end capture
 MAX_RECORD_SECONDS           = 12.0 # hard cap on a single utterance
 
 # ---------------------------------------------------------------------------
@@ -433,6 +433,12 @@ FACE_RECOGNITION_TOLERANCE = float(_optional("FACE_RECOGNITION_TOLERANCE", "0.6"
 # development — Ctrl-C (and even the voice command) will exit Python cleanly
 # but will NOT run `sudo shutdown -h now`.
 ENABLE_OS_SHUTDOWN: bool = _optional("ENABLE_OS_SHUTDOWN", "").lower() in ("1", "true", "yes")
+
+# When True, Rex runs a 5-question interview after enrolling a new person and
+# stores the answers as persistent memories in the face DB.
+ENROLLMENT_INTERVIEW_ENABLED: bool = _optional(
+    "ENROLLMENT_INTERVIEW_ENABLED", "true"
+).lower() not in ("0", "false", "no")
 
 # ---------------------------------------------------------------------------
 # LLM — recall_name roast prompt
