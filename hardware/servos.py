@@ -669,11 +669,10 @@ class ServoController:
                 ch = random.choice(config.IDLE_HEAD_CHANNELS)
 
                 if ch == config.SERVO_HEAD_LIFT:
-                    # Bias toward raised head so faces at normal/tall height
-                    # are more likely to be in frame for tracking and recognition.
-                    # Range is [neutral, max] — level to fully raised, never drooping.
-                    idle_lo = config.SERVO_CHANNELS[1]["neutral"]   # 6000 — head level
-                    idle_hi = config.SERVO_CHANNELS[1]["max"]       # 7744 — head up
+                    # Full range so Rex scans all heights while idle and the head
+                    # tracker can pick up anyone — tall adults and short children alike.
+                    idle_lo = config.SERVO_CHANNELS[1]["min"]   # 1984 — head down
+                    idle_hi = config.SERVO_CHANNELS[1]["max"]   # 7744 — head up
                 else:
                     # Neck: middle 60% of effective range for lazy turns
                     lo, hi    = self._effective_limits(ch)

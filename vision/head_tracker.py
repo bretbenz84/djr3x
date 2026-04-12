@@ -13,15 +13,16 @@ Tracking geometry
     Face at frame-centre (x=frame_w/2)  → neck NEUTRAL
     Face at frame-right  (x=frame_w)    → neck MAX (9984 qµs) — turns right
 
-  Y axis (headlift, ch 1) — raises head to follow face height:
+  Y axis (headlift, ch 1) — follows face height across full range:
     Face at top of frame    (y=0)          → headlift MAX (7744) — head up
-    Face at bottom of frame (y=frame_h)    → headlift NEUTRAL (6000) — head level
-    Never goes below neutral during tracking — only raises head, never lowers it.
+    Face at bottom of frame (y=frame_h)    → headlift MIN (1984) — head down
+    Full linear mapping so Rex follows tall adults up and short children down.
 
-  Y axis (headtilt, ch 2) — subtle tilt only:
-    Headtilt is INVERTED — lower qµs = head tilts up.
-    Range is clamped to ±15 % of full tilt span from neutral so height
-    differences produce only a small, natural-looking tilt.
+  Y axis (headtilt, ch 2) — tilts with face height (inverted channel):
+    Headtilt is INVERTED — lower qµs = head tilts up, higher = tilts down.
+    Face at top of frame    → tilt_lo (neutral − 400 = 3920) — tilts up
+    Face at bottom of frame → tilt_hi (neutral + 400 = 4720) — tilts down
+    Clamped within physical servo limits [3904, 5504].
 
 Thread model
 ------------
@@ -101,24 +102,27 @@ class HeadTracker:
         self._neck_max:     int = _neck["max"]
         self._neck_neutral: int = _neck["neutral"]
 
-        # Headlift limits — tracks face Y; only raises head, never lowers below neutral
+        # Headlift limits — full range to follow any face height
         _lift = cfg.SERVO_CHANNELS[_CH_LIFT]
-        self._lift_neutral: int = _lift["neutral"]   # 6000 — head level (floor)
-        self._lift_max:     int = _lift["max"]       # 7744 — head fully raised (ceiling)
+        self._lift_min:     int = _lift["min"]       # 1984 — head fully down
+        self._lift_neutral: int = _lift["neutral"]   # 6000 — head level
+        self._lift_max:     int = _lift["max"]       # 7744 — head fully up
 
         # Headtilt limits (clamped to ±15 % of full span from neutral)
         _tilt = cfg.SERVO_CHANNELS[_CH_TILT]
         self._tilt_neutral: int = _tilt["neutral"]
-        _tilt_half = int((_tilt["max"] - _tilt["min"]) * 0.15)   # 240 qµs
-        self._tilt_lo: int = self._tilt_neutral - _tilt_half      # 4080 qµs (up)
-        self._tilt_hi: int = self._tilt_neutral + _tilt_half      # 4560 qµs (down)
+        _tilt_half = 400                                            # ±400 qµs from neutral
+        self._tilt_lo: int = max(_tilt["min"],
+                                 self._tilt_neutral - _tilt_half)  # 3920 qµs (tilts up)
+        self._tilt_hi: int = min(_tilt["max"],
+                                 self._tilt_neutral + _tilt_half)  # 4720 qµs (tilts down)
 
         # Visor max — sent once at tracker start to keep camera unobstructed
         self._visor_max: int = cfg.SERVO_CHANNELS[3]["max"]
 
         # EMA-smoothed positions (float for sub-qµs accumulation)
         self._smooth_neck: float = float(self._neck_neutral)
-        self._smooth_lift: float = float(self._lift_neutral)
+        self._smooth_lift: float = float(self._lift_neutral)   # start level; tracker adjusts
         self._smooth_tilt: float = float(self._tilt_neutral)
 
         # Last positions actually sent to the Maestro
@@ -278,21 +282,26 @@ class HeadTracker:
                 )
                 t_neck = max(self._neck_min, min(self._neck_max, t_neck))
 
-                # Y → headlift: face at top (0) = max (head up), bottom = neutral (level)
-                # Never goes below neutral — only raises head, never lowers it.
+                # Y → headlift: face at top (0) = max (head up), bottom = min (head down)
                 t_lift = int(
-                    self._lift_neutral
-                    + (1.0 - face_cy / self._frame_h) * (self._lift_max - self._lift_neutral)
+                    self._lift_max
+                    - (face_cy / self._frame_h) * (self._lift_max - self._lift_min)
                 )
-                t_lift = max(self._lift_neutral, min(self._lift_max, t_lift))
+                t_lift = max(self._lift_min, min(self._lift_max, t_lift))
 
-                # Y → headtilt (inverted, clamped to narrow band)
+                # Y → headtilt (inverted): low Y = tilt up (lower qµs), high Y = tilt down
+                # Clamped to ±400 qµs around neutral; higher value = tilts further down.
                 tilt_span = self._tilt_hi - self._tilt_lo
                 t_tilt = int(
                     self._tilt_neutral
                     + ((face_cy / self._frame_h) - 0.5) * tilt_span
                 )
                 t_tilt = max(self._tilt_lo, min(self._tilt_hi, t_tilt))
+
+                log.debug(
+                    "HeadTracker targets: neck=%d  lift=%d  tilt=%d  (face cx=%d cy=%d)",
+                    t_neck, t_lift, t_tilt, face_cx, face_cy,
+                )
 
                 with self._state_lock:
                     self._target_neck = t_neck
