@@ -325,6 +325,7 @@ class StateMachine:
         self._post_greeting_person_name: str | None = None
         self._post_greeting_prompt_used: bool = False
         self._angry_mode: bool = False
+        self._last_wake_greeting_used_vision: bool = False
 
         # Animation player — shares hardware refs with the rest of the machine
         self._animations = AnimationPlayer(self._servos, self._leds)
@@ -1062,6 +1063,9 @@ class StateMachine:
         if not (frame and self._face_recognizer.is_available()):
             return
 
+        use_vision_greeting = self._should_use_vision_wake_greeting()
+        log.info("Wake greeting: first wake vision greeting=%s", use_vision_greeting)
+
         _RECOGNITION_FILLER_LINES = (
             "Uh... hang on... hang on... I'm looking...",
             "Um... let's see... yeah... still processing...",
@@ -1128,45 +1132,52 @@ class StateMachine:
                 name, bother_count,
             )
 
-            # GPT-4o personalized greeting — initial clip already played above.
-            greeting_result: list[str | None] = [None]
+            if use_vision_greeting:
+                # GPT-4o personalized greeting — initial clip already played above.
+                greeting_result: list[str | None] = [None]
 
-            def _gen_known() -> None:
-                greeting_result[0] = self._greeter.generate_known_person_greeting(
-                    name, bother_count, frame
+                def _gen_known() -> None:
+                    greeting_result[0] = self._greeter.generate_known_person_greeting(
+                        name, bother_count, frame
+                    )
+
+                gen_thread = threading.Thread(
+                    target=_gen_known, daemon=True, name="djr3x-greeter"
                 )
+                gen_thread.start()
 
-            gen_thread = threading.Thread(
-                target=_gen_known, daemon=True, name="djr3x-greeter"
-            )
-            gen_thread.start()
+                # Speak a filler phrase while the GPT call is in flight (~2s latency).
+                if gen_thread.is_alive():
+                    _filler = _pick_no_repeat(_GREETING_FILLERS, "greeting_filler")
+                    log.info("Wake greeting: GPT filler %r", _filler)
+                    _fs = self._begin_speech(emotion="excited")
+                    try:
+                        self._synthesizer.speak(_filler)
+                    except Exception:
+                        log.exception("Wake greeting: GPT filler TTS error")
+                    finally:
+                        self._end_speech(_fs)
 
-            # Speak a filler phrase while the GPT call is in flight (~2s latency).
-            if gen_thread.is_alive():
-                _filler = _pick_no_repeat(_GREETING_FILLERS, "greeting_filler")
-                log.info("Wake greeting: GPT filler %r", _filler)
-                _fs = self._begin_speech(emotion="excited")
+                servo_stop = self._begin_speech(emotion="excited")
                 try:
-                    self._synthesizer.speak(_filler)
+                    gen_thread.join(timeout=15.0)
+                    if greeting_result[0]:
+                        self._synthesizer.speak(greeting_result[0])
                 except Exception:
-                    log.exception("Wake greeting: GPT filler TTS error")
+                    log.exception("Wake greeting: first wake known-person greeter error")
+                    gen_thread.join(timeout=1.0)
                 finally:
-                    self._end_speech(_fs)
+                    self._end_speech(servo_stop)
 
-            servo_stop = self._begin_speech(emotion="excited")
-            try:
-                gen_thread.join(timeout=15.0)
-                if greeting_result[0]:
-                    self._synthesizer.speak(greeting_result[0])
-            except Exception:
-                log.exception("Wake greeting: first wake known-person greeter error")
-                gen_thread.join(timeout=1.0)
-            finally:
-                self._end_speech(servo_stop)
-
-            if not greeting_result[0]:
-                log.info("Wake greeting: GPT failed — canned fallback for known person")
+                if not greeting_result[0]:
+                    log.info("Wake greeting: GPT failed — canned fallback for known person")
+                    self._play_known_person_greeting(name, bother_count)
+                    self._last_wake_greeting_used_vision = False
+                else:
+                    self._last_wake_greeting_used_vision = True
+            else:
                 self._play_known_person_greeting(name, bother_count)
+                self._last_wake_greeting_used_vision = False
 
             self._maybe_speak_followup(person_id)
             return
@@ -1175,48 +1186,60 @@ class StateMachine:
         if status in ("no_match", "db_empty"):
             log.info("Wake greeting: first wake — unknown face, running appearance roast + enrollment")
 
-            # GPT-4o appearance-based roast — initial clip already played above.
-            unknown_result: list[str | None] = [None]
-
-            def _gen_unknown() -> None:
-                unknown_result[0] = self._greeter.generate(frame)
-
-            gen_thread2 = threading.Thread(
-                target=_gen_unknown, daemon=True, name="djr3x-greeter"
-            )
-            gen_thread2.start()
-
-            # Speak a filler phrase while the GPT call is in flight (~2s latency).
-            if gen_thread2.is_alive():
-                _filler2 = _pick_no_repeat(_GREETING_FILLERS, "greeting_filler")
-                log.info("Wake greeting: GPT filler (unknown) %r", _filler2)
-                _fs2 = self._begin_speech(emotion="excited")
-                try:
-                    self._synthesizer.speak(_filler2)
-                except Exception:
-                    log.exception("Wake greeting: GPT filler TTS error (unknown)")
-                finally:
-                    self._end_speech(_fs2)
-
             _CANNED_TTS = (
                 "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
                 "A lifeform! Bold of you to show up looking like THAT.",
                 "Oh, it's you. Oga's Cantina — where even the questionable guests are welcome!",
                 "Well well well, look what the Ronto dragged in. Welcome, I guess.",
             )
-            servo_stop = self._begin_speech(emotion="excited")
-            try:
-                gen_thread2.join(timeout=15.0)
-                if unknown_result[0]:
-                    self._synthesizer.speak(unknown_result[0])
-            except Exception:
-                log.exception("Wake greeting: first wake unknown-face greeter error")
-                gen_thread2.join(timeout=1.0)
-            finally:
-                self._end_speech(servo_stop)
+            if use_vision_greeting:
+                # GPT-4o appearance-based roast — initial clip already played above.
+                unknown_result: list[str | None] = [None]
 
-            if not unknown_result[0]:
-                log.info("Wake greeting: GPT failed — canned TTS fallback for unknown face")
+                def _gen_unknown() -> None:
+                    unknown_result[0] = self._greeter.generate(frame)
+
+                gen_thread2 = threading.Thread(
+                    target=_gen_unknown, daemon=True, name="djr3x-greeter"
+                )
+                gen_thread2.start()
+
+                # Speak a filler phrase while the GPT call is in flight (~2s latency).
+                if gen_thread2.is_alive():
+                    _filler2 = _pick_no_repeat(_GREETING_FILLERS, "greeting_filler")
+                    log.info("Wake greeting: GPT filler (unknown) %r", _filler2)
+                    _fs2 = self._begin_speech(emotion="excited")
+                    try:
+                        self._synthesizer.speak(_filler2)
+                    except Exception:
+                        log.exception("Wake greeting: GPT filler TTS error (unknown)")
+                    finally:
+                        self._end_speech(_fs2)
+
+                servo_stop = self._begin_speech(emotion="excited")
+                try:
+                    gen_thread2.join(timeout=15.0)
+                    if unknown_result[0]:
+                        self._synthesizer.speak(unknown_result[0])
+                except Exception:
+                    log.exception("Wake greeting: first wake unknown-face greeter error")
+                    gen_thread2.join(timeout=1.0)
+                finally:
+                    self._end_speech(servo_stop)
+
+                if not unknown_result[0]:
+                    log.info("Wake greeting: GPT failed — canned TTS fallback for unknown face")
+                    servo_stop = self._begin_speech(emotion="excited")
+                    try:
+                        self._synthesizer.speak(random.choice(_CANNED_TTS))
+                    except Exception:
+                        log.exception("Wake greeting: first wake unknown-face canned fallback error")
+                    finally:
+                        self._end_speech(servo_stop)
+                    self._last_wake_greeting_used_vision = False
+                else:
+                    self._last_wake_greeting_used_vision = True
+            else:
                 servo_stop = self._begin_speech(emotion="excited")
                 try:
                     self._synthesizer.speak(random.choice(_CANNED_TTS))
@@ -1224,6 +1247,7 @@ class StateMachine:
                     log.exception("Wake greeting: first wake unknown-face canned fallback error")
                 finally:
                     self._end_speech(servo_stop)
+                self._last_wake_greeting_used_vision = False
 
             self._learn_new_person(frame)
 
@@ -1356,6 +1380,15 @@ class StateMachine:
             self._last_greeted_person_id = person_id
             self._face_db.update_last_seen(person_id)
             self._maybe_speak_followup(person_id)
+
+    def _should_use_vision_wake_greeting(self) -> bool:
+        """Use GPT vision on about half of wake greetings, never consecutively."""
+        if self._last_wake_greeting_used_vision:
+            log.info("Wake greeting: skipping GPT vision (previous wake already used vision)")
+            return False
+        use_vision = random.random() < 0.5
+        log.info("Wake greeting: GPT vision candidate=%s (no consecutive use)", use_vision)
+        return use_vision
 
     def _maybe_speak_followup(self, person_id: int) -> None:
         """If a pending follow-up exists for this person, ask it and mark it done."""
