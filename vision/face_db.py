@@ -15,8 +15,10 @@ Typical usage:
 
 from __future__ import annotations
 
+import difflib
 import logging
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -26,6 +28,14 @@ import numpy as np
 import config
 
 log = logging.getLogger(__name__)
+
+
+def _normalize_name(value: str) -> str:
+    """Return a lowercase alphanumeric form suitable for name matching."""
+    value = value.lower().strip()
+    value = re.sub(r"[^a-z0-9\s]", " ", value)
+    value = re.sub(r"\s+", " ", value)
+    return value.strip()
 
 _CREATE_PEOPLE = """
 CREATE TABLE IF NOT EXISTS people (
@@ -242,6 +252,48 @@ class FaceDB:
             "SELECT id, name, visit_count, first_seen, last_seen FROM people ORDER BY name"
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def find_person_by_name(self, spoken_name: str) -> Optional[tuple[int, str, float]]:
+        """Return the closest stored person for a spoken/display name.
+
+        Matching is exact/substring first on a lightly normalized form, then a
+        fuzzy fallback so transcribed names can still resolve when punctuation
+        or a word is slightly off.
+        """
+        normalized_query = _normalize_name(spoken_name)
+        if not normalized_query:
+            return None
+
+        rows = self._conn.execute(
+            "SELECT id, name FROM people ORDER BY name"
+        ).fetchall()
+        if not rows:
+            return None
+
+        normalized_rows = [
+            (row["id"], row["name"], _normalize_name(row["name"]))
+            for row in rows
+        ]
+
+        for person_id, name, normalized_name in normalized_rows:
+            if normalized_query == normalized_name:
+                return person_id, name, 1.0
+
+        for person_id, name, normalized_name in normalized_rows:
+            if normalized_query in normalized_name or normalized_name in normalized_query:
+                return person_id, name, 0.9
+
+        choices = [normalized_name for _, _, normalized_name in normalized_rows if normalized_name]
+        candidates = difflib.get_close_matches(normalized_query, choices, n=1, cutoff=0.72)
+        if not candidates:
+            return None
+
+        best = candidates[0]
+        for person_id, name, normalized_name in normalized_rows:
+            if normalized_name == best:
+                score = difflib.SequenceMatcher(None, normalized_query, normalized_name).ratio()
+                return person_id, name, score
+        return None
 
     def rename_person(self, person_id: int, new_name: str) -> None:
         """Update the display name for an existing person."""

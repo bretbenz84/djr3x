@@ -2533,10 +2533,10 @@ class StateMachine:
             return self._handle_rename_me(original_text)
 
         elif action == "forget_me":
-            self._handle_forget_me()
+            return self._handle_forget_me()
 
         elif action == "wipe_memory":
-            self._handle_wipe_memory()
+            return self._handle_wipe_memory()
 
         elif action == "play_music":
             self._play_music_track()
@@ -2863,32 +2863,115 @@ class StateMachine:
     # Forget-me helper
     # ------------------------------------------------------------------
 
-    def _handle_forget_me(self) -> None:
+    def _handle_forget_me(self) -> State | None:
         """Ask for confirmation then delete the current person from FaceDB.
 
         Only acts when a known person was recognised this session
         (self._last_known_person_id is not None).
         """
         if self._last_known_person_id is None:
-            line = "I don't actually know who you are — you're safe. For now."
-            log.info("forget_me: no known person this session — aborting")
+            log.info("forget_me: no known person this session — falling back to spoken-name lookup")
+            return self._handle_forget_me_without_face_match()
+
+        person_id = self._last_known_person_id
+        person = self._face_db.get_person(person_id)
+        person_name = person["name"] if person else "you"
+        return self._confirm_forget_person(person_id, person_name)
+
+    def _handle_forget_me_without_face_match(self) -> State | None:
+        """Fallback deletion path when face recognition did not identify the speaker."""
+        line = (
+            "I can't see you clearly enough to know who I'm deleting. "
+            "My vision must be going bad. What's your name so I know who to erase?"
+        )
+        servo_stop = self._begin_speech(emotion="neutral")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("forget_me: TTS error (ask for spoken name)")
+        finally:
+            self._end_speech(servo_stop)
+
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._wake_word.pause()
+        try:
+            name_text = self._transcriber.transcribe(
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
+                allow_short=True,
+            )
+        except Exception:
+            log.exception("forget_me: transcription error during spoken-name capture")
+            name_text = None
+        finally:
+            self._wake_word.resume()
+
+        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+
+        if not name_text:
+            log.info("forget_me: no spoken name heard — cancelling")
+            return None
+
+        normalized_response = name_text.strip().lower()
+        is_name_intro = any(
+            normalized_response.startswith(p)
+            for p in ("my name is", "my name's", "i am", "i'm", "call me")
+        )
+        cmd = None if is_name_intro else parse(name_text)
+        if cmd is not None and cmd.action in _PROMPT_COMMAND_ACTIONS:
+            log.info(
+                "forget_me: command %r spoken during name lookup fallback — rerouting",
+                cmd.action,
+            )
+            return self._execute_command(cmd, name_text)
+
+        if _is_name_refusal(name_text):
+            log.info("forget_me: refusal detected during spoken-name lookup — cancelling")
+            line = random.choice(_NAME_REFUSAL_RESPONSES)
             servo_stop = self._begin_speech(emotion="neutral")
             try:
                 self._synthesizer.speak(line)
             except Exception:
-                log.exception("forget_me: TTS error (unknown person)")
+                log.exception("forget_me: TTS error (spoken-name refusal)")
             finally:
                 self._end_speech(servo_stop)
-            return
+            return None
 
-        person_id = self._last_known_person_id
+        spoken_name = _extract_name(name_text)
+        match = self._face_db.find_person_by_name(spoken_name)
+        if match is None:
+            log.info("forget_me: no database match for spoken name %r", spoken_name)
+            line = (
+                f"I don't have anyone named {spoken_name} in my databanks. "
+                "Either my memory is cleaner than expected or you need to try that name again."
+            )
+            servo_stop = self._begin_speech(emotion="neutral")
+            try:
+                self._synthesizer.speak(line)
+            except Exception:
+                log.exception("forget_me: TTS error (no spoken-name match)")
+            finally:
+                self._end_speech(servo_stop)
+            return None
+
+        person_id, person_name, score = match
+        log.info(
+            "forget_me: spoken-name fallback matched %r → person id=%d name=%r score=%.2f",
+            spoken_name,
+            person_id,
+            person_name,
+            score,
+        )
+        return self._confirm_forget_person(person_id, person_name)
+
+    def _confirm_forget_person(self, person_id: int, person_name: str) -> State | None:
+        """Ask for confirmation, then delete one specific person from FaceDB."""
 
         # Confirmation prompt.
         servo_stop = self._begin_speech(emotion="excited")
         try:
             self._synthesizer.speak(
-                "Are you sure you want me to forget you? "
-                "I mean, you are pretty forgettable. Say yes to confirm."
+                f"Are you sure you want me to forget {person_name}? "
+                "I mean, that does sound tempting. Say yes to confirm."
             )
         except Exception:
             log.exception("forget_me: TTS error (confirmation prompt)")
@@ -2912,23 +2995,25 @@ class StateMachine:
         self._leds.set_head_effect(config.LED_CMD_ACTIVE)
 
         if not response:
-            log.info("forget_me: no response heard — cancelling")
-            return
+            log.info("forget_me: no response heard while confirming deletion of person id=%d", person_id)
+            return None
 
         if any(w in response.lower() for w in ("yes", "yeah", "sure", "confirm")):
             try:
                 self._face_db.delete_person(person_id)
             except Exception:
                 log.exception("forget_me: FaceDB delete failed")
-                return
-            self._last_known_person_id = None
-            log.info("forget_me: deleted person id=%d", person_id)
+                return None
+            if self._last_known_person_id == person_id:
+                self._last_known_person_id = None
+            self._recognized_today_counts.pop(person_id, None)
+            log.info("forget_me: deleted person id=%d name=%r", person_id, person_name)
             line = (
-                "Done. You are erased. Like you were never here. "
+                f"Done. {person_name} is erased. Like they were never here. "
                 "Which honestly might be an improvement."
             )
         else:
-            log.info("forget_me: user declined — no change")
+            log.info("forget_me: user declined deletion of person id=%d name=%r", person_id, person_name)
             line = "Smart choice. You need me to remember you. Admit it."
 
         servo_stop = self._begin_speech(emotion="excited")
@@ -2938,8 +3023,9 @@ class StateMachine:
             log.exception("forget_me: TTS error (result)")
         finally:
             self._end_speech(servo_stop)
+        return None
 
-    def _handle_wipe_memory(self) -> None:
+    def _handle_wipe_memory(self) -> State | None:
         """Ask for confirmation, then wipe all known people and face-debug images."""
         confirm_line = _pick_no_repeat((
             "You want me to completely wipe my memory? Wow. Straight to droid amnesia. Say yes to confirm.",
@@ -3016,6 +3102,7 @@ class StateMachine:
             log.exception("wipe_memory: TTS error (result)")
         finally:
             self._end_speech(servo_stop)
+        return None
 
     # ------------------------------------------------------------------
     # Camera pose helpers
