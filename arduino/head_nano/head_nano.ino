@@ -34,7 +34,9 @@
  *                         suspended until next EYE: or ACTIVE command.
  *   IDLE                  Mouth off; eyes breathe slowly at last EYE: colour;
  *                         blink system activates (or stays active) immediately.
- *   ACTIVE                Mouth off; eyes bright white; blinking resumes.
+ *   ACTIVE                Mouth off; preserve the current eye colour and
+ *                         resume blinking. Falls back to bright white only
+ *                         if no eye colour has been set yet.
  *   EYE:{r},{g},{b}       Set both eyes to RGB colour; blinking resumes.
  *   OFF                   All 82 pixels off immediately; blinking suspended.
  */
@@ -384,11 +386,15 @@ void handleCommand(char *cmd) {
         return;
     }
 
-    // ACTIVE — mouth off; eyes bright white; blink resumes.
+    // ACTIVE — mouth off; preserve current eye colour; blink resumes.
     if (strcmp(cmd, "ACTIVE") == 0) {
         animMode = ANIM_ACTIVE;
         mouthOff();
-        setEyes(255, 255, 255);
+        if (eyeColor.r || eyeColor.g || eyeColor.b) {
+            setEyes(eyeColor.r, eyeColor.g, eyeColor.b);
+        } else {
+            setEyes(255, 255, 255);
+        }
         FastLED.show();
         return;
     }
