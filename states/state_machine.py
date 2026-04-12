@@ -740,9 +740,11 @@ class StateMachine:
             self._wake_word.resume()
 
         if not text:
-            # No response — go back to idle silently (no goodbye phrase).
-            log.info("Face-triggered greeting: no speech in %.0f s — returning to IDLE silently",
+            # No response — play the return-to-idle chime so the user knows
+            # to use the wake word to reactivate Rex, then go back to IDLE.
+            log.info("Face-triggered greeting: no speech in %.0f s — playing chime and returning to IDLE",
                      config.FACE_WAKE_LISTEN_TIMEOUT)
+            self._play_return_to_idle_chime()
             self._apply_idle_led_theme()
             return
 
