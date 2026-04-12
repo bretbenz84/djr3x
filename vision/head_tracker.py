@@ -96,6 +96,11 @@ class HeadTracker:
 
         self._frame_w, self._frame_h = cfg.HEAD_TRACKING_RESOLUTION
 
+        # Wide-angle compensation margins (fraction of frame from each edge).
+        # Faces within x_margin of the left/right edge → servo fully extended.
+        self._x_margin: float = getattr(cfg, "HEAD_TRACKING_X_MARGIN", 0.15)
+        self._y_margin: float = getattr(cfg, "HEAD_TRACKING_Y_MARGIN", 0.10)
+
         # Neck limits (full pan range)
         _neck = cfg.SERVO_CHANNELS[_CH_NECK]
         self._neck_min:     int = _neck["min"]
@@ -275,26 +280,43 @@ class HeadTracker:
                 face_cx = x + w // 2
                 face_cy = y + h // 2
 
-                # X → neck: face-left (0) = neck min, face-right (frame_w) = neck max
+                # Normalise face position to [0,1] then remap to account for the
+                # wide-angle lens.  Faces detected within the edge margin already
+                # represent an extreme viewing angle, so we stretch the inner
+                # active zone [margin, 1-margin] across the full servo range and
+                # clamp anything outside it to the servo extreme.
+                x_raw = face_cx / self._frame_w   # 0.0 (left) … 1.0 (right)
+                y_raw = face_cy / self._frame_h   # 0.0 (top)  … 1.0 (bottom)
+
+                x_margin = self._x_margin
+                y_margin = self._y_margin
+                x_active = 1.0 - 2.0 * x_margin  # width of the inner zone
+                y_active = 1.0 - 2.0 * y_margin
+
+                # Clamp to [0,1] after scaling — this is what saturates the servo
+                # at its full extent when the face reaches the margin zone.
+                x_scaled = max(0.0, min(1.0, (x_raw - x_margin) / x_active))
+                y_scaled = max(0.0, min(1.0, (y_raw - y_margin) / y_active))
+
+                # X → neck: face-left = neck min, face-right = neck max
                 t_neck = int(
                     self._neck_min
-                    + (face_cx / self._frame_w) * (self._neck_max - self._neck_min)
+                    + x_scaled * (self._neck_max - self._neck_min)
                 )
                 t_neck = max(self._neck_min, min(self._neck_max, t_neck))
 
-                # Y → headlift: face at top (0) = max (head up), bottom = min (head down)
+                # Y → headlift: face at top = max (head up), bottom = min (head down)
                 t_lift = int(
                     self._lift_max
-                    - (face_cy / self._frame_h) * (self._lift_max - self._lift_min)
+                    - y_scaled * (self._lift_max - self._lift_min)
                 )
                 t_lift = max(self._lift_min, min(self._lift_max, t_lift))
 
                 # Y → headtilt (inverted): low Y = tilt up (lower qµs), high Y = tilt down
-                # Clamped to ±400 qµs around neutral; higher value = tilts further down.
                 tilt_span = self._tilt_hi - self._tilt_lo
                 t_tilt = int(
                     self._tilt_neutral
-                    + ((face_cy / self._frame_h) - 0.5) * tilt_span
+                    + (y_scaled - 0.5) * tilt_span
                 )
                 t_tilt = max(self._tilt_lo, min(self._tilt_hi, t_tilt))
 

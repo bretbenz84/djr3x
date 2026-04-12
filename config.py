@@ -463,6 +463,11 @@ HEAD_TRACKING_RESOLUTION: tuple[int, int] = (
     int(_optional("HEAD_TRACKING_RES_W", "320")),
     int(_optional("HEAD_TRACKING_RES_H", "240")),
 )
+# Edge margins for wide-angle camera compensation (fraction of frame, 0.0–0.5).
+# A face detected within X_MARGIN of the left/right edge drives the neck servo
+# to its full extreme.  Increase if the servo never reaches min/max.
+HEAD_TRACKING_X_MARGIN: float = float(_optional("HEAD_TRACKING_X_MARGIN", "0.15"))
+HEAD_TRACKING_Y_MARGIN: float = float(_optional("HEAD_TRACKING_Y_MARGIN", "0.10"))
 
 # When True, Rex runs a 5-question interview after enrolling a new person and
 # stores the answers as persistent memories in the face DB.
