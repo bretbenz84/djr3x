@@ -179,6 +179,29 @@ class ChatGPTClient:
     # Public interface
     # ------------------------------------------------------------------
 
+    def warmup(self) -> None:
+        """Pre-load the Ollama model into GPU memory at startup.
+
+        Sends a minimal request with keep_alive=-1 so the model stays resident
+        for the duration of the session.  No-op for cloud OpenAI.
+        """
+        if not self._use_local:
+            return
+        try:
+            log.info("LLM warmup: pre-loading %s into Ollama …", self._chat_model)
+            t0 = time.monotonic()
+            resp = self._client.chat.completions.create(
+                model=self._chat_model,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+                stream=False,
+                extra_body={"keep_alive": -1},
+            )
+            _ = resp.choices[0].message.content
+            log.info("LLM warmup complete (%.1f s)", time.monotonic() - t0)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("LLM warmup failed (%s) — first response may be slow", exc)
+
     def chat_stream(
         self, user_text: str, image: Optional[str] = None, t0: Optional[float] = None
     ) -> Iterator[str]:
@@ -274,6 +297,10 @@ class ChatGPTClient:
             }
             if not self._use_local or image:
                 create_kwargs["max_tokens"] = 80
+            if self._use_local and not image:
+                # Tell Ollama to keep the model loaded indefinitely so
+                # subsequent calls skip the 3-second model-reload penalty.
+                create_kwargs["extra_body"] = {"keep_alive": -1}
 
             stream = active_client.chat.completions.create(**create_kwargs)
             for chunk in stream:

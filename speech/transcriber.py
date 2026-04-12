@@ -271,20 +271,28 @@ class Transcriber:
             ),
         )
         stall_threshold = max(10.0, speech_detect_threshold * 0.05)
+        # Once in Phase 2 (speech confirmed), only reset the silence counter when
+        # RMS is clearly above the detection floor.  Background noise and mechanical/
+        # speaker bleedthrough typically sits at 300–600 RMS; real speech is 1000–5000.
+        # Using a 2.5× multiplier leaves a clear gap so post-speech noise does not
+        # repeatedly reset the counter and extend the recording.
+        silence_reset_threshold = int(speech_detect_threshold * config.TRANSCRIBE_SILENCE_RESET_MULTIPLIER)
         log.info(
-            "Transcriber thresholds: calibrated=%d, speech-start=%d, speech-detect=%d, confirm-peak=%d, stall<=%.0f%s",
+            "Transcriber thresholds: calibrated=%d, speech-start=%d, speech-detect=%d, confirm-peak=%d, silence-reset=%d, stall<=%.0f%s",
             self._speech_threshold,
             speech_start_threshold,
             speech_detect_threshold,
             speech_confirm_peak_threshold,
+            silence_reset_threshold,
             stall_threshold,
             _mark(),
         )
         log.debug(
-            "Transcriber: speech-detect threshold=%d (base=%d), speech-confirm-peak=%d, stall threshold=%.0f",
+            "Transcriber: speech-detect threshold=%d (base=%d), speech-confirm-peak=%d, silence-reset=%d, stall threshold=%.0f",
             speech_detect_threshold,
             self._speech_threshold,
             speech_confirm_peak_threshold,
+            silence_reset_threshold,
             stall_threshold,
         )
 
@@ -351,7 +359,18 @@ class Transcriber:
                             consecutive_speech += 1
                             speech_run_peak = max(speech_run_peak, rms)
                             voiced_chunks += 1
-                            silence_chunks = 0   # reset Phase 2 silence counter
+                            # In Phase 1, always bust silence (silence counter is
+                            # unused in Phase 1, but keep it clean).
+                            # In Phase 2, only reset the silence counter when the
+                            # chunk is clearly voiced — well above the detection
+                            # floor.  Background noise and speaker/servo bleedthrough
+                            # typically sits at 300–600 RMS; real speech is 1000+.
+                            # Chunks between active_threshold and silence_reset_threshold
+                            # are recorded but do NOT reset the silence clock, so a
+                            # short utterance ("you suck") doesn't extend the recording
+                            # by 5+ seconds of ambient noise.
+                            if not speech_started or rms >= silence_reset_threshold:
+                                silence_chunks = 0
 
                             if (
                                 not speech_started

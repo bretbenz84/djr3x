@@ -256,7 +256,13 @@ TRANSCRIBE_SPEECH_THRESHOLD_MIN    = int(_optional("TRANSCRIBE_SPEECH_THRESHOLD_
 TRANSCRIBE_SPEECH_THRESHOLD_MAX    = int(_optional("TRANSCRIBE_SPEECH_THRESHOLD_MAX",    "800"))  # ceiling — noisy room can't silence Rex
 TRANSCRIBE_MIN_WHISPER_SECONDS     = float(_optional("TRANSCRIBE_MIN_WHISPER_SECONDS",   "0.5"))  # skip normal-path Whisper calls for ultra-short clips
 TRANSCRIBE_MIN_VOICED_CHUNKS       = int(_optional("TRANSCRIBE_MIN_VOICED_CHUNKS",       "5"))    # minimum above-threshold chunks before a normal-path clip is worth transcribing
-SILENCE_DURATION             = 1.0  # seconds of silence to end capture
+# In Phase 2 (active speech recording), the silence counter is only reset when a chunk's
+# RMS exceeds speech_detect_threshold × this multiplier.  This prevents background noise
+# and servo/speaker bleedthrough (which sits at 300–600 RMS) from resetting the silence
+# counter after the user has finished speaking.  Real speech is typically 1000–5000 RMS,
+# so a factor of 2.5 leaves a clear gap.  Increase if silence still triggers too slowly.
+TRANSCRIBE_SILENCE_RESET_MULTIPLIER = float(_optional("TRANSCRIBE_SILENCE_RESET_MULTIPLIER", "2.5"))
+SILENCE_DURATION             = 0.5  # seconds of silence to end capture
 MAX_RECORD_SECONDS           = 12.0 # hard cap on a single utterance
 
 # ---------------------------------------------------------------------------
@@ -329,7 +335,7 @@ WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",
 #     sustained silence before stopping.  Any audio above the RMS threshold
 #     resets the counter so brief inter-word pauses never cut off an utterance.
 TRANSCRIBE_SPEECH_WAIT_SECONDS   = float(_optional("TRANSCRIBE_SPEECH_WAIT_SECONDS",   "5.0"))
-TRANSCRIBE_END_SILENCE_SECONDS   = float(_optional("TRANSCRIBE_END_SILENCE_SECONDS",   "1.5"))
+TRANSCRIBE_END_SILENCE_SECONDS   = float(_optional("TRANSCRIBE_END_SILENCE_SECONDS",   "1.0"))
 
 # Substrings (lowercase) that identify known Whisper hallucination phrases.
 # Any result whose lowercased text contains one of these is silently dropped.

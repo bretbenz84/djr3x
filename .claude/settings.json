@@ -41,7 +41,8 @@
       "Bash(python3 -c \"import vision.head_tracker; import states.state_machine; print\\('OK'\\)\")",
       "Bash(python3 -c \"import states.state_machine; print\\('OK'\\)\")",
       "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; cmds = [v for k,v in PHRASE_INDEX.items\\(\\) if 'joke' in k]; print\\(cmds\\)\")",
-      "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; cmds = [\\(k,v.audio\\) for k,v in PHRASE_INDEX.items\\(\\) if 'joke' in k or 'funny' in k or 'laugh' in k]; print\\(cmds\\)\")"
+      "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; cmds = [\\(k,v.audio\\) for k,v in PHRASE_INDEX.items\\(\\) if 'joke' in k or 'funny' in k or 'laugh' in k]; print\\(cmds\\)\")",
+      "Bash(ls /Users/bbenziger/djr3x/*.log)"
     ]
   }
 }

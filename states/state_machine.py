@@ -417,6 +417,7 @@ class StateMachine:
 
         self._transcriber.warmup()   # no-op for Whisper; kept for interface consistency
         self._transcriber.calibrate_noise_floor()
+        self._llm.warmup()           # pre-loads Ollama model into GPU memory (no-op for cloud)
         startup_error: list[Exception | None] = [None]
 
         def _finish_startup() -> None:
