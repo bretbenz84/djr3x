@@ -641,8 +641,9 @@ class ServoController:
         Head (neck ch 0, headlift ch 1): one channel every 3-5 s, slow speed.
             Headlift range is biased toward neutral (level) so Rex doesn't
             spend too much time looking fully upward.
-        Headtilt (ch 2): drifts toward IDLE_HEAD_TILT_REST every 4-7 s at
-            very slow speed — produces a gradual, relaxed resting pose.
+        Headtilt (ch 2): drifts randomly between min and neutral every 4-7 s
+            at very slow speed — biased upward (lower qµs = up) so faces at
+            normal and tall height land in the camera frame.
         Visor (ch 3): every 5-8 s, very slow speed,
             constrained to the open (low) 30% of its range.
         Elbow (ch 4): drifts toward IDLE_ELBOW_REST every 4-7 s at very slow
@@ -668,11 +669,11 @@ class ServoController:
                 ch = random.choice(config.IDLE_HEAD_CHANNELS)
 
                 if ch == config.SERVO_HEAD_LIFT:
-                    # Higher qµs = head up, lower = head down.  Constrain to
-                    # [min, neutral] so Rex always looks upward or level, never
-                    # drooping down (Rex is ~3 ft tall and looks up at people).
-                    idle_lo = config.SERVO_CHANNELS[1]["min"]       # 1984 — head up
-                    idle_hi = config.SERVO_CHANNELS[1]["neutral"]   # 6000 — head level
+                    # Bias toward raised head so faces at normal/tall height
+                    # are more likely to be in frame for tracking and recognition.
+                    # Range is [neutral, max] — level to fully raised, never drooping.
+                    idle_lo = config.SERVO_CHANNELS[1]["neutral"]   # 6000 — head level
+                    idle_hi = config.SERVO_CHANNELS[1]["max"]       # 7744 — head up
                 else:
                     # Neck: middle 60% of effective range for lazy turns
                     lo, hi    = self._effective_limits(ch)
@@ -689,21 +690,17 @@ class ServoController:
                     self._send_target(ch, target)
                 _next_head = now + random.uniform(3.0, 5.0)
 
-            # --- Headtilt idle (ch 2): slow drift toward resting pose ---
-            # Targets a small window around IDLE_HEAD_TILT_REST so Rex
-            # gradually settles to a slightly-downward resting angle.
+            # --- Headtilt idle (ch 2): slow drift toward upward-looking pose ---
+            # Headtilt is inverted: lower qµs = head tilts up.
+            # Range is [min (3904), neutral (4320)] — the upper half of travel,
+            # biased toward looking slightly upward so faces at normal/tall height
+            # are more likely to land in the camera frame.
             # SERVO_HEAD_IDLE_SPEED (3) ensures the drift is barely perceptible.
             if now >= _next_tilt:
-                tilt_min = config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["min"]
-                tilt_max = config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["max"]
-                target = _clamp(
-                    random.randint(
-                        config.IDLE_HEAD_TILT_REST - 150,
-                        config.IDLE_HEAD_TILT_REST + 200,
-                    ),
-                    tilt_min, tilt_max,
-                )
-                log.debug("Headtilt idle: ch 2 → %d (rest=%d)", target, config.IDLE_HEAD_TILT_REST)
+                tilt_min = config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["min"]      # 3904 — tilts up
+                tilt_neutral = config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["neutral"]  # 4320 — level
+                target = random.randint(tilt_min, tilt_neutral)
+                log.debug("Headtilt idle: ch 2 → %d (range %d–%d)", target, tilt_min, tilt_neutral)
                 with self._lock:
                     self._send_speed(config.SERVO_HEAD_TILT, config.SERVO_HEAD_IDLE_SPEED)
                     self._send_target(config.SERVO_HEAD_TILT, target)
