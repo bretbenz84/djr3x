@@ -823,6 +823,32 @@ COMMANDS: list[Command] = [
     ),
 
     # -----------------------------------------------------------------------
+    # Dance
+    # -----------------------------------------------------------------------
+
+    Command(
+        phrases=[
+            "do a little dance", "dance for me", "dance for us",
+            "can you dance", "dance please", "show me your moves", "bust a move",
+        ],
+        response="",
+        action="dance_short",
+    ),
+
+    # -----------------------------------------------------------------------
+    # Generic music start (response-free — handler speaks the intro)
+    # -----------------------------------------------------------------------
+
+    Command(
+        phrases=[
+            "play some music", "play a song", "put on some music", "play something",
+            "start the music", "hit it", "drop a beat",
+        ],
+        response="",
+        action="play_music",
+    ),
+
+    # -----------------------------------------------------------------------
     # Face recognition — identity management
     # -----------------------------------------------------------------------
 

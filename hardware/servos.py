@@ -38,6 +38,7 @@ Usage
 from __future__ import annotations
 
 import logging
+import math
 import random
 import threading
 import time
@@ -117,6 +118,8 @@ class ServoController:
         self._current_speed: int = config.SERVO_DEFAULT_SPEED
         self._stop_event = threading.Event()
         self._idle_thread: threading.Thread | None = None
+        self._dance_stop_event = threading.Event()
+        self._dance_thread: threading.Thread | None = None
         # Throttle counters for slow-moving arm channels in speak_move().
         # ch 5 (hand): update every 4 calls (~200 ms) — servo needs time to
         #   complete each full-range twist before receiving a new target.
@@ -485,6 +488,96 @@ class ServoController:
         """Allow the idle loop to resume moving expressive arm channels."""
         self._arm_idle_pause.clear()
         log.debug("Arm idle resumed")
+
+    # ------------------------------------------------------------------
+    # Dance mode
+    # ------------------------------------------------------------------
+
+    @property
+    def is_dancing(self) -> bool:
+        """True while the dance loop thread is actively running."""
+        return self._dance_thread is not None and self._dance_thread.is_alive()
+
+    def start_dancing(self) -> None:
+        """Start the background dance-loop thread.
+
+        No-op (returns immediately) if already dancing.
+        The dance loop runs at 20 Hz, sweeping all servo channels through
+        their full range with staggered sine-wave phases so they move
+        independently rather than in lockstep.
+        """
+        if self.is_dancing:
+            log.info("start_dancing: already dancing — ignoring")
+            return
+        self._dance_stop_event.clear()
+        self._dance_thread = threading.Thread(
+            target=self._dance_loop,
+            daemon=True,
+            name="djr3x-dance",
+        )
+        self._dance_thread.start()
+        log.info("Dance thread started.")
+
+    def stop_dancing(self) -> None:
+        """Stop the dance-loop thread and return all servos to neutral.
+
+        Blocks until the dance thread exits (up to 3 s).
+        """
+        self._dance_stop_event.set()
+        if self._dance_thread is not None:
+            self._dance_thread.join(timeout=3.0)
+            if self._dance_thread.is_alive():
+                log.warning("Dance thread did not stop cleanly within 3 s")
+            self._dance_thread = None
+        # Return all channels to neutral at a moderate speed.
+        with self._lock:
+            for channel, cfg in config.SERVO_CHANNELS.items():
+                self._send_speed(channel, config.SERVO_DEFAULT_SPEED)
+                self._send_target(channel, cfg["neutral"])
+        log.info("Dance stopped — servos returned to neutral.")
+
+    # (channel, sine phase offset in radians)
+    _DANCE_CHANNELS: tuple[tuple[int, float], ...] = (
+        (0, 0.0),    # neck
+        (1, 0.5),    # headlift
+        (2, 1.0),    # headtilt
+        (3, 1.5),    # visor
+        (4, 0.3),    # elbow
+        (5, 0.8),    # hand
+        (6, 1.2),    # pokerarm
+        (7, 1.7),    # heroarm
+    )
+    _DANCE_SPEED = 120    # servo move speed during dancing (faster = snappier)
+    _DANCE_HZ    = 20     # update rate
+    _DANCE_FREQ  = math.pi   # rad/s → one full sweep every ~2 s
+
+    def _dance_loop(self) -> None:
+        """Drive all servo channels through sine-wave patterns at 20 Hz.
+
+        Each channel has a unique phase offset so they move independently,
+        producing a fluid whole-body dancing motion rather than synchronised
+        toggling.  Uses each channel's full (min, max) range.
+        """
+        dt = 1.0 / self._DANCE_HZ
+        t  = 0.0
+
+        # Set a fast move speed for all dance channels once at loop start.
+        with self._lock:
+            for ch, _ in self._DANCE_CHANNELS:
+                self._send_speed(ch, self._DANCE_SPEED)
+
+        while not self._dance_stop_event.is_set():
+            with self._lock:
+                for ch, phase in self._DANCE_CHANNELS:
+                    ch_cfg = config.SERVO_CHANNELS[ch]
+                    lo = ch_cfg["min"]
+                    hi = ch_cfg["max"]
+                    # sin ∈ [-1, 1] → mapped linearly to [lo, hi]
+                    val = math.sin(t * self._DANCE_FREQ + phase)
+                    pos = _clamp(int(lo + (val + 1.0) / 2.0 * (hi - lo)), lo, hi)
+                    self._send_target(ch, pos)
+            t += dt
+            time.sleep(dt)
 
     def set_position(self, channel: int, position: int) -> None:
         """Move a single channel to position (qµs), clamped to its limits.

@@ -114,6 +114,7 @@ class AudioPlayer:
         # --- music stream state ---
         self._music_thread: threading.Thread | None = None
         self._music_stop = threading.Event()
+        self._music_volume: float = 1.0   # software fade multiplier (0.0–1.0)
 
     # ------------------------------------------------------------------
     # Speech — streaming TTS interface (called by synthesizer.py)
@@ -220,6 +221,21 @@ class AudioPlayer:
     def is_music_playing(self) -> bool:
         """True while a music track is actively playing in the background."""
         return self._music_thread is not None and self._music_thread.is_alive()
+
+    def fade_music(self, duration: float = 3.0) -> None:
+        """Gradually reduce music volume to 0 over *duration* seconds, then stop.
+
+        Blocks the caller for *duration* seconds while stepping the volume down
+        in 100 ms increments.  Resets _music_volume to 1.0 after stopping so
+        the next play_music() call starts at full volume.
+        """
+        steps = max(1, int(duration / 0.1))
+        for i in range(steps):
+            self._music_volume = 1.0 - float(i + 1) / steps
+            time.sleep(0.1)
+        self._music_volume = 0.0
+        self.stop_music()
+        self._music_volume = 1.0   # reset for next play
 
     def wait_for_music(self, timeout: float = 30.0) -> bool:
         """Block until the current music/chime thread exits (or timeout).
@@ -456,7 +472,7 @@ class AudioPlayer:
 
                 remaining = len(data) - pos
                 take = min(frames, remaining)
-                outdata[:take] = data[pos : pos + take] * config.AUDIO_VOLUME
+                outdata[:take] = data[pos : pos + take] * config.AUDIO_VOLUME * self._music_volume
                 if take < frames:
                     outdata[take:] = 0.0
                 pos += take

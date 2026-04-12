@@ -186,6 +186,7 @@ _PROMPT_COMMAND_ACTIONS: set[str] = {
     "os_shutdown",
     "sleep",
     "idle",
+    "dance_short",
     "play_music",
     "stop_music",
     "next_track",
@@ -2649,8 +2650,11 @@ class StateMachine:
         elif action == "wipe_memory":
             return self._handle_wipe_memory()
 
+        elif action == "dance_short":
+            return self._handle_dance_short()
+
         elif action == "play_music":
-            self._play_music_track()
+            return self._handle_play_music()
 
         elif action == "stop_music":
             self._player.stop_music()
@@ -3938,6 +3942,111 @@ class StateMachine:
                 f"Dress accordingly or do not — I am a DJ, not your mother."
             )
         self._speak_simple(line)
+
+    # ------------------------------------------------------------------
+    # Dance handlers
+    # ------------------------------------------------------------------
+
+    _DANCE_INTRO_LINES: tuple[str, ...] = (
+        "Fine. But only because you asked nicely.",
+        "Watch and learn. This is how it's done.",
+        "Oh, you want a show? Alright. Don't say I never gave you anything.",
+        "I've been waiting for someone to ask me this.",
+        "Prepare to be dazzled. Or confused. Possibly both.",
+    )
+
+    _DANCE_OUTRO_LINES: tuple[str, ...] = (
+        "You're welcome. That was a gift.",
+        "And that, my friend, is how it's done.",
+        "I hope you appreciated that. I certainly did.",
+        "Now you know why they call me DJ R3X.",
+        "Don't clap too hard. I embarrass easily.",
+    )
+
+    _DANCE_MUSIC_INTRO_LINES: tuple[str, ...] = (
+        "Oh, you want music? I've got just the thing.",
+        "Buckle up. This one slaps.",
+        "Alright, let's see if you can keep up.",
+        "Dropping the beat in three, two...",
+        "You called for music? Consider it done.",
+    )
+
+    _DANCE_MUSIC_OUTRO_LINES: tuple[str, ...] = (
+        "And scene. You're welcome.",
+        "That's a wrap. I hope you danced.",
+        "Music off. Moment over. Back to business.",
+        "Another banger in the books.",
+        "Hope that was worth it. It was for me.",
+    )
+
+    def _handle_dance_short(self) -> State | None:
+        """Speak an intro, dance to Cantina Band for a fixed duration, then stop."""
+        if self._servos is not None and self._servos.is_dancing:
+            self._speak_simple("I am already dancing. Keep up.", emotion="excited")
+            return None
+
+        intro = random.choice(self._DANCE_INTRO_LINES)
+        self._speak_simple(intro, emotion="excited")
+
+        # Hand off servo control from idle thread to dance loop.
+        if self._servos is not None:
+            self._servos.stop()
+            self._servos.start_dancing()
+
+        cantina = config.CANTINA_BAND_PATH
+        if cantina.exists():
+            self._player.play_music(cantina, loop=False)
+        else:
+            log.warning("Cantina Band not found at %s — dancing without music", cantina)
+
+        # Dance for the configured duration, then fade music.
+        time.sleep(config.DANCE_SHORT_DURATION)
+        self._player.fade_music(duration=config.DANCE_FADE_DURATION)
+
+        # Stop dancing and restore idle servo motion.
+        if self._servos is not None:
+            self._servos.stop_dancing()
+            self._servos.start()
+
+        outro = random.choice(self._DANCE_OUTRO_LINES)
+        self._speak_simple(outro, emotion="excited")
+        return None
+
+    def _handle_play_music(self) -> State | None:
+        """Pick a random track, dance while it plays, then speak an outro."""
+        if self._servos is not None and self._servos.is_dancing:
+            self._speak_simple("I am already dancing. Keep up.", emotion="excited")
+            return None
+
+        if not self._music_tracks:
+            log.info("No music tracks available for play_music action")
+            self._speak_simple(
+                "I don't seem to have any music loaded right now.", emotion="neutral"
+            )
+            return None
+
+        track = random.choice(self._music_tracks)
+        log.info("play_music action: selected %s", track.name)
+
+        intro = random.choice(self._DANCE_MUSIC_INTRO_LINES)
+        self._speak_simple(intro, emotion="excited")
+
+        # Hand off servo control from idle thread to dance loop.
+        if self._servos is not None:
+            self._servos.stop()
+            self._servos.start_dancing()
+
+        self._player.play_music(track, loop=False)
+        self._player.wait_for_music(timeout=600.0)
+
+        # Stop dancing and restore idle servo motion.
+        if self._servos is not None:
+            self._servos.stop_dancing()
+            self._servos.start()
+
+        outro = random.choice(self._DANCE_MUSIC_OUTRO_LINES)
+        self._speak_simple(outro, emotion="excited")
+        return None
 
     # ------------------------------------------------------------------
     # Music helpers
