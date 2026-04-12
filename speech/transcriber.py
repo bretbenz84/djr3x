@@ -245,30 +245,37 @@ class Transcriber:
             config.AUDIO_INPUT_DEVICE, config.AUDIO_SAMPLE_RATE,
             config.AUDIO_CHUNK_SIZE, self._speech_threshold,
         )
-        # Use a stricter threshold to START speech than to CONTINUE speech.
-        # This reduces false starts in quiet rooms while still letting natural
-        # speech dip below the initial peak once recording is underway.
+        # Use a meaningfully stricter threshold to START speech than to
+        # CONTINUE speech. The previous logic could collapse both thresholds
+        # to the calibration floor (e.g. 300), which made steady room noise
+        # look like speech after only a few chunks.
         speech_detect_threshold = max(
             config.TRANSCRIBE_SPEECH_THRESHOLD_MIN,
-            int(self._speech_threshold * 0.65),
+            int(self._speech_threshold * 0.75),
         )
         speech_start_threshold = max(
-            speech_detect_threshold,
-            int(self._speech_threshold * 0.90),
+            self._speech_threshold,
+            int(self._speech_threshold * 1.20),
+        )
+        speech_confirm_peak_threshold = max(
+            speech_start_threshold + 80,
+            int(self._speech_threshold * 1.35),
         )
         stall_threshold = max(10.0, speech_detect_threshold * 0.05)
         log.info(
-            "Transcriber thresholds: calibrated=%d, speech-start=%d, speech-detect=%d, stall<=%.0f%s",
+            "Transcriber thresholds: calibrated=%d, speech-start=%d, speech-detect=%d, confirm-peak=%d, stall<=%.0f%s",
             self._speech_threshold,
             speech_start_threshold,
             speech_detect_threshold,
+            speech_confirm_peak_threshold,
             stall_threshold,
             _mark(),
         )
         log.debug(
-            "Transcriber: speech-detect threshold=%d (base=%d), stall threshold=%.0f",
+            "Transcriber: speech-detect threshold=%d (base=%d), speech-confirm-peak=%d, stall threshold=%.0f",
             speech_detect_threshold,
             self._speech_threshold,
+            speech_confirm_peak_threshold,
             stall_threshold,
         )
 
@@ -283,6 +290,7 @@ class Transcriber:
             speech_started = False
             speech_first_chunk = None
             consecutive_speech: int = 0
+            speech_run_peak: float = 0.0
             silence_chunks: int = 0
             near_zero_chunks: int = 0
             voiced_chunks: int = 0
@@ -332,16 +340,22 @@ class Transcriber:
                             if speech_first_chunk is None:
                                 speech_first_chunk = chunk_index
                             consecutive_speech += 1
+                            speech_run_peak = max(speech_run_peak, rms)
                             voiced_chunks += 1
                             silence_chunks = 0   # reset Phase 2 silence counter
 
-                            if not speech_started and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS:
+                            if (
+                                not speech_started
+                                and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS
+                                and speech_run_peak >= speech_confirm_peak_threshold
+                            ):
                                 # ---- Phase 1 → Phase 2 transition ----
                                 speech_started = True
                                 log.info("Speech detected, recording …%s", _mark())
                         else:
                             # --- below-threshold chunk ---
                             consecutive_speech = 0
+                            speech_run_peak = 0.0
                             if speech_started:
                                 silence_chunks += 1   # only count silence in Phase 2
 
