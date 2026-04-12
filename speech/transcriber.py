@@ -253,13 +253,22 @@ class Transcriber:
             config.TRANSCRIBE_SPEECH_THRESHOLD_MIN,
             int(self._speech_threshold * 0.75),
         )
-        speech_start_threshold = max(
-            self._speech_threshold,
-            int(self._speech_threshold * 1.20),
+        # Require a modest bump above the calibrated floor, but cap the boost
+        # so a noisy calibration (e.g. startup chatter / room noise) does not
+        # make real speech effectively unreachable.
+        speech_start_threshold = min(
+            self._speech_threshold + 40,
+            max(
+                speech_detect_threshold + 30,
+                int(self._speech_threshold * 1.02),
+            ),
         )
-        speech_confirm_peak_threshold = max(
-            speech_start_threshold + 80,
-            int(self._speech_threshold * 1.35),
+        speech_confirm_peak_threshold = min(
+            speech_start_threshold + 60,
+            max(
+                speech_start_threshold + 25,
+                int(self._speech_threshold * 1.08),
+            ),
         )
         stall_threshold = max(10.0, speech_detect_threshold * 0.05)
         log.info(
