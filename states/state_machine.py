@@ -154,6 +154,7 @@ _ANGRY_TRIGGER_PHRASES: tuple[str, ...] = (
     "fuck you",
     "youre dumb",
     "i hate you",
+    "you suck",
     "you talk too much",
     "youre ugly",
     "youre not very smart",
