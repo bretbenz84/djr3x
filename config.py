@@ -468,6 +468,13 @@ HEAD_TRACKING_RESOLUTION: tuple[int, int] = (
 # to its full extreme.  Increase if the servo never reaches min/max.
 HEAD_TRACKING_X_MARGIN: float = float(_optional("HEAD_TRACKING_X_MARGIN", "0.15"))
 HEAD_TRACKING_Y_MARGIN: float = float(_optional("HEAD_TRACKING_Y_MARGIN", "0.10"))
+# Asymmetric tilt margins — headtilt has a larger bottom margin so the
+# neutral crossover sits in the upper portion of the frame (where faces
+# typically appear when Rex's camera is at roughly face height).
+# Neutral crossover = TILT_TOP_MARGIN + (1 - both) * 0.5 of frame height.
+# With defaults 0.10 / 0.35 that puts neutral at ~37 % from the top.
+HEAD_TRACKING_TILT_TOP_MARGIN: float = float(_optional("HEAD_TRACKING_TILT_TOP_MARGIN", "0.10"))
+HEAD_TRACKING_TILT_BOT_MARGIN: float = float(_optional("HEAD_TRACKING_TILT_BOT_MARGIN", "0.35"))
 
 # When True, Rex runs a 5-question interview after enrolling a new person and
 # stores the answers as persistent memories in the face DB.
