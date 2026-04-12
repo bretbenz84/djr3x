@@ -709,8 +709,13 @@ class StateMachine:
             finally:
                 self._wake_word.resume()
 
-            # --- No speech detected within the timeout window ---
-            if text is None:
+            # --- No usable speech detected within the timeout window ---
+            # Treat both a hard timeout (None) and an empty / hallucination-
+            # filtered transcription ("") as silence so background noise
+            # does not trap Rex in repeated fake-speech loops.
+            if text is None or text == "":
+                if text == "":
+                    log.info("Empty transcription treated as silence/no-response")
                 if after_response:
                     log.info(
                         "Follow-up silence timeout (%.0f s) — returning to IDLE",
@@ -782,12 +787,6 @@ class StateMachine:
                     self._transition_to(State.IDLE)
                     return
                 # else: second-chance produced text — fall through to process it
-
-            # --- Speech detected but Whisper returned nothing ---
-            if not text:
-                log.debug("Empty transcription — waiting again")
-                after_response = True   # speech was heard; skip "are you there?" next time
-                continue
 
             # --- We have a transcription ---
             after_response = True
