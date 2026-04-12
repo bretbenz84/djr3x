@@ -32,7 +32,8 @@
       "Bash(ls venv/lib/python*/site-packages/cv2*)",
       "Bash(venv/bin/python -c \"import cv2; print\\('cv2:', cv2.__version__\\)\")",
       "Bash(venv/bin/python -c \"import vision.head_tracker; print\\('head_tracker OK'\\)\")",
-      "Bash(venv/bin/python -c \"import config; print\\('HEAD_TRACKING_ENABLED:', config.HEAD_TRACKING_ENABLED\\); print\\('HEAD_TRACKING_RESOLUTION:', config.HEAD_TRACKING_RESOLUTION\\)\")"
+      "Bash(venv/bin/python -c \"import config; print\\('HEAD_TRACKING_ENABLED:', config.HEAD_TRACKING_ENABLED\\); print\\('HEAD_TRACKING_RESOLUTION:', config.HEAD_TRACKING_RESOLUTION\\)\")",
+      "Bash(venv/bin/python -c \"import vision.head_tracker; import vision.camera; print\\('imports OK'\\)\")"
     ]
   }
 }

@@ -285,7 +285,7 @@ class StateMachine:
         # HEAD_TRACKING_ENABLED is False.
         if config.HEAD_TRACKING_ENABLED and self._servos is not None:
             self._head_tracker: HeadTracker | None = HeadTracker(
-                self._servos, config.CAMERA_DEVICE_INDEX, config
+                self._servos, self._camera, config
             )
         else:
             self._head_tracker = None
@@ -413,7 +413,7 @@ class StateMachine:
         # Start head tracker after camera warmup so is_available() is reliable.
         if self._head_tracker is not None:
             self._head_tracker.start()
-            log.info("StateMachine: Head tracking  — CONNECTED (device %d)", config.CAMERA_DEVICE_INDEX)
+            log.info("StateMachine: Head tracking  — CONNECTED (shared camera)")
         elif not config.HEAD_TRACKING_ENABLED:
             log.info("StateMachine: Head tracking  — DISABLED")
         else:

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import threading
 import time
 from typing import Optional
 
@@ -41,6 +42,10 @@ class Camera:
     def __init__(self) -> None:
         self._cap: cv2.VideoCapture | None = None
         self._available: bool = False
+        # Serialises cap.read() calls between capture_frame() (main thread)
+        # and get_tracking_frame() (head-tracker background thread) so two
+        # concurrent reads never interleave on the same VideoCapture handle.
+        self._cap_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Setup
@@ -154,17 +159,20 @@ class Camera:
         # pose is reflected in the captured image rather than returning an
         # older buffered frame from before the servo movement settled.
         for _ in range(max(0, config.CAMERA_CAPTURE_FLUSH_FRAMES)):
-            ok, frame = self._cap.read()
+            with self._cap_lock:
+                ok, frame = self._cap.read()
             if not ok or frame is None:
                 break
 
-        ok, frame = self._cap.read()
+        with self._cap_lock:
+            ok, frame = self._cap.read()
         if not ok or frame is None:
             log.warning("Camera: frame read failed — attempting reopen")
             self._reopen()
             if not self._available or self._cap is None:
                 return None
-            ok, frame = self._cap.read()
+            with self._cap_lock:
+                ok, frame = self._cap.read()
             if not ok or frame is None:
                 log.warning("Camera: frame read failed after reopen")
                 return None
@@ -184,6 +192,30 @@ class Camera:
         b64 = base64.b64encode(buf.tobytes()).decode("ascii")
         log.debug("Camera: frame captured successfully (%d bytes b64)", len(b64))
         return b64
+
+    def get_tracking_frame(self) -> Optional[np.ndarray]:
+        """Capture one raw frame resized to HEAD_TRACKING_RESOLUTION.
+
+        Returns a BGR numpy array ready for cv2.cvtColor / face detection,
+        or None if the camera is unavailable or the read fails.
+
+        Thread-safe — shares the same VideoCapture as capture_frame() and
+        serialises reads with _cap_lock so the two paths never interleave.
+        Intentionally skips the flush loop used by capture_frame() because
+        the head tracker only needs any recent frame, not the freshest one
+        from a just-settled servo pose.
+        """
+        if not self._available or self._cap is None:
+            return None
+
+        with self._cap_lock:
+            ok, frame = self._cap.read()
+
+        if not ok or frame is None:
+            return None
+
+        w, h = config.HEAD_TRACKING_RESOLUTION
+        return cv2.resize(frame, (w, h))
 
     def _reopen(self) -> None:
         """Release and reopen the camera after a runtime failure."""
