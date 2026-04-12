@@ -103,6 +103,9 @@ class HeadTracker:
         self._tilt_lo: int = self._tilt_neutral - _tilt_half      # 4080 qµs (up)
         self._tilt_hi: int = self._tilt_neutral + _tilt_half      # 4560 qµs (down)
 
+        # Visor max — sent once at tracker start to keep camera unobstructed
+        self._visor_max: int = cfg.SERVO_CHANNELS[3]["max"]
+
         # EMA-smoothed positions (float for sub-qµs accumulation)
         self._smooth_neck: float = float(self._neck_neutral)
         self._smooth_tilt: float = float(self._tilt_neutral)
@@ -140,6 +143,10 @@ class HeadTracker:
             name="djr3x-head-tracker",
         )
         self._thread.start()
+        # Open visor fully so the camera has an unobstructed view.
+        if self._servos is not None:
+            self._servos.set_tracking_active(True)
+            self._servos.set_position(3, self._visor_max)
         log.info(
             "HeadTracker: started — shared camera, tracking frame %dx%d",
             self._frame_w, self._frame_h,
@@ -154,6 +161,8 @@ class HeadTracker:
             if self._thread.is_alive():
                 log.warning("HeadTracker: thread did not stop within 3 s")
             self._thread = None
+        if self._servos is not None:
+            self._servos.set_tracking_active(False)
         log.info("HeadTracker: stopped")
 
     def pause(self, reason: str = "") -> None:

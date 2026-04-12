@@ -130,6 +130,9 @@ class ServoController:
         # Set by pause_arm_idle() to prevent the idle loop from sending conflicting
         # commands to ch 4/5/7 while an arm animation is running.
         self._arm_idle_pause = threading.Event()
+        # Set by HeadTracker.start() so the idle loop never closes the visor
+        # below its midpoint while the camera is actively tracking a face.
+        self._tracking_active: bool = False
 
         self._serial = self._open_maestro_serial()
 
@@ -489,6 +492,15 @@ class ServoController:
         self._arm_idle_pause.clear()
         log.debug("Arm idle resumed")
 
+    def set_tracking_active(self, active: bool) -> None:
+        """Tell the idle loop whether head tracking is running.
+
+        When True the visor idle target is clamped to [visor_mid, visor_max]
+        so the camera is never obstructed by the visor drifting too low.
+        """
+        self._tracking_active = active
+        log.debug("ServoController: tracking_active=%s", active)
+
     # ------------------------------------------------------------------
     # Dance mode
     # ------------------------------------------------------------------
@@ -699,18 +711,23 @@ class ServoController:
 
             # --- Visor idle: ch 3 ---
             if now >= _next_visor:
-                # Drift around a naturally open resting position — centre ~5650,
-                # ±150 qµs window.  Higher = more open; this keeps eyes visible
-                # without being fully extended.
-                _VISOR_IDLE_CENTER = 5650
-                _VISOR_IDLE_HALF   = 150
                 v_min = config.SERVO_CHANNELS[config.SERVO_VISOR]["min"]
                 v_max = config.SERVO_CHANNELS[config.SERVO_VISOR]["max"]
-                target = _clamp(
-                    random.randint(_VISOR_IDLE_CENTER - _VISOR_IDLE_HALF,
-                                   _VISOR_IDLE_CENTER + _VISOR_IDLE_HALF),
-                    v_min, v_max,
-                )
+                v_mid = (v_min + v_max) // 2
+                if self._tracking_active:
+                    # Head tracking is live — keep visor above midpoint so the
+                    # camera lens is never obstructed.
+                    target = random.randint(v_mid, v_max)
+                else:
+                    # Normal idle: drift around a naturally open resting
+                    # position — centre ~5650, ±150 qµs window.
+                    _VISOR_IDLE_CENTER = 5650
+                    _VISOR_IDLE_HALF   = 150
+                    target = _clamp(
+                        random.randint(_VISOR_IDLE_CENTER - _VISOR_IDLE_HALF,
+                                       _VISOR_IDLE_CENTER + _VISOR_IDLE_HALF),
+                        v_min, v_max,
+                    )
                 with self._lock:
                     self._send_speed(config.SERVO_VISOR, config.SERVO_VISOR_IDLE_SPEED)
                     self._send_target(config.SERVO_VISOR, target)
