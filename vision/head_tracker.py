@@ -20,10 +20,11 @@ Tracking geometry
 
   Y axis (headtilt, ch 2) — tilts with face height (inverted channel):
     Headtilt is INVERTED — lower qµs = head tilts up, higher = tilts down.
-    Uses asymmetric margins so neutral crossover sits in the upper frame:
-      Face in top TILT_TOP_MARGIN (default 10 %)  → tilt_lo (3920) — fully up
-      Face in bottom TILT_BOT_MARGIN (default 35 %) → tilt_hi (4720) — fully down
-      Neutral crossover at ~37 % from top (top_margin + active * 0.5)
+    Continuous linear mapping with a bias shift:
+      t_tilt = tilt_neutral + (y_scaled − TILT_Y_BIAS) × tilt_span
+    With default bias 0.35 the neutral crossover is at y_scaled ≈ 0.35
+    (roughly 38 % from top of frame), so faces at normal viewing height
+    already produce a downward tilt.
     Clamped within physical servo limits [3904, 5504].
 
 Thread model
@@ -103,10 +104,9 @@ class HeadTracker:
         self._x_margin: float = getattr(cfg, "HEAD_TRACKING_X_MARGIN", 0.15)
         self._y_margin: float = getattr(cfg, "HEAD_TRACKING_Y_MARGIN", 0.10)
 
-        # Asymmetric tilt margins — separate from headlift y_margin.
-        # Larger bot margin shifts the neutral crossover into the upper frame.
-        self._tilt_top_margin: float = getattr(cfg, "HEAD_TRACKING_TILT_TOP_MARGIN", 0.10)
-        self._tilt_bot_margin: float = getattr(cfg, "HEAD_TRACKING_TILT_BOT_MARGIN", 0.35)
+        # Bias shifts the tilt neutral crossover above 0.5 so faces in the
+        # upper-middle of the frame already produce a downward tilt.
+        self._tilt_y_bias: float = getattr(cfg, "HEAD_TRACKING_TILT_Y_BIAS", 0.35)
 
         # Neck limits (full pan range)
         _neck = cfg.SERVO_CHANNELS[_CH_NECK]
@@ -319,13 +319,15 @@ class HeadTracker:
                 )
                 t_lift = max(self._lift_min, min(self._lift_max, t_lift))
 
-                # Y → headtilt with asymmetric margins (inverted: low qµs = up, high = down).
-                # Face in top tilt_top_margin of frame → fully up (tilt_lo).
-                # Face in bottom tilt_bot_margin of frame → fully down (tilt_hi).
-                # Neutral crossover at tilt_top_margin + active_zone * 0.5 of frame height.
-                tilt_active = max(0.01, 1.0 - self._tilt_top_margin - self._tilt_bot_margin)
-                tilt_y = max(0.0, min(1.0, (y_raw - self._tilt_top_margin) / tilt_active))
-                t_tilt = int(self._tilt_lo + tilt_y * (self._tilt_hi - self._tilt_lo))
+                # Y → headtilt (inverted: low qµs = up, high = down).
+                # Same continuous linear formula as before — no saturation zones.
+                # tilt_y_bias shifts the neutral crossover above 0.5 so faces
+                # in the upper-middle of the frame produce a downward tilt.
+                tilt_span = self._tilt_hi - self._tilt_lo
+                t_tilt = int(
+                    self._tilt_neutral
+                    + (y_scaled - self._tilt_y_bias) * tilt_span
+                )
                 t_tilt = max(self._tilt_lo, min(self._tilt_hi, t_tilt))
 
                 log.debug(
