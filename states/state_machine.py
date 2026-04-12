@@ -4169,26 +4169,14 @@ class StateMachine:
     )
 
     def _handle_tell_time(self, original_text: str | None = None) -> None:
-        """Announce the current time in Rex style."""
+        """Announce the current time directly without using the LLM."""
+        import random
         current_time = realworld.get_current_time()
-        holiday      = realworld.get_holiday()
-
-        if holiday:
-            prompt = (
-                f"Announce that it is {current_time} and that today is {holiday}. "
-                f"Ask if the person is doing anything for it. Snarky Rex style. 1-2 sentences."
-            )
-        else:
-            prompt = (
-                f"Announce that the time is {current_time}. "
-                f"Make a Rex-style joke about it — e.g. whether the person is early, late, or clueless. "
-                f"1 sentence."
-            )
-
-        log.info("tell_time: time=%r holiday=%r", current_time, holiday)
-        line = self._llm_simple(self._REX_SYSTEM, prompt)
-        if not line:
-            line = f"It is {current_time}. Whether that means anything to you is entirely your problem."
+        log.info("tell_time: time=%r", current_time)
+        line = random.choice([
+            f"The time is {current_time}.",
+            f"It's {current_time}.",
+        ])
         self._speak_simple(line)
 
     def _handle_tell_date(self, original_text: str | None = None) -> None:
