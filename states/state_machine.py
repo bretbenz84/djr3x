@@ -728,6 +728,13 @@ class StateMachine:
                 if text == "":
                     log.info("Empty transcription treated as silence/no-response")
                 if after_response:
+                    # If music is playing, the mic likely picked up the track.
+                    # Don't return to IDLE — keep listening for real commands.
+                    if self._player.is_music_playing:
+                        log.info(
+                            "Music is playing — suppressing idle timeout, continuing to listen"
+                        )
+                        continue
                     log.info(
                         "Follow-up silence timeout (%.0f s) — returning to IDLE",
                         config.ACTIVE_TIMEOUT_SECONDS,

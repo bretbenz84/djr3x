@@ -540,23 +540,33 @@ void tickIdle(float dt) {
 // Sleep animation — slow red mouth breathing
 // ---------------------------------------------------------------------------
 //
-// All 80 mouth pixels pulse together from 0 to 127 brightness in a smooth
-// sine wave with an 8000 ms period (one full breath cycle).  Eyes are NOT
-// touched — they are owned by tickIdle() / tickBlink() in SLEEP state.
+// All 80 mouth pixels ramp linearly from 0 to 30 % brightness over 4 s then
+// back to 0 over the next 4 s (triangle wave, 8 s period).  Peak R value is
+// 76 out of 255 (≈ 30 %).  Strip uses RGB byte order so CRGB(r,0,0) = red.
 //
-// Uses millis() directly (no dt accumulation) so the breath stays locked to
-// wall-clock time regardless of loop jitter.
+// FastLED.show() is only called when the red byte changes (≈ every 52 ms at
+// this ramp rate) — avoids hammering the WS2812B bus hundreds of times per
+// second, which causes visible colour glitches.
+//
+// Eyes are NOT touched — they are off in SLEEP state.
 
 void tickSleep() {
     uint32_t now   = millis();
-    // Phase 0.0 → 1.0 over 8000 ms
-    float    phase = (float)(now % 8000UL) / 8000.0f;
-    // Sine envelope: 0 at phase 0, peak at phase 0.5, back to 0 at phase 1
-    float    brightness = 0.5f * (1.0f - cosf(TWO_PI * phase));  // 0.0 – 1.0
-    uint8_t  b = (uint8_t)(brightness * 127.0f);                 // 0 – 127
+    // Triangle wave: phase 0→0.5 ramps up, 0.5→1.0 ramps down.
+    float    phase = (float)(now % 8000UL) / 8000.0f;      // 0.0 – 1.0
+    float    tri   = (phase < 0.5f) ? (phase * 2.0f)
+                                    : (2.0f - phase * 2.0f); // 0.0 – 1.0
+    // Cap at 30 % brightness (76 / 255 ≈ 29.8 %)
+    uint8_t  r     = (uint8_t)(tri * 76.0f);
+
+    // Only push a new frame when the value has actually changed.
+    // This throttles show() to ~19 calls/s and eliminates bus hammering.
+    static uint8_t lastR = 255;   // sentinel: non-zero so first call always fires
+    if (r == lastR) return;
+    lastR = r;
 
     for (uint8_t i = MOUTH_START; i < NUM_LEDS; i++) {
-        leds[i] = CRGB(b, 0, 0);   // red only
+        leds[i] = CRGB(r, 0, 0);   // RGB order — R channel only = red
     }
     FastLED.show();
 }

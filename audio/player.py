@@ -216,6 +216,11 @@ class AudioPlayer:
             self._music_thread.join(timeout=2.0)
             self._music_thread = None
 
+    @property
+    def is_music_playing(self) -> bool:
+        """True while a music track is actively playing in the background."""
+        return self._music_thread is not None and self._music_thread.is_alive()
+
     def wait_for_music(self, timeout: float = 30.0) -> bool:
         """Block until the current music/chime thread exits (or timeout).
         Returns True if the thread finished cleanly, False on timeout."""
