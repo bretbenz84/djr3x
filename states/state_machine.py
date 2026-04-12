@@ -740,15 +740,26 @@ class StateMachine:
                     self._post_greeting_person_id is not None
                     and not self._post_greeting_prompt_used
                 ):
-                    status, next_state = self._run_post_greeting_plan_prompt()
-                    if next_state is not None:
-                        if next_state == State.IDLE:
-                            self._play_return_to_idle_chime()
-                        self._transition_to(next_state)
-                        return
-                    if status != "no_answer":
+                    # On subsequent wakes, 50% of the time ask a remaining
+                    # interview question instead of the plan prompt.
+                    use_interview = (
+                        self._session_wake_count > 1
+                        and random.random() < 0.5
+                    )
+                    if use_interview and self._run_followup_interview_question():
                         after_response = True
                         continue
+
+                    if not self._post_greeting_prompt_used:
+                        status, next_state = self._run_post_greeting_plan_prompt()
+                        if next_state is not None:
+                            if next_state == State.IDLE:
+                                self._play_return_to_idle_chime()
+                            self._transition_to(next_state)
+                            return
+                        if status != "no_answer":
+                            after_response = True
+                            continue
 
                 # First listen — prompt with "are you there?"
                 prompt = random.choice(_ARE_YOU_THERE_PHRASES)
@@ -1508,6 +1519,86 @@ class StateMachine:
 
         return "no_answer", None
 
+    def _run_followup_interview_question(self) -> bool:
+        """Ask one remaining enrollment-interview question during a subsequent wake.
+
+        Called from the silence handler on subsequent wakes (50% chance, only
+        when the plan prompt hasn't fired).  Stamps the question as asked,
+        listens for an answer, stores the memory, and reacts.
+
+        Returns True if a question was asked (caller should set after_response),
+        False if there were no remaining questions or a guard failed.
+        """
+        person_id = self._post_greeting_person_id
+        name = self._post_greeting_person_name
+        if person_id is None or not name:
+            return False
+
+        try:
+            asked = self._face_db.get_asked_interview_questions(person_id)
+        except Exception:
+            log.exception("Follow-up interview: DB error fetching asked questions")
+            return False
+
+        remaining = [q for q in _ENROLLMENT_INTERVIEW_QUESTIONS if q not in asked]
+        if not remaining:
+            log.info("Follow-up interview: all questions already asked for person_id=%d", person_id)
+            return False
+
+        question = random.choice(remaining)
+        log.info("Follow-up interview: asking %r for person_id=%d", question, person_id)
+
+        # Stamp before speaking so it's recorded even if the answer is skipped.
+        try:
+            self._face_db.stamp_interview_question(person_id, question)
+        except Exception:
+            log.exception("Follow-up interview: failed to stamp question %r", question)
+
+        self._post_greeting_prompt_used = True
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(question)
+        except Exception:
+            log.exception("Follow-up interview: TTS error asking question")
+        finally:
+            self._end_speech(servo_stop)
+
+        answer = self._listen_for_prompt_answer(config.WAKE_NO_SPEECH_TIMEOUT)
+        if not answer:
+            log.info("Follow-up interview: no answer for %r — skipping storage", question)
+            return True  # question was asked; still counts as activity
+
+        log.info("Follow-up interview: Q=%r  A=%r", question, answer)
+
+        if person_id is not None:
+            memory_data = self._llm.extract_memory(question, answer)
+            if memory_data:
+                try:
+                    self._face_db.add_memory(
+                        person_id=person_id,
+                        category=memory_data.get("category", "fact"),
+                        key=memory_data.get("key", "unknown"),
+                        value=memory_data.get("value", answer[:200]),
+                        raw_quote=answer,
+                        expires_at=memory_data.get("expires_at"),
+                        follow_up_after=memory_data.get("follow_up_after"),
+                    )
+                except Exception:
+                    log.exception("Follow-up interview: failed to store memory")
+
+        reaction = self._llm.react_to_answer(question, answer)
+        if reaction:
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak(reaction)
+            except Exception:
+                log.exception("Follow-up interview: TTS error reacting")
+            finally:
+                self._end_speech(servo_stop)
+
+        return True
+
     def _build_plan_question(self, name: str) -> str:
         """Return a day-appropriate plan question for a known person."""
         weekday = date.today().weekday()
@@ -1758,6 +1849,15 @@ class StateMachine:
         for question in questions:
             if self._shutdown_event.is_set():
                 return
+
+            # Stamp the question as asked before speaking so it is recorded
+            # even if the person gives no answer or the program crashes after.
+            person_id = self._last_greeted_person_id
+            if person_id is not None:
+                try:
+                    self._face_db.stamp_interview_question(person_id, question)
+                except Exception:
+                    log.exception("Enrollment interview: failed to stamp question %r", question)
 
             # Ask the question.
             servo_stop = self._begin_speech(emotion="excited")

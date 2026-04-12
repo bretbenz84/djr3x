@@ -469,6 +469,33 @@ class FaceDB:
             )
         log.debug("FaceDB: marked memory id=%d as followed up", memory_id)
 
+    def get_asked_interview_questions(self, person_id: int) -> set[str]:
+        """Return the set of interview question texts already asked to a person.
+
+        Questions are stamped with category='interview_question' when asked
+        during enrollment or follow-up interview sessions.
+        """
+        rows = self._conn.execute(
+            """SELECT key FROM memories
+               WHERE person_id = ? AND category = 'interview_question'""",
+            (person_id,),
+        ).fetchall()
+        return {row["key"] for row in rows}
+
+    def stamp_interview_question(self, person_id: int, question: str) -> None:
+        """Record that *question* has been asked to *person_id*.
+
+        Idempotent — calling twice for the same question is harmless because
+        the query in get_asked_interview_questions returns a set.
+        """
+        with self._conn:
+            self._conn.execute(
+                """INSERT INTO memories (person_id, category, key, value, raw_quote)
+                   VALUES (?, 'interview_question', ?, 'asked', '')""",
+                (person_id, question),
+            )
+        log.debug("FaceDB: stamped interview question for person_id=%d: %r", person_id, question)
+
     def get_memories_as_context(self, person_id: int) -> str:
         """Return a single formatted string of all memories suitable for a GPT system prompt.
 
