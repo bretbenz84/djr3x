@@ -356,6 +356,7 @@ WHISPER_HALLUCINATION_FILTER: list[str] = [
     "okay okay",
     "ok ok ok",
     "ok ok",
+    "motivation motivation",
 ]
 
 # Exact lowercased phrases that Whisper sometimes hallucinates on near-silence.
