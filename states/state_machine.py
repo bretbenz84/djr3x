@@ -1290,9 +1290,12 @@ class StateMachine:
         )
 
         if result is None:
-            if status == "no_match":
-                # Case 4: unknown person — snark + enrollment
-                log.info("Wake greeting: case 4 — unknown face, running stranger snark + enrollment")
+            if status in ("no_match", "db_empty"):
+                # Case 4: unknown person or empty DB — snark + enrollment
+                log.info(
+                    "Wake greeting: case 4 — unknown face/status=%s, running stranger snark + enrollment",
+                    status,
+                )
                 line = random.choice(_STRANGER_LINES)
                 servo_stop = self._begin_speech(emotion="excited")
                 try:
