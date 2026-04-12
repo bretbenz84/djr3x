@@ -584,7 +584,7 @@ void tickAnimation() {
 // ---------------------------------------------------------------------------
 
 void setup() {
-    FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+    FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
     FastLED.setBrightness(255);
 
     // WS2812B pixels can latch random data on power-on before the first show().
