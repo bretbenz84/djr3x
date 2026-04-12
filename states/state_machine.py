@@ -3662,12 +3662,16 @@ class StateMachine:
     def _classify_angry_intent(self, text: str) -> str | None:
         """Return 'on' or 'off' when text clearly insults or de-escalates Rex."""
         normalized = normalize(text)
+        log.debug("Angry classifier: normalized=%r", normalized)
         if not normalized:
             return None
         if _matches_phrase(normalized, _ANGRY_RESET_PHRASES, cutoff=0.82):
+            log.info("Angry classifier: RESET match for %r", normalized)
             return "off"
         if _matches_phrase(normalized, _ANGRY_TRIGGER_PHRASES, cutoff=0.82):
+            log.info("Angry classifier: TRIGGER match for %r", normalized)
             return "on"
+        log.debug("Angry classifier: no match for %r", normalized)
         return None
 
     _REX_SYSTEM = (
