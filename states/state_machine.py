@@ -64,6 +64,7 @@ from speech.wake_word import WakeWordDetector
 from utils import realworld
 from vision.camera import Camera
 from vision.face_db import FaceDB
+from vision.head_tracker import HeadTracker
 from vision.i_spy import build_round, guess_matches
 from vision.face_recognizer import FaceRecognizer
 
@@ -279,6 +280,16 @@ class StateMachine:
         self._face_db = FaceDB()
         self._face_recognizer = FaceRecognizer(self._face_db)
 
+        # Head tracking — created here; started in start() after camera warmup.
+        # Requires servos; disabled gracefully when servos are absent or
+        # HEAD_TRACKING_ENABLED is False.
+        if config.HEAD_TRACKING_ENABLED and self._servos is not None:
+            self._head_tracker: HeadTracker | None = HeadTracker(
+                self._servos, config.CAMERA_DEVICE_INDEX, config
+            )
+        else:
+            self._head_tracker = None
+
         # State control
         self._state: State = State.IDLE
         self._wake_event = threading.Event()    # set by wake word callback
@@ -399,6 +410,15 @@ class StateMachine:
         if startup_error[0] is not None:
             raise startup_error[0]
 
+        # Start head tracker after camera warmup so is_available() is reliable.
+        if self._head_tracker is not None:
+            self._head_tracker.start()
+            log.info("StateMachine: Head tracking  — CONNECTED (device %d)", config.CAMERA_DEVICE_INDEX)
+        elif not config.HEAD_TRACKING_ENABLED:
+            log.info("StateMachine: Head tracking  — DISABLED")
+        else:
+            log.info("StateMachine: Head tracking  — MISSING (no servo controller)")
+
         log.info("StateMachine: all subsystems ready.")
 
     def run(self) -> None:
@@ -423,6 +443,7 @@ class StateMachine:
         log.info("StateMachine: shutting down subsystems")
         for label, fn in (
             ("wake word", self._wake_word.stop),
+            ("head tracker", self._head_tracker.stop if self._head_tracker is not None else None),
             ("servos", self._servos.close if self._servos is not None else None),
             ("leds", self._leds.close),
             ("audio player", self._player.close),
@@ -931,6 +952,10 @@ class StateMachine:
         # Stop servo idle thread before the animation so arm channels are free.
         if self._servos is not None:
             self._servos.stop()
+
+        # Head tracker must not fight the shutdown animation for neck/headtilt.
+        if self._head_tracker is not None:
+            self._head_tracker.pause("shutdown animation")
 
         # Start shutdown music and servo animation concurrently, then wait for
         # both to finish before tearing down hardware.
@@ -2688,9 +2713,13 @@ class StateMachine:
         if not self._camera.is_available():
             return self._speak_i_spy_failure()
 
+        if self._head_tracker is not None:
+            self._head_tracker.pause("i_spy capture")
         restore = self._prepare_i_spy_camera_pose()
         frame = self._camera.capture_frame()
         self._restore_servo_pose(restore)
+        if self._head_tracker is not None:
+            self._head_tracker.resume("i_spy done")
         if not frame:
             log.warning("I Spy: camera capture returned no frame")
             return self._speak_i_spy_failure()
@@ -3243,37 +3272,28 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def _prepare_camera_pose(self) -> dict[int, int] | None:
-        """Move visor/head into a stable capture pose before taking a frame.
+        """Open visor for a camera capture and wait for face to centre.
 
-        Sends position commands for visor (ch 3), neck pan (ch 0), and head tilt
-        (ch 2) together, then sleeps config.CAMERA_POSE_SETTLE_SECS so the
-        servos reach position before the caller calls capture_frame().
+        The head tracker continuously points neck (ch 0) and headtilt (ch 2) at
+        the face, so this method only opens the visor (ch 3) and then waits for
+        the tracker to confirm the face is centred before the caller grabs a
+        frame.
 
-        Returns a restore dict for _restore_servo_pose().  The restore targets
-        are the channel neutral positions — ServoController has no get_position
-        API, so neutral is the best approximation of "where they were" and is
-        also the position the idle loop naturally drifts toward.
-
-        Returns None if servos are unavailable (caller must still check).
+        Returns None — no servo restore is needed because the head tracker owns
+        neck/headtilt and the visor is left open for the next interaction.
+        Returns None also when servos are unavailable.
         """
         if self._servos is None:
             return None
 
-        restore = {
-            config.SERVO_VISOR:     config.SERVO_CHANNELS[config.SERVO_VISOR]["neutral"],
-            config.SERVO_HEAD_PAN:  config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["neutral"],
-            config.SERVO_HEAD_TILT: config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["neutral"],
-        }
-
         self._servos.set_channel_speed(config.SERVO_VISOR, config.SERVO_DEFAULT_SPEED)
-        self._servos.set_channel_speed(config.SERVO_HEAD_PAN, config.SERVO_DEFAULT_SPEED)
-        self._servos.set_channel_speed(config.SERVO_HEAD_TILT, config.SERVO_DEFAULT_SPEED)
         self._servos.set_position(config.SERVO_VISOR, config.CAMERA_POSE_VISOR)
-        self._servos.set_position(config.SERVO_HEAD_PAN, config.CAMERA_POSE_NECK)
-        self._servos.set_position(config.SERVO_HEAD_TILT, config.CAMERA_POSE_TILT)
-
         time.sleep(config.CAMERA_POSE_SETTLE_SECS)
-        return restore
+
+        if self._head_tracker is not None:
+            self._head_tracker.wait_for_center(timeout=2.0)
+
+        return None
 
     def _prepare_i_spy_camera_pose(self) -> dict[int, int] | None:
         """Turn dramatically left/right before an I Spy capture."""
@@ -3988,6 +4008,10 @@ class StateMachine:
         intro = random.choice(self._DANCE_INTRO_LINES)
         self._speak_simple(intro, emotion="excited")
 
+        # Head tracker must not fight the dance loop for neck/headtilt.
+        if self._head_tracker is not None:
+            self._head_tracker.pause("dance")
+
         # Hand off servo control from idle thread to dance loop.
         if self._servos is not None:
             self._servos.stop()
@@ -4007,6 +4031,9 @@ class StateMachine:
         if self._servos is not None:
             self._servos.stop_dancing()
             self._servos.start()
+
+        if self._head_tracker is not None:
+            self._head_tracker.resume("dance done")
 
         outro = random.choice(self._DANCE_OUTRO_LINES)
         self._speak_simple(outro, emotion="excited")
@@ -4031,6 +4058,10 @@ class StateMachine:
         intro = random.choice(self._DANCE_MUSIC_INTRO_LINES)
         self._speak_simple(intro, emotion="excited")
 
+        # Head tracker must not fight the dance loop for neck/headtilt.
+        if self._head_tracker is not None:
+            self._head_tracker.pause("play_music dance")
+
         # Hand off servo control from idle thread to dance loop.
         if self._servos is not None:
             self._servos.stop()
@@ -4043,6 +4074,9 @@ class StateMachine:
         if self._servos is not None:
             self._servos.stop_dancing()
             self._servos.start()
+
+        if self._head_tracker is not None:
+            self._head_tracker.resume("play_music done")
 
         outro = random.choice(self._DANCE_MUSIC_OUTRO_LINES)
         self._speak_simple(outro, emotion="excited")

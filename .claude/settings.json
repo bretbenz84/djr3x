@@ -24,7 +24,15 @@
       "Bash(ls /Users/bbenziger/djr3x/*.env*)",
       "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; print\\('OK', len\\(PHRASE_INDEX\\), 'phrases'\\)\")",
       "Bash(python3 -)",
-      "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; print\\('OK —', len\\(PHRASE_INDEX\\), 'phrases loaded'\\)\")"
+      "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; print\\('OK —', len\\(PHRASE_INDEX\\), 'phrases loaded'\\)\")",
+      "Bash(python -c \"import vision.head_tracker; print\\('head_tracker import OK'\\)\")",
+      "Bash(python -c \"import config; print\\('HEAD_TRACKING_ENABLED:', config.HEAD_TRACKING_ENABLED\\); print\\('HEAD_TRACKING_ALPHA:', config.HEAD_TRACKING_ALPHA\\); print\\('HEAD_TRACKING_DEAD_ZONE:', config.HEAD_TRACKING_DEAD_ZONE\\); print\\('HEAD_TRACKING_UPDATE_HZ:', config.HEAD_TRACKING_UPDATE_HZ\\); print\\('HEAD_TRACKING_RESOLUTION:', config.HEAD_TRACKING_RESOLUTION\\)\")",
+      "Bash(python -c \"import vision.head_tracker; print\\('OK'\\)\")",
+      "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(ls venv/lib/python*/site-packages/cv2*)",
+      "Bash(venv/bin/python -c \"import cv2; print\\('cv2:', cv2.__version__\\)\")",
+      "Bash(venv/bin/python -c \"import vision.head_tracker; print\\('head_tracker OK'\\)\")",
+      "Bash(venv/bin/python -c \"import config; print\\('HEAD_TRACKING_ENABLED:', config.HEAD_TRACKING_ENABLED\\); print\\('HEAD_TRACKING_RESOLUTION:', config.HEAD_TRACKING_RESOLUTION\\)\")"
     ]
   }
 }

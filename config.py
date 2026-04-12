@@ -451,6 +451,19 @@ FACE_RECOGNITION_TOLERANCE = float(_optional("FACE_RECOGNITION_TOLERANCE", "0.6"
 # but will NOT run `sudo shutdown -h now`.
 ENABLE_OS_SHUTDOWN: bool = _optional("ENABLE_OS_SHUTDOWN", "").lower() in ("1", "true", "yes")
 
+# ---------------------------------------------------------------------------
+# Vision — head tracking
+# ---------------------------------------------------------------------------
+
+HEAD_TRACKING_ENABLED:    bool  = _optional("HEAD_TRACKING_ENABLED",    "true").lower() not in ("0", "false", "no")
+HEAD_TRACKING_ALPHA:      float = float(_optional("HEAD_TRACKING_ALPHA",      "0.2"))   # EMA smoothing factor (0=frozen, 1=raw)
+HEAD_TRACKING_DEAD_ZONE:  int   = int(_optional("HEAD_TRACKING_DEAD_ZONE",  "30"))      # min qµs change before sending servo command
+HEAD_TRACKING_UPDATE_HZ:  float = float(_optional("HEAD_TRACKING_UPDATE_HZ",  "10"))   # max detection/servo-update rate
+HEAD_TRACKING_RESOLUTION: tuple[int, int] = (
+    int(_optional("HEAD_TRACKING_RES_W", "320")),
+    int(_optional("HEAD_TRACKING_RES_H", "240")),
+)
+
 # When True, Rex runs a 5-question interview after enrolling a new person and
 # stores the answers as persistent memories in the face DB.
 ENROLLMENT_INTERVIEW_ENABLED: bool = _optional(
