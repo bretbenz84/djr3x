@@ -536,19 +536,18 @@ class ServoController:
                 self._send_target(channel, cfg["neutral"])
         log.info("Dance stopped — servos returned to neutral.")
 
-    # (channel, frequency_multiplier, phase_offset_radians)
-    # Each channel gets its own frequency so they stay visually in motion
-    # together but gradually drift in and out of sync — full-body dancing.
-    # Phases are all near 0 so every servo starts moving at the same time.
-    _DANCE_CHANNELS: tuple[tuple[int, float, float], ...] = (
-        (0, 1.00, 0.00),   # neck       — base frequency
-        (1, 0.73, 0.20),   # headlift   — slightly slower
-        (2, 1.31, 0.10),   # headtilt   — slightly faster
-        (3, 0.61, 0.30),   # visor      — slowest
-        (4, 1.17, 0.15),   # elbow      — medium-fast
-        (5, 0.83, 0.25),   # hand       — medium-slow
-        (6, 1.43, 0.05),   # pokerarm   — fastest
-        (7, 0.91, 0.35),   # heroarm    — medium
+    # (channel, frequency_multiplier, phase_offset_radians, lo_pct, hi_pct)
+    # lo_pct/hi_pct limit each channel to a fraction of its configured range.
+    # Default is 0.0–1.0 (full range); tighten individual channels as needed.
+    _DANCE_CHANNELS: tuple[tuple[int, float, float, float, float], ...] = (
+        (0, 1.00, 0.00, 0.0, 1.0),   # neck       — full range
+        (1, 0.73, 0.20, 0.25, 0.75), # headlift   — 25–75 % (avoid extremes)
+        (2, 1.31, 0.10, 0.0, 1.0),   # headtilt   — full range
+        (3, 0.61, 0.30, 0.0, 1.0),   # visor      — full range
+        (4, 1.17, 0.15, 0.0, 1.0),   # elbow      — full range
+        (5, 0.83, 0.25, 0.0, 1.0),   # hand       — full range
+        (6, 1.43, 0.05, 0.0, 1.0),   # pokerarm   — full range
+        (7, 0.91, 0.35, 0.0, 1.0),   # heroarm    — full range
     )
     _DANCE_SPEED = 50          # slightly faster than excited (40); keeps motion smooth
     _DANCE_HZ    = 10          # update rate (Hz) — lower rate suits the gentler speed
@@ -570,12 +569,15 @@ class ServoController:
         # Set dance speed for all channels and pre-position them at t=0 targets
         # so the loop begins with all servos already in their start positions.
         with self._lock:
-            for ch, freq_mult, phase in self._DANCE_CHANNELS:
+            for ch, freq_mult, phase, lo_pct, hi_pct in self._DANCE_CHANNELS:
                 self._send_speed(ch, self._DANCE_SPEED)
-            for ch, freq_mult, phase in self._DANCE_CHANNELS:
+            for ch, freq_mult, phase, lo_pct, hi_pct in self._DANCE_CHANNELS:
                 ch_cfg = config.SERVO_CHANNELS[ch]
-                lo = ch_cfg["min"]
-                hi = ch_cfg["max"]
+                full_lo = ch_cfg["min"]
+                full_hi = ch_cfg["max"]
+                span = full_hi - full_lo
+                lo = full_lo + int(lo_pct * span)
+                hi = full_lo + int(hi_pct * span)
                 val = math.sin(0.0 * self._DANCE_FREQ * freq_mult + phase)
                 pos = _clamp(int(lo + (val + 1.0) / 2.0 * (hi - lo)), lo, hi)
                 self._send_target(ch, pos)
@@ -586,10 +588,13 @@ class ServoController:
 
         while not self._dance_stop_event.is_set():
             with self._lock:
-                for ch, freq_mult, phase in self._DANCE_CHANNELS:
+                for ch, freq_mult, phase, lo_pct, hi_pct in self._DANCE_CHANNELS:
                     ch_cfg = config.SERVO_CHANNELS[ch]
-                    lo = ch_cfg["min"]
-                    hi = ch_cfg["max"]
+                    full_lo = ch_cfg["min"]
+                    full_hi = ch_cfg["max"]
+                    span = full_hi - full_lo
+                    lo = full_lo + int(lo_pct * span)
+                    hi = full_lo + int(hi_pct * span)
                     val = math.sin(t * self._DANCE_FREQ * freq_mult + phase)
                     pos = _clamp(int(lo + (val + 1.0) / 2.0 * (hi - lo)), lo, hi)
                     self._send_target(ch, pos)
