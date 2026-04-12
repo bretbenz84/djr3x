@@ -9,9 +9,9 @@ shared 1080p capture down to 320×240 for detection.
 Tracking geometry
 -----------------
   X axis (neck, ch 0) — left/right panning:
-    Face at frame-left   (x=0)          → neck MAX (9984 qµs) — leftmost
+    Face at frame-left   (x=0)          → neck MIN (1984 qµs) — turns left
     Face at frame-centre (x=frame_w/2)  → neck NEUTRAL
-    Face at frame-right  (x=frame_w)    → neck MIN  (1984 qµs) — rightmost
+    Face at frame-right  (x=frame_w)    → neck MAX (9984 qµs) — turns right
 
   Y axis (headtilt, ch 2) — subtle tilt only:
     Headtilt is INVERTED — lower qµs = head tilts up.
@@ -247,10 +247,10 @@ class HeadTracker:
                 face_cx = x + w // 2
                 face_cy = y + h // 2
 
-                # X → neck: face-left = neck max, face-right = neck min
+                # X → neck: face-left (0) = neck min, face-right (frame_w) = neck max
                 t_neck = int(
-                    self._neck_max
-                    + (face_cx / self._frame_w) * (self._neck_min - self._neck_max)
+                    self._neck_min
+                    + (face_cx / self._frame_w) * (self._neck_max - self._neck_min)
                 )
                 t_neck = max(self._neck_min, min(self._neck_max, t_neck))
 
