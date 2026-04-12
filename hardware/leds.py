@@ -179,7 +179,14 @@ class LEDController:
         Call once before start_mouth() so the Arduino knows the emotion
         colour before SPEAK_LEVEL commands begin flowing.  Valid values:
         neutral, happy, excited, sad, angry.
+
+        Suppressed during sleep mode — sending SPEAK:{emotion} in that state
+        would switch the Arduino out of ANIM_SLEEP and corrupt the red breathing
+        animation with the emotion colour.
         """
+        if self._sleep_active:
+            log.debug("set_mouth_emotion: sleep active — suppressing SPEAK:%s", emotion)
+            return
         self._send_head(config.LED_CMD_SPEAK.format(emotion))
 
     def start_mouth(self) -> None:

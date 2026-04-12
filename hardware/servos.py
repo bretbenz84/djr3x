@@ -541,7 +541,7 @@ class ServoController:
     # Default is 0.0–1.0 (full range); tighten individual channels as needed.
     _DANCE_CHANNELS: tuple[tuple[int, float, float, float, float], ...] = (
         (0, 1.00, 0.00, 0.0, 1.0),   # neck       — full range
-        (1, 0.73, 0.20, 0.25, 0.75), # headlift   — 25–75 % (avoid extremes)
+        (1, 0.73, 0.20, 0.40, 0.60), # headlift   — 40–60 % (subtle movement)
         (2, 1.31, 0.10, 0.0, 1.0),   # headtilt   — full range
         (3, 0.61, 0.30, 0.0, 1.0),   # visor      — full range
         (4, 1.17, 0.15, 0.0, 1.0),   # elbow      — full range

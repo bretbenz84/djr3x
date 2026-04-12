@@ -2223,7 +2223,7 @@ class StateMachine:
         # Animation takes ~7.5 s; TTS is typically 3-4 s so the sequence
         # continues moving after the speech ends.
         self._animations.play_wake_from_sleep()
-        servo_stop = self._begin_speech(emotion="sad")
+        servo_stop = self._begin_speech(emotion="neutral")
         try:
             self._synthesizer.speak(wake_line)
         except Exception:
@@ -2277,7 +2277,7 @@ class StateMachine:
         # Launch the slow-collapse animation non-blocking, then speak the
         # sleep line concurrently so the TTS hides the animation startup.
         self._animations.play_sleep()
-        servo_stop = self._begin_speech(emotion="sad")
+        servo_stop = self._begin_speech(emotion="neutral")
         try:
             self._synthesizer.speak(line)
         except Exception:
