@@ -3000,16 +3000,25 @@ class StateMachine:
 
         if any(w in response.lower() for w in ("yes", "yeah", "sure", "confirm")):
             try:
-                self._face_db.delete_person(person_id)
+                deleted_ids = self._face_db.delete_people_by_name(person_name)
             except Exception:
                 log.exception("forget_me: FaceDB delete failed")
                 return None
-            if self._last_known_person_id == person_id:
+            if not deleted_ids:
+                deleted_ids = [person_id]
+                self._face_db.delete_person(person_id)
+            if self._last_known_person_id in deleted_ids:
                 self._last_known_person_id = None
-            self._recognized_today_counts.pop(person_id, None)
-            log.info("forget_me: deleted person id=%d name=%r", person_id, person_name)
+            for deleted_id in deleted_ids:
+                self._recognized_today_counts.pop(deleted_id, None)
+            log.info(
+                "forget_me: deleted %d person row(s) for name=%r ids=%s",
+                len(deleted_ids),
+                person_name,
+                deleted_ids,
+            )
             line = (
-                f"Done. {person_name} is erased. Like they were never here. "
+                f"Done. {person_name} is erased from my databanks. Like they were never here. "
                 "Which honestly might be an improvement."
             )
         else:

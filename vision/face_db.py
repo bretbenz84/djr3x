@@ -312,6 +312,37 @@ class FaceDB:
             self._conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
         log.info("FaceDB: deleted person id=%d", person_id)
 
+    def delete_people_by_name(self, name: str) -> list[int]:
+        """Remove every person row whose normalized name matches *name*."""
+        normalized_query = _normalize_name(name)
+        if not normalized_query:
+            return []
+
+        rows = self._conn.execute(
+            "SELECT id, name FROM people ORDER BY id"
+        ).fetchall()
+        matching_ids = [
+            row["id"]
+            for row in rows
+            if _normalize_name(row["name"]) == normalized_query
+        ]
+        if not matching_ids:
+            return []
+
+        with self._conn:
+            for person_id in matching_ids:
+                self._conn.execute(
+                    "DELETE FROM face_encodings WHERE person_id = ?", (person_id,)
+                )
+                self._conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
+        log.info(
+            "FaceDB: deleted %d person row(s) for name %r: ids=%s",
+            len(matching_ids),
+            name,
+            matching_ids,
+        )
+        return matching_ids
+
     def delete_all_people(self) -> None:
         """Remove all people and all stored face encodings."""
         with self._conn:
