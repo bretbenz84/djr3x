@@ -69,6 +69,7 @@ class Synthesizer:
         if not text:
             return
 
+        log.info("Speaking: %s", text)
         cached = _cache_path(text)
         if cached.exists():
             log.debug("TTS cache hit: %s", cached.name)
