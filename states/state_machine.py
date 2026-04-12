@@ -3470,8 +3470,8 @@ class StateMachine:
                 deleted_ids,
             )
             line = (
-                f"Done. {person_name} is erased from my databanks. Like they were never here. "
-                "Which honestly might be an improvement."
+                "Done. Someone was just erased from my databanks. "
+                "Which honestly, might be an improvement, but it's hard to say because I'm not sure who."
             )
         else:
             log.info("forget_me: user declined deletion of person id=%d name=%r", person_id, person_name)
