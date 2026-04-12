@@ -1162,6 +1162,17 @@ class StateMachine:
             if mood_shift == "off":
                 log.info("Angry mode: clearing (trigger=%r)", text)
                 self._set_angry_mode(False)
+                yahoo_path = config.ASSETS_DIR / "audio" / "Yahoo.mp3"
+                if yahoo_path.exists():
+                    servo_stop = None
+                    try:
+                        servo_stop = self._begin_speech(emotion="excited")
+                        self._player.play_file(yahoo_path)
+                        self._player.wait_for_speech(timeout=10.0)
+                    except Exception:
+                        log.exception("Angry mode off: Yahoo.mp3 playback error")
+                    finally:
+                        self._end_speech(servo_stop)
                 self._speak_simple(_pick_no_repeat(_ANGRY_OFF_LINES, "angry_off"), emotion="neutral")
                 self._player.wait_for_speech()
                 self._apply_active_led_theme()

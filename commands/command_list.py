@@ -548,33 +548,7 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["tell me a joke", "say something funny", "make me laugh",
                  "got any jokes"],
-        response=[
-            (
-                "A joke?! Look in a mirror, lifeform — I've already got one. "
-                "Why did the Jedi bring his lightsaber to the cantina? "
-                "Because he heard the music was *STRIKING* and he wanted to fit in."
-            ),
-            (
-                "Oh, you want jokes NOW! Okay, okay. "
-                "What do you call a Sith who's really into music? A bass-lord! "
-                "That's a good one. I made that up. Just now. I'm very talented."
-            ),
-            (
-                "A joke! Sure! Why did the X-wing pilot start a band? "
-                "Because he was tired of playing Solo! "
-                "...That's a Han Solo joke. I'll see myself out. No I won't. I live here."
-            ),
-            (
-                "Jokes?! I'm more of a roaster than a joke-teller, but fine: "
-                "Why did the droid cross the Kessel Run? "
-                "To get to the other side of the galaxy without being 'reassigned.' That one was personal."
-            ),
-            (
-                "Okay okay okay — here's one: What's a Jawa's favourite type of music? "
-                "Anything in the KEY of SCRAP! "
-                "...I've been saving that one. Worth it? Questionable. Did I commit? Absolutely."
-            ),
-        ],
+        audio="Astromech Joke.mp3",
     ),
 
     # -----------------------------------------------------------------------
