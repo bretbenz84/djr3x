@@ -798,12 +798,14 @@ class StateMachine:
 
             mood_shift = self._classify_angry_intent(text)
             if mood_shift == "on":
+                log.info("Angry mode: entering (trigger=%r)", text)
                 self._set_angry_mode(True)
                 self._speak_simple(_pick_no_repeat(_ANGRY_ON_LINES, "angry_on"), emotion="neutral")
                 self._player.wait_for_speech()
                 self._apply_active_led_theme()
                 continue
             if mood_shift == "off":
+                log.info("Angry mode: clearing (trigger=%r)", text)
                 self._set_angry_mode(False)
                 self._speak_simple(_pick_no_repeat(_ANGRY_OFF_LINES, "angry_off"), emotion="neutral")
                 self._player.wait_for_speech()
@@ -3480,6 +3482,7 @@ class StateMachine:
         """Enable or disable angry mode and immediately update persona + LEDs."""
         self._angry_mode = enabled
         self._llm.set_angry_mode(enabled)
+        log.info("Angry mode state -> %s", "ON" if enabled else "OFF")
         if self._state == State.IDLE:
             self._apply_idle_led_theme()
         elif self._state == State.ACTIVE:
