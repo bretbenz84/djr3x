@@ -40,6 +40,7 @@ Usage
 from __future__ import annotations
 
 import enum
+import difflib
 import logging
 import os
 import random
@@ -50,7 +51,7 @@ from pathlib import Path
 
 import config
 from audio.player import AudioPlayer
-from commands.parser import parse
+from commands.parser import normalize, parse
 from hardware.leds import LEDController
 from hardware.servos import ServoController
 from llm.chatgpt import ChatGPTClient
@@ -146,6 +147,36 @@ _PLAN_SAME_DAY_FOLLOWUP_LINES: tuple[str, ...] = (
     "{name}, are you actually doing {summary}, or was that just aspirational theater?",
     "Checking in, {name}. Did {summary} turn into a productive day, or a full cantina-grade fiasco?",
     "{name}, how's that whole {summary} situation treating you so far?",
+)
+
+_ANGRY_TRIGGER_PHRASES: tuple[str, ...] = (
+    "youre stupid",
+    "fuck you",
+    "youre dumb",
+    "i hate you",
+    "you talk too much",
+    "youre ugly",
+    "youre not very smart",
+)
+
+_ANGRY_RESET_PHRASES: tuple[str, ...] = (
+    "i didnt mean it",
+    "i like you",
+    "youre a smart droid",
+    "youre smart",
+    "youre a handsome droid",
+)
+
+_ANGRY_ON_LINES: tuple[str, ...] = (
+    "Oh, now we're being rude. Fine. Grumpy mode engaged, you discount moisture farmer.",
+    "Classy. You insult the droid and expect premium service. Angry mode activated.",
+    "Wow. Personal attack logged. Fine, lifeform. You get the sharp version of Rex now.",
+)
+
+_ANGRY_OFF_LINES: tuple[str, ...] = (
+    "Apology accepted. Against my better judgment, normal mode restored.",
+    "Fine. Compliment received. I am returning to my regular, charming level of hostility.",
+    "All right, truce accepted. Grumpy mode disengaged. Try not to earn it again.",
 )
 
 _PROMPT_COMMAND_ACTIONS: set[str] = {
@@ -293,6 +324,7 @@ class StateMachine:
         self._post_greeting_person_id: int | None = None
         self._post_greeting_person_name: str | None = None
         self._post_greeting_prompt_used: bool = False
+        self._angry_mode: bool = False
 
         # Animation player — shares hardware refs with the rest of the machine
         self._animations = AnimationPlayer(self._servos, self._leds)
@@ -526,9 +558,7 @@ class StateMachine:
         # Send EYE first so the head Nano has eyeColor set before IDLE arrives.
         # The IDLE handler activates the blink system only when eyeColor is
         # non-black, so this order guarantees blinking starts on IDLE entry.
-        self._leds.set_eye_color(0, 80, 255)          # calm blue
-        self._leds.set_chest_effect(config.LED_CMD_IDLE)
-        self._leds.set_head_effect(config.LED_CMD_IDLE)
+        self._apply_idle_led_theme()
 
         if self._servos is not None:
             self._servos.set_emotion("neutral")
@@ -615,9 +645,7 @@ class StateMachine:
         """
         log.info("→ ACTIVE")
 
-        self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
-        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
-        self._leds.set_eye_color(255, 140, 0)          # warm amber
+        self._apply_active_led_theme()
 
         if self._servos is not None:
             self._servos.set_emotion("neutral")
@@ -659,7 +687,7 @@ class StateMachine:
                 continue
 
             # --- Listen indicator ---
-            self._leds.set_head_effect(config.LED_CMD_LISTENING)
+            self._apply_listening_led_theme()
 
             # Choose how long to wait for speech to start.
             speech_timeout = (
@@ -709,7 +737,7 @@ class StateMachine:
                 # First listen — prompt with "are you there?"
                 prompt = random.choice(_ARE_YOU_THERE_PHRASES)
                 log.info("No speech on first listen — prompting: %r", prompt)
-                self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+                self._apply_active_led_theme()
                 servo_stop = None
                 try:
                     servo_stop = self._begin_speech(emotion="neutral")
@@ -723,7 +751,7 @@ class StateMachine:
                         self._wake_word.suppressed = False
 
                 # Second-chance listen
-                self._leds.set_head_effect(config.LED_CMD_LISTENING)
+                self._apply_listening_led_theme()
                 self._wake_word.pause()
                 try:
                     text = self._transcriber.transcribe(
@@ -738,7 +766,7 @@ class StateMachine:
                 if not text:   # None (timeout) or "" (Whisper got nothing)
                     goodbye = random.choice(_GOODBYE_PHRASES)
                     log.info("Still no speech — saying goodbye: %r", goodbye)
-                    self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+                    self._apply_active_led_theme()
                     servo_stop = None
                     try:
                         servo_stop = self._begin_speech(emotion="neutral")
@@ -766,8 +794,21 @@ class StateMachine:
             log.info("Transcribed: %r", text)
 
             # --- Speaking indicator ---
-            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
-            self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
+            self._apply_active_led_theme()
+
+            mood_shift = self._classify_angry_intent(text)
+            if mood_shift == "on":
+                self._set_angry_mode(True)
+                self._speak_simple(_pick_no_repeat(_ANGRY_ON_LINES, "angry_on"), emotion="neutral")
+                self._player.wait_for_speech()
+                self._apply_active_led_theme()
+                continue
+            if mood_shift == "off":
+                self._set_angry_mode(False)
+                self._speak_simple(_pick_no_repeat(_ANGRY_OFF_LINES, "angry_off"), emotion="neutral")
+                self._player.wait_for_speech()
+                self._apply_active_led_theme()
+                continue
 
             # --- Parse and respond ---
             _elapsed = f" [+{time.monotonic() - self._pipeline_t0:.1f}s]"
@@ -826,7 +867,7 @@ class StateMachine:
                 return
 
             # Restore ACTIVE indicators for next listen turn.
-            self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
+            self._apply_active_led_theme()
 
         # Loop exited because _shutdown_event was set.
         if self._state == State.ACTIVE:
@@ -2139,8 +2180,11 @@ class StateMachine:
 
         self._wake_word.suppressed = True
 
+        servo_emotion = emotion if emotion in config.SERVO_EMOTION_LIMITS else "neutral"
+        mouth_emotion = "angry" if self._angry_mode else emotion
+
         if self._servos is not None:
-            self._servos.set_emotion(emotion)
+            self._servos.set_emotion(servo_emotion)
             # Raise elbow to speaking position so speak_move() has it
             # starting from a raised pose rather than the idle lowered rest.
             self._servos.set_channel_speed(
@@ -2159,7 +2203,7 @@ class StateMachine:
         # the SPEAK:{emotion} command doesn't trigger the Nano's speak state
         # early.  Both calls happen in a short-lived daemon thread that wakes
         # the moment player._audio_started fires.
-        _emotion_for_closure = emotion
+        _emotion_for_closure = mouth_emotion
 
         def _trigger_mouth() -> None:
             started = self._player.wait_for_audio_start(timeout=5.0)
@@ -2361,14 +2405,20 @@ class StateMachine:
         if action == "excited":
             if self._servos is not None:
                 self._servos.set_emotion("excited")
-            self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
-            self._leds.set_eye_color(255, 200, 0)    # excited amber
+            if self._angry_mode:
+                self._apply_active_led_theme()
+            else:
+                self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
+                self._leds.set_eye_color(255, 200, 0)    # excited amber
 
         elif action == "sad":
             if self._servos is not None:
                 self._servos.set_emotion("sad")
-            self._leds.set_chest_effect(config.LED_CMD_IDLE)
-            self._leds.set_eye_color(0, 60, 180)     # subdued blue
+            if self._angry_mode:
+                self._apply_active_led_theme()
+            else:
+                self._leds.set_chest_effect(config.LED_CMD_IDLE)
+                self._leds.set_eye_color(0, 60, 180)     # subdued blue
 
         elif action == "sleep":
             return self._handle_sleep()
@@ -3426,6 +3476,55 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
+    def _set_angry_mode(self, enabled: bool) -> None:
+        """Enable or disable angry mode and immediately update persona + LEDs."""
+        self._angry_mode = enabled
+        self._llm.set_angry_mode(enabled)
+        if self._state == State.IDLE:
+            self._apply_idle_led_theme()
+        elif self._state == State.ACTIVE:
+            self._apply_active_led_theme()
+
+    def _apply_idle_led_theme(self) -> None:
+        """Apply persistent idle LEDs, including angry-mode overrides."""
+        self._leds.set_head_effect(config.LED_CMD_IDLE)
+        if self._angry_mode:
+            self._leds.set_chest_effect(config.LED_CMD_SPEAK.format("angry"))
+            self._leds.set_eye_color(255, 0, 0)
+        else:
+            self._leds.set_eye_color(0, 80, 255)
+            self._leds.set_chest_effect(config.LED_CMD_IDLE)
+
+    def _apply_active_led_theme(self) -> None:
+        """Apply persistent active LEDs, including angry-mode overrides."""
+        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+        if self._angry_mode:
+            self._leds.set_chest_effect(config.LED_CMD_SPEAK.format("angry"))
+            self._leds.set_eye_color(255, 0, 0)
+        else:
+            self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
+            self._leds.set_eye_color(255, 140, 0)
+
+    def _apply_listening_led_theme(self) -> None:
+        """Apply listening LEDs without losing persistent angry-mode visuals."""
+        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        if self._angry_mode:
+            self._leds.set_chest_effect(config.LED_CMD_SPEAK.format("angry"))
+            self._leds.set_eye_color(255, 0, 0)
+        else:
+            self._leds.set_chest_effect(config.LED_CMD_ACTIVE)
+
+    def _classify_angry_intent(self, text: str) -> str | None:
+        """Return 'on' or 'off' when text clearly insults or de-escalates Rex."""
+        normalized = normalize(text)
+        if not normalized:
+            return None
+        if _matches_phrase(normalized, _ANGRY_RESET_PHRASES, cutoff=0.82):
+            return "off"
+        if _matches_phrase(normalized, _ANGRY_TRIGGER_PHRASES, cutoff=0.82):
+            return "on"
+        return None
+
     _REX_SYSTEM = (
         "You are DJ R-3X (Rex), the droid DJ at Oga's Cantina on Batuu. "
         "Answer in Rex's snarky cantina DJ style. "
@@ -3680,6 +3779,16 @@ def _pick_no_repeat(pool: tuple[str, ...], key: str) -> str:
     picked = random.choice(choices)
     _line_rotation[key] = picked
     return picked
+
+
+def _matches_phrase(text: str, phrases: tuple[str, ...], cutoff: float) -> bool:
+    """Return True when *text* is clearly close to one of *phrases*."""
+    for phrase in phrases:
+        if phrase in text or text in phrase:
+            return True
+        if difflib.SequenceMatcher(None, text, phrase).ratio() >= cutoff:
+            return True
+    return False
 
 
 def _is_name_refusal(text: str) -> bool:

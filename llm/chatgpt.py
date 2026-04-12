@@ -173,6 +173,7 @@ class ChatGPTClient:
         # Injected memory context for the currently recognized person.
         # Prepended to the system prompt when set; cleared on IDLE.
         self._person_context: str = ""
+        self._mood_context: str = ""
 
     # ------------------------------------------------------------------
     # Public interface
@@ -246,11 +247,19 @@ class ChatGPTClient:
                     "content": (
                         f"Here is what you know about the person you are talking to: "
                         f"{self._person_context}\n\n"
+                        + (f"{self._mood_context}\n\n" if self._mood_context else "")
                         + self._system_message["content"]
                     ),
                 }
             else:
-                effective_system = self._system_message
+                effective_system = (
+                    {
+                        "role": "system",
+                        "content": self._mood_context + "\n\n" + self._system_message["content"],
+                    }
+                    if self._mood_context
+                    else self._system_message
+                )
 
             # Local Ollama models rely on the system prompt to constrain
             # response length; a hard token cap causes mid-sentence truncation
@@ -324,6 +333,18 @@ class ChatGPTClient:
         """Remove the injected memory context (called on IDLE entry)."""
         self._person_context = ""
         log.debug("ChatGPT: person context cleared")
+
+    def set_angry_mode(self, enabled: bool) -> None:
+        """Overlay a grumpier runtime style onto Rex's normal voice."""
+        self._mood_context = (
+            "CURRENT MOOD: angry/grumpy mode is active. "
+            "Be curt, irritated, sarcastic, and dismissive. "
+            "Keep replies short and robotic. "
+            "Stay family-safe. Do not threaten, swear, or become personally abusive."
+            if enabled
+            else ""
+        )
+        log.debug("ChatGPT: angry mode=%s", enabled)
 
     # ------------------------------------------------------------------
     # Utility — structured one-shot calls (always use cloud OpenAI for
