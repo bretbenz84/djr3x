@@ -247,6 +247,16 @@ class HeadTracker:
         """True while paused (servo updates suppressed)."""
         return self._pause_event.is_set()
 
+    def face_recently_seen(self, within_seconds: float = 2.0) -> bool:
+        """Return True if a face was detected within *within_seconds* of now.
+
+        Thread-safe — reads _last_face_seen_time which is only written by the
+        detection thread, and float reads are atomic on CPython.  Used by the
+        state machine to decide whether to attempt a face-triggered greeting
+        without waiting for the full absence-timer cycle.
+        """
+        return (time.monotonic() - self._last_face_seen_time) <= within_seconds
+
     # ------------------------------------------------------------------
     # Background detection loop
     # ------------------------------------------------------------------

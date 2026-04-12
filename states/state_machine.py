@@ -81,6 +81,59 @@ _ARE_YOU_THERE_PHRASES: list[str] = [
     "Uh... hello?! I didn't clear my schedule for nothing!",
 ]
 
+# Casual known-person greetings spoken after "Hi There.mp3" on a face-triggered wake.
+# Time-based entries (Morning/Afternoon/Evening) are added to the pool only when the
+# hour matches — see _pick_face_wake_greeting().
+_FACE_WAKE_GREETINGS_ALWAYS: tuple[str, ...] = (
+    "Yo {name}",
+    "Hey {name}",
+    "Sup {name}",
+    "What's up {name}",
+    "What up {name}",
+    "Wassup {name}",
+    "Whaddup {name}",
+    "Ayo {name}",
+    "Ey {name}",
+    "Hey there {name}",
+    "Hi {name}",
+    "Hello {name}",
+    "Howdy {name}",
+    "How's it going {name}",
+    "How's it hangin {name}",
+    "What's new {name}",
+    "What's good {name}",
+    "What's happening {name}",
+    "What's going on {name}",
+    "How are ya {name}",
+    "Hey dude {name}",
+    "Sup bro {name}",
+    "What's crackin {name}",
+    "What's poppin {name}",
+    "What it do {name}",
+)
+_FACE_WAKE_GREETINGS_MORNING:   tuple[str, ...] = ("Morning {name}",)
+_FACE_WAKE_GREETINGS_AFTERNOON: tuple[str, ...] = ("Afternoon {name}",)
+_FACE_WAKE_GREETINGS_EVENING:   tuple[str, ...] = ("Evening {name}",)
+
+
+def _pick_face_wake_greeting(name: str) -> str:
+    """Return a random casual greeting for a known person, injecting their name.
+
+    Time-based greetings are included only within appropriate hour ranges:
+      Morning   — 05:00–11:59
+      Afternoon — 12:00–16:59
+      Evening   — 17:00–21:59
+    """
+    hour = datetime.now().hour
+    pool: list[str] = list(_FACE_WAKE_GREETINGS_ALWAYS)
+    if 5 <= hour < 12:
+        pool.extend(_FACE_WAKE_GREETINGS_MORNING)
+    elif 12 <= hour < 17:
+        pool.extend(_FACE_WAKE_GREETINGS_AFTERNOON)
+    elif 17 <= hour < 22:
+        pool.extend(_FACE_WAKE_GREETINGS_EVENING)
+    return random.choice(pool).format(name=name)
+
 _GOODBYE_PHRASES: list[str] = [
     "Oh, you're just GONE. That's fine. I had better conversations with an R2 unit.",
     "Stood up AND abandoned. Classic lifeform behavior. Going back to sleep.",
@@ -609,6 +662,18 @@ class StateMachine:
             self._llm.set_angry_mode(False)
             log.info("ACTIVE entry: angry mode cleared")
 
+        # On entry (startup or return from ACTIVE/SLEEP), immediately check whether
+        # a face is already in view — bypasses the 8-second absence timer so Rex
+        # greets someone standing at the camera when the program first starts.
+        if (
+            self._head_tracker is not None
+            and self._head_tracker.face_recently_seen(within_seconds=3.0)
+        ):
+            log.info("IDLE entry: face already visible — triggering immediate face greeting")
+            self._run_face_triggered_greeting()
+            if self._state != State.IDLE:
+                return
+
         # Wait for a wake word or a face-appear event, playing random atmosphere
         # clips in between.  The inner polling loop ticks every 0.2 s so the
         # face_wake_event is noticed promptly without burning CPU.
@@ -693,6 +758,18 @@ class StateMachine:
                 if self._state != State.IDLE:
                     return
 
+            # After every idle clip, also check directly whether a face is
+            # currently visible — catches people who walked up during or just
+            # before the clip without triggering the 8-second absence timer.
+            if (
+                self._head_tracker is not None
+                and self._head_tracker.face_recently_seen(within_seconds=2.0)
+            ):
+                log.info("Post-clip face check: face visible — triggering face greeting")
+                self._run_face_triggered_greeting()
+                if self._state != State.IDLE:
+                    return
+
     # ------------------------------------------------------------------
     # Face-triggered greeting (called from _run_idle)
     # ------------------------------------------------------------------
@@ -753,10 +830,28 @@ class StateMachine:
         else:
             log.warning("Face-triggered greeting: 'Hi There.mp3' not found — skipping clip")
 
-        # Ensure recognition is done before we decide what to do on silence.
+        # Ensure recognition is done before we greet or listen.
         if face_thread is not None:
             face_thread.join(timeout=5.0)
         status, result = face_result[0]
+
+        # If we recognised someone, speak a casual name-based greeting before
+        # opening the mic — no LLM, just a canned phrase chosen at random.
+        if result is not None:
+            _face_person_id, _face_name, _ = result
+            greeting_line = _pick_face_wake_greeting(_face_name)
+            log.info("Face-triggered greeting: known person '%s' — greeting %r", _face_name, greeting_line)
+            servo_stop = None
+            try:
+                servo_stop = self._begin_speech(emotion="excited")
+                self._synthesizer.speak(greeting_line)
+            except Exception:
+                log.exception("Face-triggered greeting: name greeting TTS error")
+            finally:
+                if servo_stop is not None:
+                    self._end_speech(servo_stop)
+                else:
+                    self._wake_word.suppressed = False
 
         # Listen for an initial response.
         self._apply_listening_led_theme()
