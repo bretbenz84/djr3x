@@ -536,44 +536,63 @@ class ServoController:
                 self._send_target(channel, cfg["neutral"])
         log.info("Dance stopped — servos returned to neutral.")
 
-    # (channel, sine phase offset in radians)
-    _DANCE_CHANNELS: tuple[tuple[int, float], ...] = (
-        (0, 0.0),    # neck
-        (1, 0.5),    # headlift
-        (2, 1.0),    # headtilt
-        (3, 1.5),    # visor
-        (4, 0.3),    # elbow
-        (5, 0.8),    # hand
-        (6, 1.2),    # pokerarm
-        (7, 1.7),    # heroarm
+    # (channel, frequency_multiplier, phase_offset_radians)
+    # Each channel gets its own frequency so they stay visually in motion
+    # together but gradually drift in and out of sync — full-body dancing.
+    # Phases are all near 0 so every servo starts moving at the same time.
+    _DANCE_CHANNELS: tuple[tuple[int, float, float], ...] = (
+        (0, 1.00, 0.00),   # neck       — base frequency
+        (1, 0.73, 0.20),   # headlift   — slightly slower
+        (2, 1.31, 0.10),   # headtilt   — slightly faster
+        (3, 0.61, 0.30),   # visor      — slowest
+        (4, 1.17, 0.15),   # elbow      — medium-fast
+        (5, 0.83, 0.25),   # hand       — medium-slow
+        (6, 1.43, 0.05),   # pokerarm   — fastest
+        (7, 0.91, 0.35),   # heroarm    — medium
     )
-    _DANCE_SPEED = 120    # servo move speed during dancing (faster = snappier)
-    _DANCE_HZ    = 20     # update rate
-    _DANCE_FREQ  = math.pi   # rad/s → one full sweep every ~2 s
+    # Speed high enough to always reach the next target within one 50 ms tick.
+    # Worst case per tick: half-range * π * dt = 4000 * 3.14 * 0.05 ≈ 628 qµs.
+    # At speed 800 each servo can move 800*5 = 4000 qµs per tick — plenty.
+    _DANCE_SPEED = 800
+    _DANCE_HZ    = 20          # update rate (Hz)
+    _DANCE_FREQ  = math.pi     # base rad/s → one full sweep every ~2 s
 
     def _dance_loop(self) -> None:
         """Drive all servo channels through sine-wave patterns at 20 Hz.
 
-        Each channel has a unique phase offset so they move independently,
-        producing a fluid whole-body dancing motion rather than synchronised
-        toggling.  Uses each channel's full (min, max) range.
+        Each channel has its own frequency multiplier so they drift in and out
+        of sync, producing a fluid whole-body dancing motion.  All phase offsets
+        are near 0 so every channel starts moving at the same time.
+
+        Speed is set high enough that every servo reaches its new target within
+        a single 50 ms update interval, so all channels always move in parallel.
         """
         dt = 1.0 / self._DANCE_HZ
         t  = 0.0
 
-        # Set a fast move speed for all dance channels once at loop start.
+        # Set dance speed for all channels and pre-position them at t=0 targets
+        # so the loop begins with all servos already in their start positions.
         with self._lock:
-            for ch, _ in self._DANCE_CHANNELS:
+            for ch, freq_mult, phase in self._DANCE_CHANNELS:
                 self._send_speed(ch, self._DANCE_SPEED)
+            for ch, freq_mult, phase in self._DANCE_CHANNELS:
+                ch_cfg = config.SERVO_CHANNELS[ch]
+                lo = ch_cfg["min"]
+                hi = ch_cfg["max"]
+                val = math.sin(0.0 * self._DANCE_FREQ * freq_mult + phase)
+                pos = _clamp(int(lo + (val + 1.0) / 2.0 * (hi - lo)), lo, hi)
+                self._send_target(ch, pos)
+
+        # Wait for all servos to reach their t=0 positions before the loop.
+        time.sleep(0.5)
 
         while not self._dance_stop_event.is_set():
             with self._lock:
-                for ch, phase in self._DANCE_CHANNELS:
+                for ch, freq_mult, phase in self._DANCE_CHANNELS:
                     ch_cfg = config.SERVO_CHANNELS[ch]
                     lo = ch_cfg["min"]
                     hi = ch_cfg["max"]
-                    # sin ∈ [-1, 1] → mapped linearly to [lo, hi]
-                    val = math.sin(t * self._DANCE_FREQ + phase)
+                    val = math.sin(t * self._DANCE_FREQ * freq_mult + phase)
                     pos = _clamp(int(lo + (val + 1.0) / 2.0 * (hi - lo)), lo, hi)
                     self._send_target(ch, pos)
             t += dt

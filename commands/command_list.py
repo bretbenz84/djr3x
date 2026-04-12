@@ -18,7 +18,22 @@ No other module needs to change.
 from __future__ import annotations
 
 import random
+import re
+import string
 from dataclasses import dataclass, field
+
+# ---------------------------------------------------------------------------
+# Phrase normalization — must match the logic in commands/parser.py exactly.
+# Duplicated here to avoid a circular import (parser imports command_list).
+# ---------------------------------------------------------------------------
+_STRIP_PUNCT = str.maketrans("", "", string.punctuation)
+
+
+def _normalize(text: str) -> str:
+    text = text.lower()
+    text = text.translate(_STRIP_PUNCT)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -828,8 +843,21 @@ COMMANDS: list[Command] = [
 
     Command(
         phrases=[
-            "do a little dance", "dance for me", "dance for us",
-            "can you dance", "dance please", "show me your moves", "bust a move",
+            "dance",
+            "do a little dance",
+            "dance for me",
+            "dance for us",
+            "can you dance",
+            "dance please",
+            "show me your moves",
+            "bust a move",
+            "lets dance",
+            "let's dance",
+            "show me a dance",
+            "do a dance",
+            "start dancing",
+            "i want to see you dance",
+            "do your dance",
         ],
         response="",
         action="dance_short",
@@ -1242,16 +1270,21 @@ COMMANDS: list[Command] = [
 # ---------------------------------------------------------------------------
 
 def _build_phrase_index(commands: list[Command]) -> dict[str, Command]:
-    """Build a flat dict mapping every trigger phrase → its Command.
-    Raises ValueError on duplicate phrases so mistakes fail loudly at import."""
+    """Build a flat dict mapping every normalized trigger phrase → its Command.
+
+    Phrases are normalized (lowercase, punctuation stripped) so the keys match
+    what parser.py produces when normalizing transcribed text.  Raises ValueError
+    on duplicate normalized phrases so mistakes fail loudly at import.
+    """
     index: dict[str, Command] = {}
     for cmd in commands:
         for phrase in cmd.phrases:
-            if phrase in index:
+            key = _normalize(phrase)
+            if key in index:
                 raise ValueError(
-                    f"Duplicate trigger phrase '{phrase}' in command_list.py"
+                    f"Duplicate trigger phrase '{phrase}' (normalized: '{key}') in command_list.py"
                 )
-            index[phrase] = cmd
+            index[key] = cmd
     return index
 
 
