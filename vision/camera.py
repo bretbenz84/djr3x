@@ -215,7 +215,7 @@ class Camera:
             return None
 
         w, h = config.HEAD_TRACKING_RESOLUTION
-        return cv2.resize(frame, (w, h))
+        return cv2.resize(frame, (w, h), interpolation=cv2.INTER_NEAREST)
 
     def _reopen(self) -> None:
         """Release and reopen the camera after a runtime failure."""

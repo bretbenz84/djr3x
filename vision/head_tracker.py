@@ -234,6 +234,7 @@ class HeadTracker:
 
             # ── Face detection ────────────────────────────────────────────
             gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray  = cv2.equalizeHist(gray)
             faces = classifier.detectMultiScale(
                 gray,
                 scaleFactor=1.1,
@@ -304,9 +305,9 @@ class HeadTracker:
             if len(_frame_times) == 30:
                 avg = sum(_frame_times) / 30
                 fps = 1.0 / avg if avg > 0 else 0.0
-                if fps < 5.0:
+                if fps < 3.0:
                     log.warning(
-                        "HeadTracker: average FPS %.1f is below 5 — "
+                        "HeadTracker: average FPS %.1f is below 3 — "
                         "Pi may be under load",
                         fps,
                     )
