@@ -3733,13 +3733,13 @@ class StateMachine:
     def _apply_idle_led_theme(self) -> None:
         """Apply persistent idle LEDs, including angry-mode overrides.
 
-        EYE: is sent before IDLE so the Arduino's stored eyeColor is already
-        correct when IDLE re-enables blinking, preventing a one-frame flash of
-        the previous color.
+        For angry mode, EYE: is sent both before and after IDLE for the same
+        belt-and-suspenders reason as _apply_active_led_theme.
         """
         if self._angry_mode:
             self._leds.set_eye_color(255, 0, 0)
             self._leds.set_head_effect(config.LED_CMD_IDLE)
+            self._leds.set_eye_color(255, 0, 0)
             self._leds.set_chest_effect(config.LED_CMD_SPEAK.format("angry"))
         else:
             self._leds.set_eye_color(0, 80, 255)
@@ -3749,13 +3749,16 @@ class StateMachine:
     def _apply_active_led_theme(self) -> None:
         """Apply persistent active LEDs, including angry-mode overrides.
 
-        EYE: is sent before ACTIVE so the Arduino's stored eyeColor is already
-        correct when the ACTIVE command re-applies it, preventing the one-frame
-        white/amber flash that caused flickering during angry-mode transitions.
+        For angry mode, EYE: is sent both before and after ACTIVE.  The first
+        pre-seeds the Arduino's stored eyeColor so ACTIVE re-applies red.  The
+        second is a safety-net that overwrites eyeColor after ACTIVE runs,
+        guaranteeing red even if the firmware's stored value was stale, and
+        ensuring the blink-recovery path also uses red.
         """
         if self._angry_mode:
             self._leds.set_eye_color(255, 0, 0)
             self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+            self._leds.set_eye_color(255, 0, 0)
             self._leds.set_chest_effect(config.LED_CMD_SPEAK.format("angry"))
         else:
             self._leds.set_eye_color(255, 140, 0)
@@ -3765,13 +3768,13 @@ class StateMachine:
     def _apply_listening_led_theme(self) -> None:
         """Apply listening LEDs without losing persistent angry-mode visuals.
 
-        EYE: is sent before ACTIVE for the same ordering reason as
-        _apply_active_led_theme.  Non-angry path does not change eye color
-        so the eyes hold their last active color during listening.
+        Angry mode sends EYE: both before and after LISTEN for the same
+        belt-and-suspenders reason as _apply_active_led_theme.
         """
         if self._angry_mode:
             self._leds.set_eye_color(255, 0, 0)
             self._leds.set_head_effect(config.LED_CMD_LISTENING)
+            self._leds.set_eye_color(255, 0, 0)
             self._leds.set_chest_effect(config.LED_CMD_SPEAK.format("angry"))
         else:
             self._leds.set_head_effect(config.LED_CMD_LISTENING)
