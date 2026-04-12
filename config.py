@@ -21,6 +21,9 @@ MODELS_DIR         = ASSETS_DIR / "models"
 STARTUP_CHIME_PATH   = ASSETS_DIR / "audio" / "startup_chime.mp3"
 STARTUP_MUSIC_PATH   = ASSETS_DIR / "audio" / "light_speed.mp3"
 STARTUP_INTRO_PATH   = ASSETS_DIR / "audio" / "Roger Control.mp3"
+STARTUP_INTRO_PATH_ALT = ASSETS_DIR / "audio" / "This is your cap.mp3"
+# File that persists which intro clip played last (to avoid back-to-back repeats).
+STARTUP_INTRO_LAST_PLAYED = PROJECT_ROOT / ".last_startup_intro"
 SHUTDOWN_MUSIC_PATH  = ASSETS_DIR / "audio" / "hyperdrive_down.mp3"
 CANTINA_BAND_PATH    = ASSETS_DIR / "music" / "Cantina Band.mp3"
 

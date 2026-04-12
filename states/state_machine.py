@@ -577,14 +577,39 @@ class StateMachine:
         """Play the spoken intro clip through the speech path with full
         mouth-LED and servo speech animation.
 
+        Alternates between two intro clips so the same one never plays twice
+        in a row.  The last-played clip is persisted to disk across restarts.
+
         Must be called *after* play_startup_animation() (so servos are idle)
         and *before* start() (so the wake-word and idle threads are not yet
         competing for hardware).  Gracefully skipped if the file is missing.
         """
-        path = config.STARTUP_INTRO_PATH
-        if not path.exists():
-            log.warning("Startup intro not found at %s — skipping.", path)
+        clips = [config.STARTUP_INTRO_PATH, config.STARTUP_INTRO_PATH_ALT]
+        last_file = config.STARTUP_INTRO_LAST_PLAYED
+
+        # Read which clip played last time.
+        last_played: str | None = None
+        try:
+            if last_file.exists():
+                last_played = last_file.read_text().strip()
+        except Exception:
+            pass
+
+        # Pick whichever clip was NOT played last; fall back to the first clip.
+        available = [p for p in clips if str(p) != last_played and p.exists()]
+        if not available:
+            available = [p for p in clips if p.exists()]
+        if not available:
+            log.warning("No startup intro clips found — skipping.")
             return
+
+        path = available[0]
+
+        # Persist the choice for next startup.
+        try:
+            last_file.write_text(str(path))
+        except Exception:
+            log.warning("Could not write last startup intro record — continuing.")
 
         log.info("Playing startup intro (%s) …", path)
         servo_stop = None
