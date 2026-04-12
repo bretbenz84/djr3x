@@ -56,7 +56,7 @@ log = logging.getLogger(__name__)
 
 # Maestro speed used for tracking moves.
 # 15 (0.25 µs / 10 ms) keeps up with a 10 Hz loop while looking fluid.
-_TRACKING_SPEED: int = 15
+_TRACKING_SPEED: int = 40
 
 _CH_NECK = 0
 _CH_TILT = 2
