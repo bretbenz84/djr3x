@@ -574,8 +574,12 @@ class StateMachine:
         # speech mid-utterance, e.g. via request_shutdown).
         self._wake_word.suppressed = False
 
-        # Reset conversation context so each active session starts fresh.
+        # Reset conversation context and mood so each active session starts fresh.
         self._llm.clear_history()
+        if self._angry_mode:
+            self._angry_mode = False
+            self._llm.set_angry_mode(False)
+            log.info("ACTIVE entry: angry mode cleared")
 
         # Wait for a wake word, playing random atmosphere clips in between.
         while True:
@@ -963,6 +967,10 @@ class StateMachine:
             self._post_greeting_person_name = None
             self._post_greeting_prompt_used = False
             self._llm.clear_person_context()
+            if self._angry_mode:
+                self._angry_mode = False
+                self._llm.set_angry_mode(False)
+                log.info("Transition: angry mode cleared on %s entry", new_state.value)
             # Global mouth safety: guarantee mouth is off whenever Rex returns
             # to IDLE or SLEEP, regardless of what the LED state machine thinks.
             self._leds.stop_mouth()
@@ -1745,26 +1753,7 @@ class StateMachine:
         if not config.ENROLLMENT_INTERVIEW_ENABLED:
             return
 
-        _QUESTION_POOL = (
-            "What kind of music do you like?",
-            "What is your favorite food?",
-            "Do you have any pets? What are their names?",
-            "What do you do for work?",
-            "Where are you from originally?",
-            "Do you have a favorite Star Wars character?",
-            "What are you up to this weekend?",
-            "What is your favorite drink?",
-            "Do you have any kids?",
-            "What is your favorite movie?",
-        )
-        _CLOSING_LINES = (
-            "Good. I will file that away. Do not expect me to use it wisely.",
-            "Excellent. All noted. I make no promises about how I use this.",
-            "Logged. You have just made me significantly more dangerous at small talk.",
-            "Filed. Somewhere in my databanks, beneath every cantina song ever written.",
-        )
-
-        questions = random.sample(_QUESTION_POOL, 5)
+        questions = random.sample(_ENROLLMENT_INTERVIEW_QUESTIONS, 5)
 
         for question in questions:
             if self._shutdown_event.is_set():
@@ -1831,7 +1820,7 @@ class StateMachine:
 
         # Closing line.
         if not self._shutdown_event.is_set():
-            closing = random.choice(_CLOSING_LINES)
+            closing = random.choice(_ENROLLMENT_INTERVIEW_CLOSING)
             servo_stop = self._begin_speech(emotion="excited")
             try:
                 self._synthesizer.speak(closing)
@@ -2619,7 +2608,7 @@ class StateMachine:
         if guess is None:
             return None
         if guess == "":
-            line = random.choice(_I_SPY_TIMEOUT_LINES).format(answer=round_data.answer)
+            line = random.choice(_I_SPY_TIMEOUT_LINES).replace("{answer}", round_data.answer)
             servo_stop = self._begin_speech(emotion="neutral")
             try:
                 self._synthesizer.speak(line)
@@ -2637,10 +2626,10 @@ class StateMachine:
             return self._execute_command(guard_cmd, guess)
 
         if guess_matches(guess, round_data.answer):
-            line = random.choice(_I_SPY_CORRECT_LINES).format(answer=round_data.answer)
+            line = random.choice(_I_SPY_CORRECT_LINES).replace("{answer}", round_data.answer)
             emotion = "excited"
         else:
-            line = random.choice(_I_SPY_WRONG_LINES).format(answer=round_data.answer)
+            line = random.choice(_I_SPY_WRONG_LINES).replace("{answer}", round_data.answer)
             emotion = "neutral"
 
         servo_stop = self._begin_speech(emotion=emotion)
@@ -2653,11 +2642,19 @@ class StateMachine:
         return None
 
     def _listen_for_i_spy_guess(self) -> str | None:
-        """Listen for an I Spy guess; '' means both chances timed out."""
+        """Listen for an I Spy guess.
+
+        Returns:
+          str   — the player's guess text
+          ""    — both chances timed out (reveal the answer)
+          None  — transcriber unavailable or error (abort silently)
+        """
         if not self._transcriber.is_available():
-            return ""
+            return None
 
         guess = self._transcribe_i_spy_guess(config.I_SPY_GUESS_TIMEOUT_SECONDS)
+        if guess is None:
+            return None   # transcription error — abort cleanly
         if guess:
             log.info("I Spy: guess=%r", guess)
             return guess
@@ -2672,6 +2669,8 @@ class StateMachine:
             self._end_speech(servo_stop)
 
         guess = self._transcribe_i_spy_guess(config.WAKE_GOODBYE_TIMEOUT)
+        if guess is None:
+            return None   # transcription error on second attempt — abort cleanly
         if guess:
             log.info("I Spy: guess=%r", guess)
             return guess
@@ -2688,7 +2687,7 @@ class StateMachine:
             )
         except Exception:
             log.exception("I Spy: transcription error while waiting for guess")
-            return ""
+            return None
         finally:
             self._wake_word.resume()
             self._apply_active_led_theme()
@@ -3908,18 +3907,42 @@ _ENROLLMENT_CONFIRMATION_LINES: tuple[str, ...] = (
     "It's a mess in there but your face now has a spot. Very exclusive.",
 )
 
+_ENROLLMENT_INTERVIEW_QUESTIONS: tuple[str, ...] = (
+    "What kind of music do you like?",
+    "What is your favorite food?",
+    "Do you have any pets? What are their names?",
+    "What do you do for work?",
+    "Where are you from originally?",
+    "Do you have a favorite Star Wars character?",
+    "What are you up to this weekend?",
+    "What is your favorite drink?",
+    "Do you have any kids?",
+    "What is your favorite movie?",
+)
+
+_ENROLLMENT_INTERVIEW_CLOSING: tuple[str, ...] = (
+    "Good. I will file that away. Do not expect me to use it wisely.",
+    "Excellent. All noted. I make no promises about how I use this.",
+    "Logged. You have just made me significantly more dangerous at small talk.",
+    "Filed. Somewhere in my databanks, beneath every cantina song ever written.",
+)
+
 # Tracks the last-used line per pool so the same line is never repeated
 # back-to-back.  Keyed by an arbitrary string that namespaces each pool.
 _line_rotation: dict[str, str] = {}
 
 
-def _pick_no_repeat(pool: tuple[str, ...], key: str) -> str:
+def _pick_no_repeat(pool: tuple[str, ...], key: str, fallback: str = "") -> str:
     """Return a random entry from *pool*, excluding the last-used entry for *key*.
 
     *key* namespaces the rotation state so different pools don't interfere.
     Falls back to the full pool if all entries happen to equal the last (i.e.
-    pool has only one item).
+    pool has only one item).  Returns *fallback* (default "") if the pool is
+    empty, rather than raising IndexError.
     """
+    if not pool:
+        log.warning("_pick_no_repeat: pool for key %r is empty", key)
+        return fallback
     last = _line_rotation.get(key)
     choices = [line for line in pool if line != last] or list(pool)
     picked = random.choice(choices)

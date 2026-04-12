@@ -241,25 +241,26 @@ class ChatGPTClient:
         first_token_logged = False
         try:
             # Build effective system message — prepend person memory context when set.
+            # Build effective system prompt: character definition always comes
+            # first so the model establishes Rex's voice before any overrides.
+            # Person context and mood overlay are appended after.
+            base = self._system_message["content"]
+            suffix = ""
             if self._person_context:
+                suffix += (
+                    f"\n\nHere is what you know about the person you are talking to: "
+                    f"{self._person_context}"
+                )
+            if self._mood_context:
+                suffix += f"\n\n{self._mood_context}"
+
+            if suffix:
                 effective_system: dict[str, str] = {
                     "role": "system",
-                    "content": (
-                        f"Here is what you know about the person you are talking to: "
-                        f"{self._person_context}\n\n"
-                        + (f"{self._mood_context}\n\n" if self._mood_context else "")
-                        + self._system_message["content"]
-                    ),
+                    "content": base + suffix,
                 }
             else:
-                effective_system = (
-                    {
-                        "role": "system",
-                        "content": self._mood_context + "\n\n" + self._system_message["content"],
-                    }
-                    if self._mood_context
-                    else self._system_message
-                )
+                effective_system = self._system_message
 
             # Local Ollama models rely on the system prompt to constrain
             # response length; a hard token cap causes mid-sentence truncation
