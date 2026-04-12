@@ -1,5 +1,5 @@
 """
-vision/head_tracker.py — Real-time two-axis face tracking for DJ-R3X.
+vision/head_tracker.py — Real-time three-axis face tracking for DJ-R3X.
 
 Shares the existing vision.camera.Camera instance rather than opening a
 second VideoCapture — Linux V4L2 only permits one capture per device, so
@@ -12,6 +12,11 @@ Tracking geometry
     Face at frame-left   (x=0)          → neck MIN (1984 qµs) — turns left
     Face at frame-centre (x=frame_w/2)  → neck NEUTRAL
     Face at frame-right  (x=frame_w)    → neck MAX (9984 qµs) — turns right
+
+  Y axis (headlift, ch 1) — raises head to follow face height:
+    Face at top of frame    (y=0)          → headlift MAX (7744) — head up
+    Face at bottom of frame (y=frame_h)    → headlift NEUTRAL (6000) — head level
+    Never goes below neutral during tracking — only raises head, never lowers it.
 
   Y axis (headtilt, ch 2) — subtle tilt only:
     Headtilt is INVERTED — lower qµs = head tilts up.
@@ -31,10 +36,9 @@ Thread model
 
 Speed note
 ----------
-  The tracker resets _TRACKING_SPEED on neck and headtilt before every servo
-  write so a preceding set_emotion() or idle-loop speed change does not make
-  tracking sluggish.  The extra serial traffic is minimal (~4 extra bytes
-  per tick at 10 Hz).
+  The tracker resets _TRACKING_SPEED on neck, headlift, and headtilt before
+  every servo write so a preceding set_emotion() or idle-loop speed change
+  does not make tracking sluggish.
 """
 
 from __future__ import annotations
@@ -59,6 +63,7 @@ log = logging.getLogger(__name__)
 _TRACKING_SPEED: int = 40
 
 _CH_NECK = 0
+_CH_LIFT = 1
 _CH_TILT = 2
 
 
@@ -96,6 +101,11 @@ class HeadTracker:
         self._neck_max:     int = _neck["max"]
         self._neck_neutral: int = _neck["neutral"]
 
+        # Headlift limits — tracks face Y; only raises head, never lowers below neutral
+        _lift = cfg.SERVO_CHANNELS[_CH_LIFT]
+        self._lift_neutral: int = _lift["neutral"]   # 6000 — head level (floor)
+        self._lift_max:     int = _lift["max"]       # 7744 — head fully raised (ceiling)
+
         # Headtilt limits (clamped to ±15 % of full span from neutral)
         _tilt = cfg.SERVO_CHANNELS[_CH_TILT]
         self._tilt_neutral: int = _tilt["neutral"]
@@ -108,14 +118,17 @@ class HeadTracker:
 
         # EMA-smoothed positions (float for sub-qµs accumulation)
         self._smooth_neck: float = float(self._neck_neutral)
+        self._smooth_lift: float = float(self._lift_neutral)
         self._smooth_tilt: float = float(self._tilt_neutral)
 
         # Last positions actually sent to the Maestro
         self._sent_neck: int = self._neck_neutral
+        self._sent_lift: int = self._lift_neutral
         self._sent_tilt: int = self._tilt_neutral
 
         # Current tracking targets (updated on each successful detection)
         self._target_neck: int = self._neck_neutral
+        self._target_lift: int = self._lift_neutral
         self._target_tilt: int = self._tilt_neutral
 
         # Thread control
@@ -190,8 +203,9 @@ class HeadTracker:
         while time.monotonic() < deadline:
             with self._state_lock:
                 neck_ok = abs(self._smooth_neck - self._target_neck) < dead_zone
+                lift_ok = abs(self._smooth_lift - self._target_lift) < dead_zone
                 tilt_ok = abs(self._smooth_tilt - self._target_tilt) < dead_zone
-            if neck_ok and tilt_ok:
+            if neck_ok and lift_ok and tilt_ok:
                 return True
             time.sleep(0.05)
         log.debug("HeadTracker.wait_for_center: timed out after %.1f s", timeout)
@@ -264,6 +278,14 @@ class HeadTracker:
                 )
                 t_neck = max(self._neck_min, min(self._neck_max, t_neck))
 
+                # Y → headlift: face at top (0) = max (head up), bottom = neutral (level)
+                # Never goes below neutral — only raises head, never lowers it.
+                t_lift = int(
+                    self._lift_neutral
+                    + (1.0 - face_cy / self._frame_h) * (self._lift_max - self._lift_neutral)
+                )
+                t_lift = max(self._lift_neutral, min(self._lift_max, t_lift))
+
                 # Y → headtilt (inverted, clamped to narrow band)
                 tilt_span = self._tilt_hi - self._tilt_lo
                 t_tilt = int(
@@ -274,6 +296,7 @@ class HeadTracker:
 
                 with self._state_lock:
                     self._target_neck = t_neck
+                    self._target_lift = t_lift
                     self._target_tilt = t_tilt
             # else: no face — hold last known target, do NOT reset to neutral
 
@@ -283,16 +306,24 @@ class HeadTracker:
                     alpha * self._target_neck
                     + (1.0 - alpha) * self._smooth_neck
                 )
+                self._smooth_lift = (
+                    alpha * self._target_lift
+                    + (1.0 - alpha) * self._smooth_lift
+                )
                 self._smooth_tilt = (
                     alpha * self._target_tilt
                     + (1.0 - alpha) * self._smooth_tilt
                 )
                 new_neck = int(round(self._smooth_neck))
+                new_lift = int(round(self._smooth_lift))
                 new_tilt = int(round(self._smooth_tilt))
                 send_neck = abs(new_neck - self._sent_neck) >= dead_zone
+                send_lift = abs(new_lift - self._sent_lift) >= dead_zone
                 send_tilt = abs(new_tilt - self._sent_tilt) >= dead_zone
                 if send_neck:
                     self._sent_neck = new_neck
+                if send_lift:
+                    self._sent_lift = new_lift
                 if send_tilt:
                     self._sent_tilt = new_tilt
 
@@ -302,6 +333,9 @@ class HeadTracker:
                     # Restore tracking speed in case set_emotion() changed it.
                     self._servos.set_channel_speed(_CH_NECK, _TRACKING_SPEED)
                     self._servos.set_position(_CH_NECK, new_neck)
+                if send_lift:
+                    self._servos.set_channel_speed(_CH_LIFT, _TRACKING_SPEED)
+                    self._servos.set_position(_CH_LIFT, new_lift)
                 if send_tilt:
                     self._servos.set_channel_speed(_CH_TILT, _TRACKING_SPEED)
                     self._servos.set_position(_CH_TILT, new_tilt)
