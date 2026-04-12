@@ -258,10 +258,12 @@ TRANSCRIBE_MIN_WHISPER_SECONDS     = float(_optional("TRANSCRIBE_MIN_WHISPER_SEC
 TRANSCRIBE_MIN_VOICED_CHUNKS       = int(_optional("TRANSCRIBE_MIN_VOICED_CHUNKS",       "5"))    # minimum above-threshold chunks before a normal-path clip is worth transcribing
 # In Phase 2 (active speech recording), the silence counter is only reset when a chunk's
 # RMS exceeds speech_detect_threshold × this multiplier.  This prevents background noise
-# and servo/speaker bleedthrough (which sits at 300–600 RMS) from resetting the silence
-# counter after the user has finished speaking.  Real speech is typically 1000–5000 RMS,
-# so a factor of 2.5 leaves a clear gap.  Increase if silence still triggers too slowly.
-TRANSCRIBE_SILENCE_RESET_MULTIPLIER = float(_optional("TRANSCRIBE_SILENCE_RESET_MULTIPLIER", "2.5"))
+# and servo/speaker bleedthrough from resetting the silence counter after the user has
+# finished speaking.  Servo actuation during the wake wave (≈2.9 s) can hit 600–1000 RMS;
+# real speech is typically 1500–5000 RMS.  A factor of 4.0 places the reset threshold
+# well above typical servo noise so the silence clock keeps advancing even while the wave
+# animation is still running.  Increase further if silence still takes too long.
+TRANSCRIBE_SILENCE_RESET_MULTIPLIER = float(_optional("TRANSCRIBE_SILENCE_RESET_MULTIPLIER", "4.0"))
 SILENCE_DURATION             = 0.5  # seconds of silence to end capture
 MAX_RECORD_SECONDS           = 12.0 # hard cap on a single utterance
 
@@ -323,7 +325,7 @@ WHISPER_LANGUAGE = _optional("WHISPER_LANGUAGE", "en")
 
 # Whisper-specific recording limits (tighter than the generic caps in the
 # "recording / wake word" section above — shorter recording = lower latency).
-WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",       "8.0"))
+WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",       "15.0"))
 
 # Two-phase silence detection in transcriber.py:
 #
@@ -335,7 +337,7 @@ WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",
 #     sustained silence before stopping.  Any audio above the RMS threshold
 #     resets the counter so brief inter-word pauses never cut off an utterance.
 TRANSCRIBE_SPEECH_WAIT_SECONDS   = float(_optional("TRANSCRIBE_SPEECH_WAIT_SECONDS",   "5.0"))
-TRANSCRIBE_END_SILENCE_SECONDS   = float(_optional("TRANSCRIBE_END_SILENCE_SECONDS",   "1.0"))
+TRANSCRIBE_END_SILENCE_SECONDS   = float(_optional("TRANSCRIBE_END_SILENCE_SECONDS",   "2.5"))
 
 # Substrings (lowercase) that identify known Whisper hallucination phrases.
 # Any result whose lowercased text contains one of these is silently dropped.
@@ -410,9 +412,9 @@ IDLE_CLIP_INTERVAL_MAX = 60.0  # maximum seconds between idle atmosphere clips
 
 
 ACTIVE_IDLE_TIMEOUT  = 20.0  # legacy — superseded by ACTIVE_TIMEOUT_SECONDS
-ACTIVE_TIMEOUT_SECONDS   = 5.0   # seconds of silence after a response before returning to IDLE
-WAKE_NO_SPEECH_TIMEOUT   = 5.0   # seconds to wait for first speech after wake word
-WAKE_GOODBYE_TIMEOUT     = 4.0   # seconds to wait after "are you there?" before saying goodbye
+ACTIVE_TIMEOUT_SECONDS   = 8.0   # seconds of silence after a response before returning to IDLE
+WAKE_NO_SPEECH_TIMEOUT   = 8.0   # seconds to wait for first speech after wake word
+WAKE_GOODBYE_TIMEOUT     = 6.0   # seconds to wait after "are you there?" before saying goodbye
 
 # Face-presence wake — triggers a greeting when a face appears after a long absence
 FACE_APPEAR_ABSENT_SECONDS: float = 8.0   # no-face gap required before appearance triggers greeting

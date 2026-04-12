@@ -996,14 +996,25 @@ class StateMachine:
             if self._state != State.ACTIVE:
                 return
 
-            # Wait for the wave to finish (usually already done by the time audio ends),
-            # then restore hand speed and restart the servo idle thread.
-            self._animations.wait(timeout=5.0)
+            # Restore servos in a background thread so the mic can open
+            # immediately after the greeting finishes.  The wave animation
+            # (≈2.9 s) typically runs concurrently with the greeting audio;
+            # when the greeting is long it's already done, and when it's short
+            # (or silent) the background thread completes within a few seconds
+            # without blocking the first listen window.
             if self._servos is not None:
-                self._servos.set_channel_speed(
-                    config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
-                )
-                self._servos.start()
+                _servos_ref = self._servos
+
+                def _wave_cleanup() -> None:
+                    self._animations.wait(timeout=5.0)
+                    _servos_ref.set_channel_speed(
+                        config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
+                    )
+                    _servos_ref.start()
+
+                threading.Thread(
+                    target=_wave_cleanup, daemon=True, name="djr3x-wave-cleanup"
+                ).start()
 
         # Re-enable idle clips now that the user has interacted again.
         self._idle_clips_enabled = True
