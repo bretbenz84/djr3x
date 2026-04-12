@@ -20,7 +20,8 @@
       "Bash(python -m py_compile utils/realworld.py)",
       "Bash(pip install:*)",
       "Bash(python3 -c \"from commands.command_list import COMMANDS, PHRASE_INDEX; print\\('OK —', len\\(COMMANDS\\), 'commands'\\)\")",
-      "Bash(python -m py_compile llm/chatgpt.py)"
+      "Bash(python -m py_compile llm/chatgpt.py)",
+      "Bash(ls /Users/bbenziger/djr3x/*.env*)"
     ]
   }
 }

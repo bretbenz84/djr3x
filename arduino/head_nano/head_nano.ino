@@ -103,12 +103,20 @@ struct EmotionColor { uint8_t r, g, b; };
 #define EMO_ANGRY    4
 #define EMO_COUNT    5
 
+// IMPORTANT — mouth colour encoding (leds[2..81]):
+// The eye pixels (leds[0-1]) are RGB-ordered LEDs; the mouth PCB uses
+// GRB-ordered WS2812B.  Both share one data line so FastLED uses a single
+// colour order (RGB, matching the eyes).  For mouth pixels this means the
+// first wire byte is interpreted by the GRB strip as GREEN, not RED.
+// All mouth colours must therefore have R↔G swapped relative to the
+// intended physical colour:
+//   physical (R, G, B) on GRB mouth strip → store as EmotionColor { G, R, B }
 const EmotionColor EMOTION_COLORS[EMO_COUNT] PROGMEM = {
-    { 255, 140,   0 },   // neutral  — warm amber
-    {   0, 200, 255 },   // happy    — cyan blue
-    { 255, 200,   0 },   // excited  — yellow-orange
-    {  40,   0, 200 },   // sad      — deep blue-purple
-    { 255,   0,   0 },   // angry    — red
+    { 140, 255,   0 },   // neutral  — warm amber   (physical R=255 G=140 B=0 → swap → 140,255,0)
+    { 200,   0, 255 },   // happy    — cyan blue    (physical R=0   G=200 B=255 → swap → 200,0,255)
+    { 200, 255,   0 },   // excited  — yellow       (physical R=255 G=200 B=0 → swap → 200,255,0)
+    {   0,  40, 200 },   // sad      — blue-purple  (physical R=40  G=0   B=200 → swap → 0,40,200)
+    {   0, 255,   0 },   // angry    — red          (physical R=255 G=0   B=0 → swap → 0,255,0)
 };
 
 // ---------------------------------------------------------------------------
@@ -542,7 +550,8 @@ void tickIdle(float dt) {
 //
 // All 80 mouth pixels ramp linearly from 0 to 30 % brightness over 4 s then
 // back to 0 over the next 4 s (triangle wave, 8 s period).  Peak R value is
-// 76 out of 255 (≈ 30 %).  Strip uses RGB byte order so CRGB(r,0,0) = red.
+// 76 out of 255 (≈ 30 %).  Mouth pixels are GRB-ordered; R↔G is swapped in
+// all mouth writes so the physical display is red (see EMOTION_COLORS note).
 //
 // FastLED.show() is only called when the red byte changes (≈ every 52 ms at
 // this ramp rate) — avoids hammering the WS2812B bus hundreds of times per
@@ -566,7 +575,7 @@ void tickSleep() {
     lastR = r;
 
     for (uint8_t i = MOUTH_START; i < NUM_LEDS; i++) {
-        leds[i] = CRGB(r, 0, 0);   // RGB order — R channel only = red
+        leds[i] = CRGB(0, r, 0);   // GRB mouth via RGB FastLED: swap R↔G → physical red
     }
     FastLED.show();
 }
