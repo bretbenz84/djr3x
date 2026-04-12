@@ -698,17 +698,44 @@ class StateMachine:
     # ------------------------------------------------------------------
 
     def _run_face_triggered_greeting(self) -> None:
-        """Play "Hi There.mp3" then listen once for up to FACE_WAKE_LISTEN_TIMEOUT
-        seconds.
+        """Play "Hi There.mp3", run face recognition concurrently, then listen.
 
-        - No speech → restore IDLE LED theme and return (stay in IDLE silently).
-        - Speech detected → store the text in _face_triggered_wake_text, set
-          _pipeline_t0, then transition to ACTIVE where it will be processed
-          immediately without re-listening.
+        Speech detected → store text in _face_triggered_wake_text, transition to ACTIVE.
+
+        No speech routes by face recognition result:
+          Known person  → ask about plans via _run_post_greeting_plan_prompt().
+                          If they answer, transition to ACTIVE (empty sentinel = skip
+                          greeting, listen fresh).  If no answer, idle chime + IDLE.
+          Unknown face  → ask name and enroll via _learn_new_person(), then idle
+                          chime + IDLE.
+          No face / no recognition → idle chime + IDLE.
         """
         log.info("Face-triggered greeting: starting")
         self._apply_active_led_theme()
 
+        # Capture frame — needed for both recognition and enrollment.
+        frame: str | None = None
+        if self._camera.is_available():
+            _pose = self._prepare_camera_pose()
+            frame = self._camera.capture_frame()
+            self._restore_servo_pose(_pose)
+            if frame:
+                self._last_wake_frame = frame
+
+        # Start face recognition in background so it runs during the clip.
+        face_result: list = [("no_face", None)]
+        face_thread: threading.Thread | None = None
+        if frame and self._face_recognizer.is_available():
+            def _identify() -> None:
+                face_result[0] = self._face_recognizer.identify_with_status(
+                    frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
+                )
+            face_thread = threading.Thread(
+                target=_identify, daemon=True, name="djr3x-face-identify"
+            )
+            face_thread.start()
+
+        # Play "Hi There.mp3" with full LED/servo effects.
         clip_path = config.ASSETS_DIR / "audio" / "Hi There.mp3"
         if clip_path.exists():
             servo_stop = None
@@ -726,7 +753,12 @@ class StateMachine:
         else:
             log.warning("Face-triggered greeting: 'Hi There.mp3' not found — skipping clip")
 
-        # Listen for a response.
+        # Ensure recognition is done before we decide what to do on silence.
+        if face_thread is not None:
+            face_thread.join(timeout=5.0)
+        status, result = face_result[0]
+
+        # Listen for an initial response.
         self._apply_listening_led_theme()
         self._wake_word.pause()
         text: str | None = None
@@ -739,20 +771,58 @@ class StateMachine:
         finally:
             self._wake_word.resume()
 
-        if not text:
-            # No response — play the return-to-idle chime so the user knows
-            # to use the wake word to reactivate Rex, then go back to IDLE.
-            log.info("Face-triggered greeting: no speech in %.0f s — playing chime and returning to IDLE",
-                     config.FACE_WAKE_LISTEN_TIMEOUT)
-            self._play_return_to_idle_chime()
-            self._apply_idle_led_theme()
+        if text:
+            # User responded immediately — hand off to _run_active() with the
+            # pre-recorded text so it is processed without re-listening.
+            log.info("Face-triggered greeting: speech detected %r — entering ACTIVE", text)
+            self._face_triggered_wake_text = text
+            self._pipeline_t0 = time.monotonic()
+            self._transition_to(State.ACTIVE)
             return
 
-        # User said something — hand off to _run_active() via the pre-recorded text.
-        log.info("Face-triggered greeting: speech detected %r — entering ACTIVE", text)
-        self._face_triggered_wake_text = text
-        self._pipeline_t0 = time.monotonic()
-        self._transition_to(State.ACTIVE)
+        # --- No speech — route by face recognition result ---
+        self._apply_active_led_theme()
+
+        if result is not None:
+            # Known person — ask about their plans just like after a normal wake.
+            person_id, name, _dist = result
+            self._last_known_person_id = person_id
+            self._post_greeting_person_id = person_id
+            self._post_greeting_person_name = name
+            self._post_greeting_prompt_used = False
+            _ctx = self._face_db.get_memories_as_context(person_id)
+            if _ctx:
+                self._llm.set_person_context(_ctx)
+            log.info(
+                "Face-triggered greeting: no speech, known person '%s' — running plan prompt",
+                name,
+            )
+            plan_status, next_state = self._run_post_greeting_plan_prompt()
+            if next_state is not None:
+                # A command (e.g. cancel/shutdown) was spoken during the prompt.
+                self._transition_to(next_state)
+                return
+            if plan_status == "answered":
+                # They replied to the plan question — continue in ACTIVE for
+                # follow-up conversation.  Empty sentinel = skip greeting, listen fresh.
+                log.info("Face-triggered greeting: plan answered — entering ACTIVE")
+                self._face_triggered_wake_text = ""
+                self._pipeline_t0 = time.monotonic()
+                self._transition_to(State.ACTIVE)
+                return
+
+        elif status in ("no_match", "db_empty"):
+            # Unknown face — ask their name and enroll them.
+            log.info("Face-triggered greeting: no speech, unknown face — running enrollment")
+            self._learn_new_person(frame)
+            # _learn_new_person may set _shutdown_event (e.g. user says "shutdown").
+            if self._shutdown_event.is_set():
+                return
+
+        # Fall through: no face, unanswered plan prompt, or enrollment complete.
+        log.info("Face-triggered greeting: returning to IDLE with chime")
+        self._play_return_to_idle_chime()
+        self._apply_idle_led_theme()
 
     # ------------------------------------------------------------------
     # State — ACTIVE
@@ -782,8 +852,8 @@ class StateMachine:
         face_wake_text = self._face_triggered_wake_text
         self._face_triggered_wake_text = None
 
-        if face_wake_text:
-            log.info("ACTIVE: face-triggered path — skipping greeting, using pre-recorded text")
+        if face_wake_text is not None:
+            log.info("ACTIVE: face-triggered path — skipping greeting")
             # Just restart the servo idle thread; no wave animation or greeting.
             if self._servos is not None:
                 self._servos.start()

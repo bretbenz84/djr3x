@@ -537,6 +537,39 @@ def _is_date_hallucination(text: str) -> bool:
     return False
 
 
+def _is_repetitive_hallucination(text: str) -> bool:
+    """Return True if text is a looping repetition of a short phrase.
+
+    Whisper sometimes outputs the same 2-6 word chunk dozens of times when
+    it receives near-silence or low-energy audio (e.g. "a little bit of a
+    little bit of ...").  We detect this by sliding a window of N words
+    across the token list and checking whether a candidate phrase repeats
+    enough times to dominate the output.
+    """
+    words = text.lower().split()
+    total = len(words)
+    if total < 6:
+        return False
+    # Try phrase lengths from 2 to 6 words
+    for n in range(2, 7):
+        if n >= total:
+            break
+        phrase = tuple(words[:n])
+        # Count non-overlapping occurrences of the phrase
+        count = 0
+        i = 0
+        while i <= total - n:
+            if tuple(words[i:i + n]) == phrase:
+                count += 1
+                i += n
+            else:
+                i += 1
+        # If the phrase accounts for ≥60% of all words, it's a loop
+        if count >= 3 and (count * n) / total >= 0.60:
+            return True
+    return False
+
+
 def _filter_hallucination(text: str, allow_short: bool = False) -> str:
     """Return text unchanged if it looks like real speech, otherwise "".
 
@@ -544,6 +577,7 @@ def _filter_hallucination(text: str, allow_short: bool = False) -> str:
       - empty / whitespace only
       - contain a known Whisper hallucination substring
       - a bare month name, year, or 'month year' / 'year month' pattern
+      - a looping repetition of a short phrase
 
     allow_short is retained for API compatibility with existing call sites,
     but short results are no longer filtered purely for length.
@@ -565,6 +599,10 @@ def _filter_hallucination(text: str, allow_short: bool = False) -> str:
 
     if _is_date_hallucination(text):
         log.info("Whisper hallucination filtered (date pattern): %r", text)
+        return ""
+
+    if _is_repetitive_hallucination(text):
+        log.info("Whisper hallucination filtered (repetitive phrase loop): %r", text[:120])
         return ""
 
     return text
