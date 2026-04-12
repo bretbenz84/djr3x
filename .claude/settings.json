@@ -35,7 +35,10 @@
       "Bash(venv/bin/python -c \"import config; print\\('HEAD_TRACKING_ENABLED:', config.HEAD_TRACKING_ENABLED\\); print\\('HEAD_TRACKING_RESOLUTION:', config.HEAD_TRACKING_RESOLUTION\\)\")",
       "Bash(venv/bin/python -c \"import vision.head_tracker; import vision.camera; print\\('imports OK'\\)\")",
       "Bash(venv/bin/python -c \"import ast; ast.parse\\(open\\('hardware/servos.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(venv/bin/python -c \"import ast; ast.parse\\(open\\('vision/head_tracker.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(venv/bin/python -c \"import ast; ast.parse\\(open\\('vision/head_tracker.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(ls /Users/bbenziger/djr3x/assets/audio/*.mp3)",
+      "Bash(xargs -I{} basename {})",
+      "Bash(python3 -c \"import vision.head_tracker; import states.state_machine; print\\('OK'\\)\")"
     ]
   }
 }

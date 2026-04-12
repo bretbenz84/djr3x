@@ -405,6 +405,11 @@ ACTIVE_TIMEOUT_SECONDS   = 5.0   # seconds of silence after a response before re
 WAKE_NO_SPEECH_TIMEOUT   = 5.0   # seconds to wait for first speech after wake word
 WAKE_GOODBYE_TIMEOUT     = 4.0   # seconds to wait after "are you there?" before saying goodbye
 
+# Face-presence wake — triggers a greeting when a face appears after a long absence
+FACE_APPEAR_ABSENT_SECONDS: float = 15.0  # no-face gap required before appearance triggers greeting
+FACE_APPEAR_FRAME_COUNT:    int   = 2     # consecutive detections required to confirm appearance
+FACE_WAKE_LISTEN_TIMEOUT:   float = 10.0  # seconds to wait for speech after face-triggered "Hi There"
+
 # ---------------------------------------------------------------------------
 # Vision — webcam capture
 # ---------------------------------------------------------------------------

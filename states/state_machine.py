@@ -285,7 +285,8 @@ class StateMachine:
         # HEAD_TRACKING_ENABLED is False.
         if config.HEAD_TRACKING_ENABLED and self._servos is not None:
             self._head_tracker: HeadTracker | None = HeadTracker(
-                self._servos, self._camera, config
+                self._servos, self._camera, config,
+                on_face_appear=self._on_face_appear,
             )
         else:
             self._head_tracker = None
@@ -293,9 +294,14 @@ class StateMachine:
         # State control
         self._state: State = State.IDLE
         self._wake_event = threading.Event()    # set by wake word callback
+        self._face_wake_event = threading.Event()  # set by _on_face_appear when in IDLE
         self._shutdown_event = threading.Event()
         self._os_shutdown_requested: bool = False  # True only for voice/button shutdown
         self._pipeline_t0: float = 0.0          # monotonic time of last wake word detection
+
+        # Face-triggered wake — text captured during the face-greeting listen so
+        # _run_active() can process it without asking the user to repeat themselves.
+        self._face_triggered_wake_text: str | None = None
 
         # Music library — scanned once at startup
         self._music_tracks: list[Path] = _scan_music()
@@ -603,12 +609,25 @@ class StateMachine:
             self._llm.set_angry_mode(False)
             log.info("ACTIVE entry: angry mode cleared")
 
-        # Wait for a wake word, playing random atmosphere clips in between.
+        # Wait for a wake word or a face-appear event, playing random atmosphere
+        # clips in between.  The inner polling loop ticks every 0.2 s so the
+        # face_wake_event is noticed promptly without burning CPU.
         while True:
             interval = random.uniform(
                 config.IDLE_CLIP_INTERVAL_MIN, config.IDLE_CLIP_INTERVAL_MAX
             )
-            triggered = self._wake_event.wait(timeout=interval)
+            deadline = time.monotonic() + interval
+            triggered      = False
+            face_triggered = False
+
+            while time.monotonic() < deadline:
+                remaining = max(0.0, deadline - time.monotonic())
+                if self._wake_event.wait(timeout=min(0.2, remaining)):
+                    triggered = True
+                    break
+                if self._face_wake_event.is_set():
+                    face_triggered = True
+                    break
 
             if triggered:
                 self._wake_event.clear()
@@ -616,6 +635,15 @@ class StateMachine:
                     State.SHUTDOWN if self._shutdown_event.is_set() else State.ACTIVE
                 )
                 return
+
+            if face_triggered:
+                self._face_wake_event.clear()
+                self._run_face_triggered_greeting()
+                # _run_face_triggered_greeting() transitions to ACTIVE when the
+                # user speaks; if it returns without a transition we stay IDLE.
+                if self._state != State.IDLE:
+                    return
+                continue
 
             # Timer fired — play a random idle clip only when chatty mode is
             # enabled AND the per-session mute hasn't been triggered.
@@ -652,13 +680,77 @@ class StateMachine:
                 log.debug("Idle clip: direct SPEAK_STOP safety write to head Nano")
                 self._leds._send_head(config.LED_CMD_SPEAK_STOP)
 
-            # Handle wake word or shutdown that arrived during clip playback.
+            # Handle wake word or face-appear that arrived during clip playback.
             if self._wake_event.is_set():
                 self._wake_event.clear()
                 self._transition_to(
                     State.SHUTDOWN if self._shutdown_event.is_set() else State.ACTIVE
                 )
                 return
+            if self._face_wake_event.is_set():
+                self._face_wake_event.clear()
+                self._run_face_triggered_greeting()
+                if self._state != State.IDLE:
+                    return
+
+    # ------------------------------------------------------------------
+    # Face-triggered greeting (called from _run_idle)
+    # ------------------------------------------------------------------
+
+    def _run_face_triggered_greeting(self) -> None:
+        """Play "Hi There.mp3" then listen once for up to FACE_WAKE_LISTEN_TIMEOUT
+        seconds.
+
+        - No speech → restore IDLE LED theme and return (stay in IDLE silently).
+        - Speech detected → store the text in _face_triggered_wake_text, set
+          _pipeline_t0, then transition to ACTIVE where it will be processed
+          immediately without re-listening.
+        """
+        log.info("Face-triggered greeting: starting")
+        self._apply_active_led_theme()
+
+        clip_path = config.ASSETS_DIR / "audio" / "Hi There.mp3"
+        if clip_path.exists():
+            servo_stop = None
+            try:
+                servo_stop = self._begin_speech(emotion="excited")
+                self._player.play_file(clip_path)
+                self._player.wait_for_speech(timeout=10.0)
+            except Exception:
+                log.exception("Face-triggered greeting: clip playback error")
+            finally:
+                if servo_stop is not None:
+                    self._end_speech(servo_stop)
+                else:
+                    self._wake_word.suppressed = False
+        else:
+            log.warning("Face-triggered greeting: 'Hi There.mp3' not found — skipping clip")
+
+        # Listen for a response.
+        self._apply_listening_led_theme()
+        self._wake_word.pause()
+        text: str | None = None
+        try:
+            text = self._transcriber.transcribe(
+                wait_for_speech_seconds=config.FACE_WAKE_LISTEN_TIMEOUT
+            )
+        except Exception:
+            log.exception("Face-triggered greeting: transcription error")
+        finally:
+            self._wake_word.resume()
+
+        if not text:
+            # No response — go back to idle silently (no goodbye phrase).
+            log.info("Face-triggered greeting: no speech in %.0f s — returning to IDLE silently",
+                     config.FACE_WAKE_LISTEN_TIMEOUT)
+            self._apply_idle_led_theme()
+            return
+
+        # User said something — hand off to _run_active() via the pre-recorded text.
+        log.info("Face-triggered greeting: speech detected %r — entering ACTIVE", text)
+        self._face_triggered_wake_text = text
+        self._pipeline_t0 = time.monotonic()
+        self._transition_to(State.ACTIVE)
 
     # ------------------------------------------------------------------
     # State — ACTIVE
@@ -683,30 +775,42 @@ class StateMachine:
         if self._servos is not None:
             self._servos.set_emotion("neutral")
 
-        # Start arm wave in background (non-blocking — idle thread stopped inside).
-        self._animations.play_wake_greeting_arms()
+        # Check whether we arrived from a face-triggered greeting — if so, skip
+        # the normal arm wave and voice greeting (already said "Hi There").
+        face_wake_text = self._face_triggered_wake_text
+        self._face_triggered_wake_text = None
 
-        # Greet the user concurrently with the arm wave.
-        self._play_wake_greeting()
+        if face_wake_text:
+            log.info("ACTIVE: face-triggered path — skipping greeting, using pre-recorded text")
+            # Just restart the servo idle thread; no wave animation or greeting.
+            if self._servos is not None:
+                self._servos.start()
+        else:
+            # Normal wake-word path: arm wave + full greeting.
+            # Start arm wave in background (non-blocking — idle thread stopped inside).
+            self._animations.play_wake_greeting_arms()
 
-        # The greeting path can request shutdown (for example if the user says
-        # "shutdown" when asked for their name).  Honor that before restoring
-        # idle servo motion so we don't briefly restart hardware we're about to
-        # power down.
-        if self._shutdown_event.is_set():
-            self._transition_to(State.SHUTDOWN)
-            return
-        if self._state != State.ACTIVE:
-            return
+            # Greet the user concurrently with the arm wave.
+            self._play_wake_greeting()
 
-        # Wait for the wave to finish (usually already done by the time audio ends),
-        # then restore hand speed and restart the servo idle thread.
-        self._animations.wait(timeout=5.0)
-        if self._servos is not None:
-            self._servos.set_channel_speed(
-                config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
-            )
-            self._servos.start()
+            # The greeting path can request shutdown (for example if the user says
+            # "shutdown" when asked for their name).  Honor that before restoring
+            # idle servo motion so we don't briefly restart hardware we're about to
+            # power down.
+            if self._shutdown_event.is_set():
+                self._transition_to(State.SHUTDOWN)
+                return
+            if self._state != State.ACTIVE:
+                return
+
+            # Wait for the wave to finish (usually already done by the time audio ends),
+            # then restore hand speed and restart the servo idle thread.
+            self._animations.wait(timeout=5.0)
+            if self._servos is not None:
+                self._servos.set_channel_speed(
+                    config.SERVO_HAND_LEFT, config.SERVO_DEFAULT_SPEED
+                )
+                self._servos.start()
 
         # Re-enable idle clips now that the user has interacted again.
         self._idle_clips_enabled = True
@@ -722,25 +826,34 @@ class StateMachine:
             # --- Listen indicator ---
             self._apply_listening_led_theme()
 
-            # Choose how long to wait for speech to start.
-            speech_timeout = (
-                config.ACTIVE_TIMEOUT_SECONDS if after_response
-                else config.WAKE_NO_SPEECH_TIMEOUT
-            )
-
-            # --- Transcribe (blocks until speech+silence, timeout, or MAX_RECORD_SECONDS) ---
-            # Pause wake word: both share the same mic device.
-            self._wake_word.pause()
-            try:
-                text = self._transcriber.transcribe(
-                    wait_for_speech_seconds=speech_timeout,
-                    t0=self._pipeline_t0,
+            # If we arrived via a face-triggered wake, use the pre-recorded text
+            # from the greeting listen rather than opening the mic again.
+            if face_wake_text:
+                text = face_wake_text
+                face_wake_text = None
+                log.info("ACTIVE: using face-triggered pre-recorded text: %r", text)
+                # Jump directly to processing — skip the transcription block below.
+                after_response = True
+            else:
+                # Choose how long to wait for speech to start.
+                speech_timeout = (
+                    config.ACTIVE_TIMEOUT_SECONDS if after_response
+                    else config.WAKE_NO_SPEECH_TIMEOUT
                 )
-            except Exception:
-                log.exception("Transcription error — skipping utterance")
-                continue
-            finally:
-                self._wake_word.resume()
+
+                # --- Transcribe (blocks until speech+silence, timeout, or MAX_RECORD_SECONDS) ---
+                # Pause wake word: both share the same mic device.
+                self._wake_word.pause()
+                try:
+                    text = self._transcriber.transcribe(
+                        wait_for_speech_seconds=speech_timeout,
+                        t0=self._pipeline_t0,
+                    )
+                except Exception:
+                    log.exception("Transcription error — skipping utterance")
+                    continue
+                finally:
+                    self._wake_word.resume()
 
             # --- No usable speech detected within the timeout window ---
             # Treat both a hard timeout (None) and an empty / hallucination-
@@ -1044,6 +1157,24 @@ class StateMachine:
             log.debug(
                 "Wake word %r ignored (state=%s, is_sleep_model=%s)",
                 model_name, self._state.value, _is_sleep_model,
+            )
+
+    # ------------------------------------------------------------------
+    # Face-appear callback  (called from HeadTracker detection thread)
+    # ------------------------------------------------------------------
+
+    def _on_face_appear(self) -> None:
+        """Called by HeadTracker when a face is confirmed after a long absence.
+
+        Only acts in IDLE state — ignored during ACTIVE, SLEEP, and SHUTDOWN so
+        a face appearing while Rex is already talking doesn't re-trigger a greeting.
+        """
+        if self._state == State.IDLE:
+            log.info("Face appeared after absence — signalling face wake")
+            self._face_wake_event.set()
+        else:
+            log.debug(
+                "Face-appear signal ignored (state=%s)", self._state.value
             )
 
     # ------------------------------------------------------------------

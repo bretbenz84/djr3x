@@ -50,7 +50,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import cv2
 
@@ -62,9 +62,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# Maestro speed used for tracking moves.
-# 15 (0.25 µs / 10 ms) keeps up with a 10 Hz loop while looking fluid.
-_TRACKING_SPEED: int = 40
+# Maestro speed used for tracking moves (units: 0.25 µs / 10 ms; 0 = unlimited).
+_TRACKING_SPEED: int = 200
 
 _CH_NECK = 0
 _CH_LIFT = 1
@@ -92,6 +91,7 @@ class HeadTracker:
         servo_controller: ServoController | None,
         camera: Camera,
         cfg=_cfg_module,
+        on_face_appear: Callable[[], None] | None = None,
     ) -> None:
         self._servos = servo_controller
         self._camera = camera
@@ -155,6 +155,16 @@ class HeadTracker:
         # Protects _smooth_*, _sent_*, _target_* shared between the detection
         # thread and wait_for_center() (called from the main thread).
         self._state_lock = threading.Lock()
+
+        # Face-absence tracking — fires on_face_appear when a face is detected
+        # after FACE_APPEAR_ABSENT_SECONDS of no detections, confirmed by
+        # FACE_APPEAR_FRAME_COUNT consecutive frames.
+        self._on_face_appear: Callable[[], None] | None = on_face_appear
+        # Initialise to now so the absence clock starts from tracker start.
+        self._last_face_seen_time: float = time.monotonic()
+        self._in_face_appear_event: bool = False   # True while counting consecutive frames
+        self._appear_frame_count:   int  = 0       # consecutive face-detected frames in event
+        self._face_appear_fired:    bool = False   # prevents double-fire per appearance
 
     # ------------------------------------------------------------------
     # Public API
@@ -287,6 +297,36 @@ class HeadTracker:
                 face_cx = x + w // 2
                 face_cy = y + h // 2
 
+                # ── Face-absence tracking ─────────────────────────────────
+                now = time.monotonic()
+                absent_seconds = getattr(self._cfg, "FACE_APPEAR_ABSENT_SECONDS", 15.0)
+                confirm_frames = getattr(self._cfg, "FACE_APPEAR_FRAME_COUNT", 2)
+                if now - self._last_face_seen_time >= absent_seconds and not self._in_face_appear_event:
+                    # Long absence just ended — start counting confirmation frames.
+                    self._in_face_appear_event = True
+                    self._appear_frame_count = 0
+                    log.debug(
+                        "HeadTracker: face appeared after %.1f s absence — counting frames",
+                        now - self._last_face_seen_time,
+                    )
+                if self._in_face_appear_event:
+                    self._appear_frame_count += 1
+                    if (
+                        self._appear_frame_count >= confirm_frames
+                        and not self._face_appear_fired
+                        and self._on_face_appear is not None
+                    ):
+                        self._face_appear_fired = True
+                        log.info(
+                            "HeadTracker: face confirmed after %d frames — firing on_face_appear",
+                            self._appear_frame_count,
+                        )
+                        try:
+                            self._on_face_appear()
+                        except Exception:
+                            log.exception("HeadTracker: on_face_appear callback raised")
+                self._last_face_seen_time = now
+
                 # Normalise face position to [0,1] then remap to account for the
                 # wide-angle lens.  Faces detected within the edge margin already
                 # represent an extreme viewing angle, so we stretch the inner
@@ -339,7 +379,13 @@ class HeadTracker:
                     self._target_neck = t_neck
                     self._target_lift = t_lift
                     self._target_tilt = t_tilt
-            # else: no face — hold last known target, do NOT reset to neutral
+            else:
+                # No face — hold last known target, do NOT reset to neutral.
+                # Reset appear-event state so the next appearance starts a fresh
+                # confirmation count and the callback can fire again.
+                self._in_face_appear_event = False
+                self._appear_frame_count   = 0
+                self._face_appear_fired    = False
 
             # ── EMA smoothing ─────────────────────────────────────────────
             with self._state_lock:
