@@ -22,7 +22,7 @@ STARTUP_CHIME_PATH   = ASSETS_DIR / "audio" / "startup_chime.mp3"
 STARTUP_MUSIC_PATH   = ASSETS_DIR / "audio" / "light_speed.mp3"
 STARTUP_INTRO_PATH   = ASSETS_DIR / "audio" / "Roger Control.mp3"
 SHUTDOWN_MUSIC_PATH  = ASSETS_DIR / "audio" / "hyperdrive_down.mp3"
-CANTINA_BAND_PATH    = ASSETS_DIR / "audio" / "Cantina Band.mp3"
+CANTINA_BAND_PATH    = ASSETS_DIR / "music" / "Cantina Band.mp3"
 
 DANCE_SHORT_DURATION = 12.0   # seconds of dancing before the fade starts
 DANCE_FADE_DURATION  = 3.0    # seconds for the music fade-out

@@ -550,11 +550,8 @@ class ServoController:
         (6, 1.43, 0.05),   # pokerarm   — fastest
         (7, 0.91, 0.35),   # heroarm    — medium
     )
-    # Speed high enough to always reach the next target within one 50 ms tick.
-    # Worst case per tick: half-range * π * dt = 4000 * 3.14 * 0.05 ≈ 628 qµs.
-    # At speed 800 each servo can move 800*5 = 4000 qµs per tick — plenty.
-    _DANCE_SPEED = 800
-    _DANCE_HZ    = 20          # update rate (Hz)
+    _DANCE_SPEED = 50          # slightly faster than excited (40); keeps motion smooth
+    _DANCE_HZ    = 10          # update rate (Hz) — lower rate suits the gentler speed
     _DANCE_FREQ  = math.pi     # base rad/s → one full sweep every ~2 s
 
     def _dance_loop(self) -> None:
@@ -584,7 +581,8 @@ class ServoController:
                 self._send_target(ch, pos)
 
         # Wait for all servos to reach their t=0 positions before the loop.
-        time.sleep(0.5)
+        # At speed 50 the largest travel (~4000 qµs) takes about 0.8 s.
+        time.sleep(1.0)
 
         while not self._dance_stop_event.is_set():
             with self._lock:
