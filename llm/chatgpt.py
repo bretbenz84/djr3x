@@ -534,6 +534,46 @@ class ChatGPTClient:
             log.exception("generate_activity_followup: failed")
             return ""
 
+    def generate_activity_reply(
+        self, activity_text: str, *, weekend: bool = False
+    ) -> str:
+        """Turn a fresh first-person activity answer into a natural Rex reply.
+
+        Returns "" on any error.
+        """
+        timing = "this weekend" if weekend else "today"
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are DJ R-3X ('Rex'), the snarky cantina droid DJ. "
+                            "Rewrite the user's stated plan into ONE natural follow-up question in Rex's voice. "
+                            "Convert first-person phrasing into natural second-person phrasing when needed. "
+                            "For example, if the user says 'I'm building a droid,' respond more like "
+                            "'Oh, you're building a droid today?' instead of repeating 'I'm building a droid' verbatim. "
+                            "Keep it playful, roasty, and family-safe. One sentence only. "
+                            "No sound effects. No asterisks. Stay in character."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"User's plan answer: {activity_text}\n"
+                            f"Timing context: {timing}"
+                        ),
+                    },
+                ],
+                max_tokens=70,
+                temperature=0.9,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception:
+            log.exception("generate_activity_reply: failed")
+            return ""
+
     def analyze_i_spy_scene(self, image: str) -> dict | None:
         """Return structured scene data for the I Spy mini-game."""
         try:

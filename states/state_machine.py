@@ -1510,7 +1510,7 @@ class StateMachine:
 
     def _listen_for_prompt_answer(self, timeout_seconds: float) -> str | None:
         """Listen once for a prompted reply."""
-        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
             return self._transcriber.transcribe(
@@ -1522,7 +1522,7 @@ class StateMachine:
             return None
         finally:
             self._wake_word.resume()
-            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+            self._apply_active_led_theme()
 
     def _store_plan_memory(self, person_id: int, name: str, answer: str) -> None:
         """Store a post-greeting plan/activity answer as a memory row."""
@@ -1692,8 +1692,14 @@ class StateMachine:
 
     def _speak_plan_reply(self, answer: str) -> None:
         """Riff on the user's stated plan, then ask one follow-up question."""
-        summary = self._short_memory_summary(self._summarize_plan_answer(answer))
-        line = _pick_no_repeat(_PLAN_REPLY_LINES, "plan_reply").format(summary=summary)
+        weekday = date.today().weekday()
+        line = self._llm.generate_activity_reply(
+            answer,
+            weekend=weekday >= 4,
+        )
+        if not line:
+            summary = self._short_memory_summary(self._summarize_plan_answer(answer))
+            line = _pick_no_repeat(_PLAN_REPLY_LINES, "plan_reply").format(summary=summary)
         servo_stop = self._begin_speech(emotion="excited")
         try:
             self._synthesizer.speak(line)
@@ -1768,7 +1774,7 @@ class StateMachine:
                 self._end_speech(servo_stop)
 
             # Listen for the answer.
-            self._leds.set_head_effect(config.LED_CMD_LISTENING)
+            self._apply_listening_led_theme()
             self._wake_word.pause()
             try:
                 answer = self._transcriber.transcribe(
@@ -1780,7 +1786,7 @@ class StateMachine:
                 answer = None
             finally:
                 self._wake_word.resume()
-            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+            self._apply_active_led_theme()
 
             if not answer:
                 log.info("Enrollment interview: no answer for %r — skipping", question)
@@ -1880,7 +1886,7 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
-        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
             name_text = self._transcriber.transcribe(
@@ -1953,7 +1959,7 @@ class StateMachine:
         name = _extract_name(name_text)
         log.info("Wake greeting: enrolling new person as %r", name)
 
-        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+        self._apply_active_led_theme()
 
         # Capture a fresh frame NOW — the person just said their name and is
         # almost certainly still facing the camera.  This is our best shot at
@@ -2667,7 +2673,7 @@ class StateMachine:
 
     def _transcribe_i_spy_guess(self, timeout_seconds: float) -> str | None:
         """Capture one possible I Spy guess."""
-        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
             return self._transcriber.transcribe(
@@ -2679,7 +2685,7 @@ class StateMachine:
             return ""
         finally:
             self._wake_word.resume()
-            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+            self._apply_active_led_theme()
 
     def _speak_i_spy_failure(self) -> State | None:
         """Apologize in character and end the I Spy round cleanly."""
@@ -2739,7 +2745,7 @@ class StateMachine:
                 self._end_speech(servo_stop)
 
             # Listen for the reply.
-            self._leds.set_head_effect(config.LED_CMD_LISTENING)
+            self._apply_listening_led_theme()
             self._wake_word.pause()
             try:
                 name_text = self._transcriber.transcribe(
@@ -2752,7 +2758,7 @@ class StateMachine:
             finally:
                 self._wake_word.resume()
 
-            self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+            self._apply_active_led_theme()
 
             if not name_text:
                 log.info("rename_me: no name heard — aborting")
@@ -2895,7 +2901,7 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
-        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
             name_text = self._transcriber.transcribe(
@@ -2908,7 +2914,7 @@ class StateMachine:
         finally:
             self._wake_word.resume()
 
-        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+        self._apply_active_led_theme()
 
         if not name_text:
             log.info("forget_me: no spoken name heard — cancelling")
@@ -2982,7 +2988,7 @@ class StateMachine:
             self._end_speech(servo_stop)
 
         # Listen for yes / no.
-        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
             response = self._transcriber.transcribe(
@@ -2995,7 +3001,7 @@ class StateMachine:
         finally:
             self._wake_word.resume()
 
-        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+        self._apply_active_led_theme()
 
         if not response:
             log.info("forget_me: no response heard while confirming deletion of person id=%d", person_id)
@@ -3056,7 +3062,7 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
-        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
             response = self._transcriber.transcribe(
@@ -3069,7 +3075,7 @@ class StateMachine:
         finally:
             self._wake_word.resume()
 
-        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+        self._apply_active_led_theme()
 
         if not response:
             log.info("wipe_memory: no response heard — cancelling")
@@ -3302,7 +3308,7 @@ class StateMachine:
             self._end_speech(servo_stop)
 
         # Listen for their name.
-        self._leds.set_head_effect(config.LED_CMD_LISTENING)
+        self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
             name_text = self._transcriber.transcribe(
@@ -3315,7 +3321,7 @@ class StateMachine:
         finally:
             self._wake_word.resume()
 
-        self._leds.set_head_effect(config.LED_CMD_ACTIVE)
+        self._apply_active_led_theme()
 
         if not name_text:
             log.info("recall_name: no name heard — aborting")
