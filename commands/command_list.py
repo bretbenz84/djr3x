@@ -82,7 +82,7 @@ COMMANDS: list[Command] = [
 
     Command(
         phrases=["hello", "hey", "hi", "hey rex", "hello rex", "yo rex",
-                 "what's up rex", "whats up rex"],
+                 "what's up rex"],
         response=[
             (
                 "Oh great, YOU showed up. "
@@ -173,7 +173,7 @@ COMMANDS: list[Command] = [
 
     Command(
         phrases=["how are you", "how are you doing", "how's it going",
-                 "hows it going", "you doing okay", "you okay"],
+                 "you doing okay", "you okay"],
         response=[
             (
                 "Better than you look, that's for sure. "
@@ -202,7 +202,7 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
-        phrases=["what's your name", "whats your name", "who are you",
+        phrases=["what's your name", "who are you",
                  "what are you", "introduce yourself"],
         response=[
             (
@@ -451,7 +451,7 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
-        phrases=["what song is this", "what's playing", "whats playing",
+        phrases=["what song is this", "what's playing",
                  "what are you playing", "name this song", "what is this song"],
         response=[
             (
@@ -610,7 +610,7 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
-        phrases=["what's batuu", "whats batuu", "what planet is this"],
+        phrases=["what's batuu", "what planet is this"],
         response=[
             (
                 "Batuu! Black Spire Outpost — edge of the known galaxy, home to ancient ruins, shady traders, "
@@ -640,7 +640,7 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
-        phrases=["who's your favourite jedi", "whos your favourite jedi",
+        phrases=["who's your favourite jedi",
                  "best jedi", "favourite jedi"],
         response=[
             (
@@ -740,7 +740,7 @@ COMMANDS: list[Command] = [
     # -----------------------------------------------------------------------
 
     Command(
-        phrases=["you're a great dj", "youre a great dj", "great music",
+        phrases=["you're a great dj", "great music",
                  "love the music", "nice music", "good music"],
         response=[
             (
@@ -851,7 +851,6 @@ COMMANDS: list[Command] = [
             "dance please",
             "show me your moves",
             "bust a move",
-            "lets dance",
             "let's dance",
             "show me a dance",
             "do a dance",
@@ -869,8 +868,7 @@ COMMANDS: list[Command] = [
 
     Command(
         phrases=[
-            "play some music", "play a song", "put on some music", "play something",
-            "start the music", "hit it", "drop a beat",
+            "play some music", "play a song", "put on some music",
         ],
         response="",
         action="play_music",
@@ -965,10 +963,7 @@ COMMANDS: list[Command] = [
             "what is today",
             "what is the date",
             "what is today's date",
-            "whats today's date",
             "what's today's date",
-            "what is todays date",
-            "whats todays date",
             "what day of the week is it",
             "what month is it",
         ],
@@ -1016,13 +1011,13 @@ COMMANDS: list[Command] = [
     Command(
         phrases=["what do you see", "what can you see", "look around",
                  "tell me what you see", "describe what you see",
-                 "what's in front of you", "whats in front of you"],
+                 "what's in front of you"],
         response="",   # not spoken — action=vision routes to LLM
         action="vision",
     ),
 
     Command(
-        phrases=["i spy", "lets play i spy", "let's play i spy"],
+        phrases=["i spy", "let's play i spy"],
         response="",   # not spoken — action=i_spy handled by state machine
         action="i_spy",
     ),

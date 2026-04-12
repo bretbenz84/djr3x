@@ -21,7 +21,10 @@
       "Bash(pip install:*)",
       "Bash(python3 -c \"from commands.command_list import COMMANDS, PHRASE_INDEX; print\\('OK —', len\\(COMMANDS\\), 'commands'\\)\")",
       "Bash(python -m py_compile llm/chatgpt.py)",
-      "Bash(ls /Users/bbenziger/djr3x/*.env*)"
+      "Bash(ls /Users/bbenziger/djr3x/*.env*)",
+      "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; print\\('OK', len\\(PHRASE_INDEX\\), 'phrases'\\)\")",
+      "Bash(python3 -)",
+      "Bash(python3 -c \"from commands.command_list import PHRASE_INDEX; print\\('OK —', len\\(PHRASE_INDEX\\), 'phrases loaded'\\)\")"
     ]
   }
 }
