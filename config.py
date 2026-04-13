@@ -195,8 +195,9 @@ ARM_IDLE_INTERVAL_MIN   = float(_optional("ARM_IDLE_INTERVAL_MIN",   "2.0"))   #
 ARM_IDLE_INTERVAL_MAX   = float(_optional("ARM_IDLE_INTERVAL_MAX",   "4.0"))
 
 # Arm speech-reactive tuning
-SERVO_ELBOW_SPEAK_MULT     = float(_optional("SERVO_ELBOW_SPEAK_MULT",     "1.2"))  # elbow intensity multiplier (lower = less jerk on narrow range)
-SERVO_ELBOW_SPEAK_THROTTLE = int(_optional("SERVO_ELBOW_SPEAK_THROTTLE",   "3"))    # only update elbow every N speak_move() calls so it completes each raise/lower
+SERVO_ELBOW_SPEAK_MULT         = float(_optional("SERVO_ELBOW_SPEAK_MULT",         "1.0"))   # scales elbow gesture size during speech
+SERVO_ELBOW_SPEAK_INTERVAL_MIN = float(_optional("SERVO_ELBOW_SPEAK_INTERVAL_MIN", "0.35"))  # seconds to hold an elbow gesture before picking a new one
+SERVO_ELBOW_SPEAK_INTERVAL_MAX = float(_optional("SERVO_ELBOW_SPEAK_INTERVAL_MAX", "0.75"))  # longer hold keeps speech arm motion from rocking too quickly
 SERVO_HAND_SPEAK_SPEED          = int(_optional("SERVO_HAND_SPEAK_SPEED",          "255"))  # ch 5 max speed — used only for the wake greeting wave
 SERVO_HAND_SPEAK_SPEED_RELAXED  = int(_optional("SERVO_HAND_SPEAK_SPEED_RELAXED",   "30"))   # ch 5 speed during normal speech — slow and relaxed
 

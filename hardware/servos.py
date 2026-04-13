@@ -120,13 +120,17 @@ class ServoController:
         self._idle_thread: threading.Thread | None = None
         self._dance_stop_event = threading.Event()
         self._dance_thread: threading.Thread | None = None
-        # Throttle counters for slow-moving arm channels in speak_move().
+        # Throttle counters / timers for slow-moving arm channels in
+        # speak_move().
         # ch 5 (hand): update every 4 calls (~200 ms) — servo needs time to
         #   complete each full-range twist before receiving a new target.
-        # ch 4 (elbow): update every SERVO_ELBOW_SPEAK_THROTTLE calls so it
-        #   makes slow deliberate raises rather than rapid small jitters.
+        # ch 4 (elbow): hold each speech gesture for a short beat before
+        #   picking the next target so the arm reads like human emphasis
+        #   instead of a fast metronomic rock.
         self._hand_speak_counter: int = 0
-        self._elbow_speak_counter: int = 0
+        self._elbow_speak_direction: int = 1
+        self._elbow_speak_target: int | None = None
+        self._next_elbow_speak_at: float = 0.0
         # Set by pause_arm_idle() to prevent the idle loop from sending conflicting
         # commands to ch 4/5/7 while an arm animation is running.
         self._arm_idle_pause = threading.Event()
@@ -358,20 +362,35 @@ class ServoController:
         hand_lo,  hand_hi  = self._effective_limits(config.SERVO_HAND_LEFT)  # ch 5
         hero_lo,  hero_hi  = self._effective_limits(config.SERVO_HAND_RIGHT) # ch 7
 
-        # Elbow (ch 4): update every SERVO_ELBOW_SPEAK_THROTTLE calls so the servo
-        # has time to complete each raise/lower before a new target arrives.
-        # Alternates between the low and high end of at least 50% of its span,
-        # scaled by intensity — produces slow deliberate raises instead of jitter.
-        self._elbow_speak_counter += 1
-        elbow_target: int | None = None
-        if self._elbow_speak_counter % config.SERVO_ELBOW_SPEAK_THROTTLE == 0:
-            elbow_center    = (elbow_lo + elbow_hi) // 2
-            # Amplitude: 50–75% of span, growing with intensity
-            elbow_amplitude = int((elbow_hi - elbow_lo) * (0.50 + 0.25 * intensity))
-            if (self._elbow_speak_counter // config.SERVO_ELBOW_SPEAK_THROTTLE) % 2 == 0:
-                elbow_target = _clamp(elbow_center - elbow_amplitude, elbow_lo, elbow_hi)
-            else:
-                elbow_target = _clamp(elbow_center + elbow_amplitude, elbow_lo, elbow_hi)
+        # Elbow (ch 4): hold each gesture for 0.35–0.75 s before changing.
+        # Keep motion in the upper speaking band instead of slamming between
+        # mechanical extremes, and alternate direction to preserve the feeling
+        # of conversational arm emphasis.
+        now = time.monotonic()
+        elbow_target = self._elbow_speak_target
+        if elbow_target is None or now >= self._next_elbow_speak_at:
+            elbow_span = elbow_hi - elbow_lo
+            elbow_center = _clamp(
+                int(elbow_lo + elbow_span * 0.58),
+                elbow_lo,
+                elbow_hi,
+            )
+            elbow_amplitude = int(
+                elbow_span * (0.12 + 0.10 * arm_intensity) * config.SERVO_ELBOW_SPEAK_MULT
+            )
+            elbow_target = _clamp(
+                elbow_center
+                + self._elbow_speak_direction * elbow_amplitude
+                + random.randint(-40, 40),
+                elbow_lo,
+                elbow_hi,
+            )
+            self._elbow_speak_target = elbow_target
+            self._elbow_speak_direction *= -1
+            self._next_elbow_speak_at = now + random.uniform(
+                config.SERVO_ELBOW_SPEAK_INTERVAL_MIN,
+                config.SERVO_ELBOW_SPEAK_INTERVAL_MAX,
+            )
 
         # Hand (ch 5): only update every 4th call (~200 ms) so the servo can
         # complete each twist before receiving a new target.
