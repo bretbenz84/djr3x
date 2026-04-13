@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import sqlite3
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -77,6 +78,21 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 """
 
+_CREATE_INTERACTION_STATS = """
+CREATE TABLE IF NOT EXISTS interaction_stats (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id              INTEGER REFERENCES people(id),
+    day_iso                TEXT NOT NULL,
+    interaction_count      INTEGER DEFAULT 0,
+    repeated_command_count INTEGER DEFAULT 0,
+    repeated_topic_count   INTEGER DEFAULT 0,
+    last_command           TEXT,
+    last_topic             TEXT,
+    last_interaction_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(person_id, day_iso)
+);
+"""
+
 
 class FaceDB:
     """SQLite-backed store for known-person face encodings."""
@@ -104,6 +120,7 @@ class FaceDB:
             self._conn.execute(_CREATE_PEOPLE)
             self._conn.execute(_CREATE_ENCODINGS)
             self._conn.execute(_CREATE_MEMORIES)
+            self._conn.execute(_CREATE_INTERACTION_STATS)
         self._ensure_people_columns()
         self._ensure_memories_columns()
 
@@ -364,6 +381,9 @@ class FaceDB:
         """Remove a person and all their encodings."""
         with self._conn:
             self._conn.execute(
+                "DELETE FROM interaction_stats WHERE person_id = ?", (person_id,)
+            )
+            self._conn.execute(
                 "DELETE FROM memories WHERE person_id = ?", (person_id,)
             )
             self._conn.execute(
@@ -392,6 +412,9 @@ class FaceDB:
         with self._conn:
             for person_id in matching_ids:
                 self._conn.execute(
+                    "DELETE FROM interaction_stats WHERE person_id = ?", (person_id,)
+                )
+                self._conn.execute(
                     "DELETE FROM memories WHERE person_id = ?", (person_id,)
                 )
                 self._conn.execute(
@@ -409,6 +432,7 @@ class FaceDB:
     def delete_all_people(self) -> None:
         """Remove all people and all stored face encodings."""
         with self._conn:
+            self._conn.execute("DELETE FROM interaction_stats")
             self._conn.execute("DELETE FROM memories")
             self._conn.execute("DELETE FROM face_encodings")
             self._conn.execute("DELETE FROM people")
@@ -611,6 +635,114 @@ class FaceDB:
                 value += "."
             sentences.append(value)
         return " ".join(sentences)
+
+    def record_interaction(
+        self,
+        person_id: int,
+        *,
+        command_key: Optional[str] = None,
+        topic_key: Optional[str] = None,
+    ) -> dict:
+        """Update daily interaction counters for a known person.
+
+        Returns a snapshot containing today's interaction counts and whether
+        this turn repeated the previous command or topic.
+        """
+        day_iso = date.today().isoformat()
+        existing = self._conn.execute(
+            """SELECT interaction_count, repeated_command_count, repeated_topic_count,
+                      last_command, last_topic
+               FROM interaction_stats
+               WHERE person_id = ? AND day_iso = ?""",
+            (person_id, day_iso),
+        ).fetchone()
+
+        prev_last_command = str(existing["last_command"]) if existing and existing["last_command"] else None
+        prev_last_topic = str(existing["last_topic"]) if existing and existing["last_topic"] else None
+        is_repeated_command = bool(command_key and prev_last_command == command_key)
+        is_repeated_topic = bool(topic_key and prev_last_topic == topic_key)
+
+        if existing is None:
+            interaction_count = 1
+            repeated_command_count = 1 if is_repeated_command else 0
+            repeated_topic_count = 1 if is_repeated_topic else 0
+            new_last_command = command_key
+            new_last_topic = topic_key
+            with self._conn:
+                self._conn.execute(
+                    """INSERT INTO interaction_stats
+                       (
+                           person_id, day_iso, interaction_count,
+                           repeated_command_count, repeated_topic_count,
+                           last_command, last_topic
+                       )
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        person_id,
+                        day_iso,
+                        interaction_count,
+                        repeated_command_count,
+                        repeated_topic_count,
+                        new_last_command,
+                        new_last_topic,
+                    ),
+                )
+        else:
+            interaction_count = int(existing["interaction_count"]) + 1
+            repeated_command_count = int(existing["repeated_command_count"]) + (
+                1 if is_repeated_command else 0
+            )
+            repeated_topic_count = int(existing["repeated_topic_count"]) + (
+                1 if is_repeated_topic else 0
+            )
+            new_last_command = command_key or prev_last_command
+            new_last_topic = topic_key or prev_last_topic
+            with self._conn:
+                self._conn.execute(
+                    """UPDATE interaction_stats
+                       SET interaction_count = ?,
+                           repeated_command_count = ?,
+                           repeated_topic_count = ?,
+                           last_command = ?,
+                           last_topic = ?,
+                           last_interaction_at = CURRENT_TIMESTAMP
+                       WHERE person_id = ? AND day_iso = ?""",
+                    (
+                        interaction_count,
+                        repeated_command_count,
+                        repeated_topic_count,
+                        new_last_command,
+                        new_last_topic,
+                        person_id,
+                        day_iso,
+                    ),
+                )
+
+        snapshot = {
+            "day_iso": day_iso,
+            "interaction_count": interaction_count,
+            "repeated_command_count": repeated_command_count,
+            "repeated_topic_count": repeated_topic_count,
+            "last_command": new_last_command,
+            "last_topic": new_last_topic,
+            "is_repeated_command": is_repeated_command,
+            "is_repeated_topic": is_repeated_topic,
+        }
+        log.debug("FaceDB: interaction stats updated for person_id=%d: %s", person_id, snapshot)
+        return snapshot
+
+    def get_today_interaction_stats(self, person_id: int) -> Optional[dict]:
+        """Return today's interaction stats snapshot for a known person."""
+        day_iso = date.today().isoformat()
+        row = self._conn.execute(
+            """SELECT day_iso, interaction_count, repeated_command_count,
+                      repeated_topic_count, last_command, last_topic,
+                      last_interaction_at
+               FROM interaction_stats
+               WHERE person_id = ? AND day_iso = ?""",
+            (person_id, day_iso),
+        ).fetchone()
+        return dict(row) if row is not None else None
 
     def close(self) -> None:
         self._conn.close()

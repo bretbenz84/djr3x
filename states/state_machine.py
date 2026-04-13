@@ -39,6 +39,7 @@ Usage
 
 from __future__ import annotations
 
+from collections import deque
 import enum
 import difflib
 import logging
@@ -310,6 +311,21 @@ _ANGRY_OFF_LINES: tuple[str, ...] = (
     "All right, truce accepted. Grumpy mode disengaged. Try not to earn it again.",
 )
 
+_OPINION_TOPIC_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("appearance", ("shirt", "clothes", "clothing", "outfit", "wearing", "look", "looks", "style")),
+    ("music", ("music", "song", "songs", "playlist", "track", "tracks", "album")),
+    ("memory", ("name", "remember", "memory", "memories", "preference", "preferences")),
+    ("vision", ("see", "camera", "image", "picture", "photo", "scene")),
+    ("time", ("time", "date", "day", "weather", "forecast", "clock")),
+    ("shutdown", ("shutdown", "sleep", "idle", "power", "off")),
+)
+
+_OPINION_STOPWORDS: set[str] = {
+    "a", "an", "and", "are", "be", "for", "from", "how", "i", "im", "is",
+    "it", "me", "my", "of", "on", "or", "please", "tell", "that", "the",
+    "this", "to", "what", "whats", "why", "you", "your",
+}
+
 _PROMPT_COMMAND_ACTIONS: set[str] = {
     "cancel",
     "program_shutdown",
@@ -493,6 +509,18 @@ class StateMachine:
         self._curious_questions_asked_this_session: set[str] = set()
         self._angry_mode: bool = False
         self._last_wake_greeting_used_vision: bool = False
+        self._last_opinion_at: float = 0.0
+        self._opinions_this_session: int = 0
+        self._recent_normalized_turns: deque[str] = deque(maxlen=6)
+        self._recent_person_gap_days: dict[int, int] = {}
+        self._anonymous_interaction_day: date = date.today()
+        self._anonymous_interaction_stats: dict[str, int | str | None] = {
+            "interaction_count": 0,
+            "repeated_command_count": 0,
+            "repeated_topic_count": 0,
+            "last_command": None,
+            "last_topic": None,
+        }
 
         # Animation player — shares hardware refs with the rest of the machine
         self._animations = AnimationPlayer(self._servos, self._leds)
@@ -1372,6 +1400,8 @@ class StateMachine:
             #   4. Plain LLM fallback
             # This keeps fuzzy matching from stealing open-ended or visual
             # questions that should go to the LLM path.
+            matched_action: str | None = None
+            used_vision = False
             cmd = parse(text, allow_fuzzy=False)
             if cmd is not None and cmd.action == "vision":
                 # Vision command — capture a fresh frame right now and send to LLM.
@@ -1382,9 +1412,12 @@ class StateMachine:
                 if frame:
                     log.debug("Camera: fresh frame captured for vision command (%d bytes b64)",
                               len(frame))
+                matched_action = cmd.action
+                used_vision = bool(frame)
                 next_state = self._speak_llm(text, image=frame, t0=self._pipeline_t0)
             elif cmd is not None:
                 log.info("Command matched: %r → %r%s", cmd.phrases[0], cmd.action, _elapsed)
+                matched_action = cmd.action
                 next_state = self._execute_command(cmd, text)
             else:
                 # No exact/prefix command match — check visual intent before
@@ -1397,6 +1430,8 @@ class StateMachine:
                     if frame:
                         log.debug("Camera: fresh frame captured for vision intent (%d bytes b64)",
                                   len(frame))
+                    matched_action = "vision"
+                    used_vision = bool(frame)
                     next_state = self._speak_llm(text, image=frame, t0=self._pipeline_t0)
                 else:
                     fuzzy_cmd = parse(text, allow_fuzzy=True)
@@ -1405,10 +1440,18 @@ class StateMachine:
                             "Command fuzzy-matched: %r → %r%s",
                             fuzzy_cmd.phrases[0], fuzzy_cmd.action, _elapsed
                         )
+                        matched_action = fuzzy_cmd.action
                         next_state = self._execute_command(fuzzy_cmd, text)
                     else:
                         log.info("No vision intent or command match — sending text only to ChatGPT%s", _elapsed)
                         next_state = self._speak_llm(text, image=None, t0=self._pipeline_t0)
+
+            topic_key = self._extract_topic_key(text, matched_action)
+            turn_context = self._record_turn_context(
+                text=text,
+                matched_action=matched_action,
+                topic_key=topic_key,
+            )
 
             # Ensure all audio has finished before re-opening the mic.
             self._player.wait_for_speech()
@@ -1419,7 +1462,14 @@ class StateMachine:
                 self._transition_to(next_state)
                 return
 
-            self._maybe_speak_autonomy_followup(response_plan)
+            opinion_spoken = self._maybe_speak_contextual_opinion(
+                matched_action=matched_action,
+                topic_key=topic_key,
+                turn_context=turn_context,
+                used_vision=used_vision,
+            )
+            if not opinion_spoken:
+                self._maybe_speak_autonomy_followup(response_plan)
             self._player.wait_for_speech()
 
             # Restore ACTIVE indicators for next listen turn.
@@ -1515,6 +1565,9 @@ class StateMachine:
             self._post_greeting_person_name = None
             self._post_greeting_prompt_used = False
             self._curious_questions_asked_this_session.clear()
+            self._recent_normalized_turns.clear()
+            self._recent_person_gap_days.clear()
+            self._opinions_this_session = 0
             self._llm.clear_person_context()
             if self._angry_mode:
                 self._angry_mode = False
@@ -1688,6 +1741,7 @@ class StateMachine:
         # ---- Known person ------------------------------------------------
         if result is not None:
             person_id, name, _dist = result
+            self._cache_days_since_last_seen(person_id)
             bother_count = self._face_db.update_last_seen(person_id)
 
             self._last_known_person_id = person_id
@@ -1956,6 +2010,7 @@ class StateMachine:
                 self._play_known_person_greeting(name, 1)
 
             self._last_greeted_person_id = person_id
+            self._cache_days_since_last_seen(person_id)
             self._face_db.update_last_seen(person_id)
             self._maybe_speak_followup(person_id)
 
@@ -4261,6 +4316,7 @@ class StateMachine:
 
         if result is not None:
             person_id, name, distance = result
+            self._cache_days_since_last_seen(person_id)
             self._face_db.update_last_seen(person_id)
             self._last_known_person_id = person_id
             memories_ctx = self._face_db.get_memories_as_context(person_id)
@@ -4416,6 +4472,7 @@ class StateMachine:
             return None, None, frame
 
         person_id, name, distance = result
+        self._cache_days_since_last_seen(person_id)
         self._face_db.update_last_seen(person_id)
         self._last_known_person_id = person_id
         log.info("recall: recognised person_id=%d name=%r distance=%.3f", person_id, name, distance)
@@ -4729,6 +4786,297 @@ class StateMachine:
             if remaining <= 0.0:
                 return
             time.sleep(min(0.05, remaining))
+
+    def _extract_topic_key(self, text: str, cmd_action: str | None) -> str | None:
+        """Bucket a turn into a coarse topic label for repetition tracking."""
+        if cmd_action:
+            if cmd_action in {"recall_name", "rename_me", "forget_me", "recall_memories", "recall_preference"}:
+                return "memory"
+            if cmd_action in {"play_music", "stop_music", "next_track"}:
+                return "music"
+            if cmd_action in {"tell_time", "tell_date", "tell_weather"}:
+                return "time"
+            if cmd_action == "vision":
+                return "vision"
+            if cmd_action in {"program_shutdown", "os_shutdown", "sleep", "idle"}:
+                return "shutdown"
+            return cmd_action
+
+        normalized = normalize(text)
+        if not normalized:
+            return None
+
+        words = normalized.split()
+        for topic, keywords in _OPINION_TOPIC_KEYWORDS:
+            if any(word in words for word in keywords):
+                return topic
+
+        tokens = [
+            token for token in words
+            if token not in _OPINION_STOPWORDS and len(token) > 2
+        ]
+        if not tokens:
+            return None
+        return "_".join(tokens[:3])
+
+    def _is_repeated_request(self, normalized_text: str) -> bool:
+        """Return True when this turn is very similar to a recent request."""
+        if not normalized_text:
+            return False
+        for previous in reversed(self._recent_normalized_turns):
+            if previous == normalized_text:
+                return True
+            if difflib.SequenceMatcher(None, previous, normalized_text).ratio() >= 0.92:
+                return True
+        return False
+
+    def _cache_days_since_last_seen(self, person_id: int) -> None:
+        """Remember the pre-visit gap for a recognized person."""
+        person = self._face_db.get_person(person_id)
+        if not person:
+            self._recent_person_gap_days.pop(person_id, None)
+            return
+        raw_last_seen = person.get("last_seen")
+        if not raw_last_seen:
+            self._recent_person_gap_days.pop(person_id, None)
+            return
+        try:
+            seen_at = datetime.fromisoformat(str(raw_last_seen))
+        except ValueError:
+            self._recent_person_gap_days.pop(person_id, None)
+            return
+        self._recent_person_gap_days[person_id] = max(0, (datetime.now() - seen_at).days)
+
+    def _record_turn_context(
+        self,
+        *,
+        text: str,
+        matched_action: str | None,
+        topic_key: str | None,
+    ) -> dict:
+        """Capture lightweight interaction stats for opinion selection."""
+        today = date.today()
+        if today != self._anonymous_interaction_day:
+            self._anonymous_interaction_day = today
+            self._anonymous_interaction_stats = {
+                "interaction_count": 0,
+                "repeated_command_count": 0,
+                "repeated_topic_count": 0,
+                "last_command": None,
+                "last_topic": None,
+            }
+
+        normalized_text = normalize(text)
+        repeated_request = self._is_repeated_request(normalized_text)
+        person_id = self._last_known_person_id
+
+        if person_id is not None:
+            person_stats = self._face_db.record_interaction(
+                person_id,
+                command_key=matched_action,
+                topic_key=topic_key,
+            )
+        else:
+            prior_command = self._anonymous_interaction_stats.get("last_command")
+            prior_topic = self._anonymous_interaction_stats.get("last_topic")
+            repeated_command = bool(matched_action and prior_command == matched_action)
+            repeated_topic = bool(topic_key and prior_topic == topic_key)
+            self._anonymous_interaction_stats["interaction_count"] = int(
+                self._anonymous_interaction_stats["interaction_count"]
+            ) + 1
+            if repeated_command:
+                self._anonymous_interaction_stats["repeated_command_count"] = int(
+                    self._anonymous_interaction_stats["repeated_command_count"]
+                ) + 1
+            if repeated_topic:
+                self._anonymous_interaction_stats["repeated_topic_count"] = int(
+                    self._anonymous_interaction_stats["repeated_topic_count"]
+                ) + 1
+            if matched_action:
+                self._anonymous_interaction_stats["last_command"] = matched_action
+            if topic_key:
+                self._anonymous_interaction_stats["last_topic"] = topic_key
+            person_stats = {
+                "interaction_count": int(self._anonymous_interaction_stats["interaction_count"]),
+                "repeated_command_count": int(self._anonymous_interaction_stats["repeated_command_count"]),
+                "repeated_topic_count": int(self._anonymous_interaction_stats["repeated_topic_count"]),
+                "last_command": self._anonymous_interaction_stats["last_command"],
+                "last_topic": self._anonymous_interaction_stats["last_topic"],
+                "is_repeated_command": repeated_command,
+                "is_repeated_topic": repeated_topic,
+            }
+
+        days_since_last_seen: int | None = None
+        person_name: str | None = None
+        if person_id is not None:
+            person = self._face_db.get_person(person_id)
+            if person:
+                person_name = str(person.get("name") or "").strip() or None
+                days_since_last_seen = self._recent_person_gap_days.get(person_id)
+
+        self._recent_normalized_turns.append(normalized_text)
+        return {
+            "normalized_text": normalized_text,
+            "repeated_request": repeated_request,
+            "person_id": person_id,
+            "person_name": person_name,
+            "person_stats": person_stats,
+            "topic_key": topic_key,
+            "days_since_last_seen": days_since_last_seen,
+        }
+
+    @staticmethod
+    def _clamp_probability(value: float) -> float:
+        return max(0.0, min(0.7, value))
+
+    def _build_contextual_opinion(
+        self,
+        *,
+        topic_key: str | None,
+        turn_context: dict,
+        used_vision: bool,
+    ) -> str | None:
+        """Select a short in-character line based on recent interaction context."""
+        stats = turn_context["person_stats"]
+        interaction_count = int(stats.get("interaction_count", 0))
+        repeated_command = bool(stats.get("is_repeated_command"))
+        repeated_topic = bool(stats.get("is_repeated_topic"))
+        repeated_request = bool(turn_context["repeated_request"])
+        days_since_last_seen = turn_context["days_since_last_seen"]
+        topic_label = (topic_key or "that").replace("_", " ")
+
+        if used_vision and topic_key in {"appearance", "vision"}:
+            if self._angry_mode:
+                return random.choice((
+                    "I have seen the outfit. It explained nothing.",
+                    "Visual scan complete. That look lost the argument.",
+                    "I checked the visuals. Regrettable choices everywhere.",
+                ))
+            return random.choice((
+                "I have reviewed the outfit. Not a strong campaign.",
+                "I saw the look. Bold in the wrong direction.",
+                "Visual update received. The shirt is losing badly.",
+            ))
+
+        if repeated_command or repeated_request:
+            if self._angry_mode:
+                return random.choice((
+                    "Same command again. Confidence by brute force. Charming.",
+                    "You asked that twice. Even my patience has standards.",
+                    "We are repeating ourselves. A stunning tactical failure.",
+                ))
+            return random.choice((
+                "Same command again. Very confidence-inspiring.",
+                "You asked that twice. Suspicious little pattern.",
+                "We are looping already. Incredible stamina.",
+            ))
+
+        if repeated_topic:
+            if self._angry_mode:
+                return random.choice((
+                    f"We are still on {topic_label}. Grim commitment.",
+                    f"{topic_label.title()} again. You really do not know when to leave a topic alone.",
+                    "This conversation is doing donuts in the parking lot.",
+                ))
+            return random.choice((
+                f"We are still on {topic_label}. Interesting fixation.",
+                f"{topic_label.title()} again. You're committed, I'll give you that.",
+                "This conversation is doing laps now.",
+            ))
+
+        if interaction_count >= 5:
+            if self._angry_mode:
+                return random.choice((
+                    f"You have bothered me {interaction_count} times today. That feels targeted.",
+                    f"{interaction_count} interactions today. I am beginning to suspect intent.",
+                    "You again. Persistent in the least restful way possible.",
+                ))
+            return random.choice((
+                f"You have asked for me {interaction_count} times today. Suspicious.",
+                f"{interaction_count} interactions today. You really do circle back.",
+                "You again. Persistent. Slightly alarming.",
+            ))
+
+        if days_since_last_seen is not None and days_since_last_seen >= 3:
+            if self._angry_mode:
+                return random.choice((
+                    f"Gone for {days_since_last_seen} days and this is the comeback material.",
+                    f"{days_since_last_seen} days away and you return with that energy. Bold.",
+                ))
+            return random.choice((
+                f"You vanish for {days_since_last_seen} days, then wander back in. Dramatic.",
+                f"{days_since_last_seen} days later and here you are again. I was almost at peace.",
+            ))
+
+        if topic_key == "music":
+            return random.choice((
+                "That was a very human music decision.",
+                "Your taste continues to concern the booth.",
+            ))
+
+        return random.choice((
+            "That was a very human choice.",
+            "I was enjoying the silence, and then you returned.",
+            "You do keep the chaos nicely scheduled.",
+        ))
+
+    def _maybe_speak_contextual_opinion(
+        self,
+        *,
+        matched_action: str | None,
+        topic_key: str | None,
+        turn_context: dict,
+        used_vision: bool,
+    ) -> bool:
+        """Occasionally inject a short unsolicited opinion without derailing flow."""
+        if (
+            self._shutdown_event.is_set()
+            or self._state != State.ACTIVE
+            or self._opinions_this_session >= config.OPINION_MAX_PER_SESSION
+        ):
+            return False
+
+        if matched_action in _PROMPT_COMMAND_ACTIONS:
+            return False
+
+        if time.monotonic() - self._last_opinion_at < config.OPINION_COOLDOWN_SECONDS:
+            return False
+
+        stats = turn_context["person_stats"]
+        chance = config.OPINION_BASE_CHANCE
+        if bool(stats.get("is_repeated_command")) or bool(turn_context["repeated_request"]):
+            chance += config.OPINION_REPEAT_BONUS
+        if bool(stats.get("is_repeated_topic")):
+            chance += config.OPINION_REPEAT_BONUS * 0.85
+        interaction_count = int(stats.get("interaction_count", 0))
+        if interaction_count >= 3:
+            chance += min(0.12, (interaction_count - 2) * config.OPINION_INTERACTION_BONUS)
+        if used_vision and topic_key in {"appearance", "vision"}:
+            chance += 0.05
+        if matched_action in _AUTONOMY_GUARD_ACTIONS:
+            chance -= 0.05
+        if self._player.is_music_playing:
+            chance -= 0.04
+
+        chance = self._clamp_probability(chance)
+        roll = random.random()
+        log.debug("Opinion gate: roll=%.3f chance=%.3f context=%s", roll, chance, turn_context)
+        if roll >= chance:
+            return False
+
+        line = self._build_contextual_opinion(
+            topic_key=topic_key,
+            turn_context=turn_context,
+            used_vision=used_vision,
+        )
+        if not line:
+            return False
+
+        log.info("Contextual opinion: %r", line)
+        self._last_opinion_at = time.monotonic()
+        self._opinions_this_session += 1
+        self._speak_simple(line, emotion="neutral")
+        return True
 
     def _maybe_speak_autonomy_followup(self, plan: ResponseDecision) -> None:
         """Occasionally extend a conversation with a short extra prompt."""

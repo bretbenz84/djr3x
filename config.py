@@ -91,6 +91,11 @@ LOCAL_LLM_MODEL:    str = _optional("LOCAL_LLM_MODEL",    "llama3.2:1b")
 
 OPENAI_MODEL        = "gpt-4o-mini"
 MAX_HISTORY_TURNS   = 6      # number of user/assistant pairs kept in context
+OPINION_BASE_CHANCE = float(_optional("OPINION_BASE_CHANCE", "0.14"))
+OPINION_REPEAT_BONUS = float(_optional("OPINION_REPEAT_BONUS", "0.08"))
+OPINION_INTERACTION_BONUS = float(_optional("OPINION_INTERACTION_BONUS", "0.03"))
+OPINION_COOLDOWN_SECONDS = float(_optional("OPINION_COOLDOWN_SECONDS", "90"))
+OPINION_MAX_PER_SESSION = int(_optional("OPINION_MAX_PER_SESSION", "3"))
 
 # ---------------------------------------------------------------------------
 # Serial — Pololu Maestro Mini
