@@ -186,7 +186,15 @@ class _DroidVoiceEffect:
                 shaped *= makeup_gain
 
             shaped = np.tanh(shaped * saturation_drive) * saturation_norm
-            if tremolo_enabled and tremolo_depth > 0.0 and tremolo_rate > 0.0:
+            if ring_mod_enabled and ring_mod_depth > 0.0 and ring_mod_rate > 0.0:
+                carrier = np.sin(ring_mod_phase)
+                shaped = shaped * (1.0 - ring_mod_depth) + (
+                    shaped * carrier * ring_mod_depth
+                )
+                ring_mod_phase += ring_mod_rate * phase_scale
+                if ring_mod_phase >= 2.0 * np.pi:
+                    ring_mod_phase -= 2.0 * np.pi
+            elif tremolo_enabled and tremolo_depth > 0.0 and tremolo_rate > 0.0:
                 tremolo = 1.0 - tremolo_depth + tremolo_depth * (
                     0.5 * (1.0 + np.sin(tremolo_phase))
                 )
@@ -194,12 +202,6 @@ class _DroidVoiceEffect:
                 tremolo_phase += tremolo_rate * phase_scale
                 if tremolo_phase >= 2.0 * np.pi:
                     tremolo_phase -= 2.0 * np.pi
-            if ring_mod_enabled and ring_mod_depth > 0.0 and ring_mod_rate > 0.0:
-                carrier = np.sin(ring_mod_phase)
-                shaped *= (1.0 - ring_mod_depth) + ring_mod_depth * carrier
-                ring_mod_phase += ring_mod_rate * phase_scale
-                if ring_mod_phase >= 2.0 * np.pi:
-                    ring_mod_phase -= 2.0 * np.pi
             if crush_mix > 0.0:
                 crushed = np.round(shaped * crush_levels) / crush_levels
                 shaped += (crushed - shaped) * crush_mix
