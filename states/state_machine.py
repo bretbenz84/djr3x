@@ -1225,83 +1225,84 @@ class StateMachine:
                         self._transition_to(State.IDLE)
                         return
 
-                if (
-                    self._post_greeting_person_id is not None
-                    and not self._post_greeting_prompt_used
-                ):
-                    # On subsequent wakes, 50% of the time ask a remaining
-                    # interview question instead of the plan prompt.
-                    use_interview = (
-                        self._session_wake_count > 1
-                        and random.random() < 0.5
-                    )
-                    if use_interview and self._run_followup_interview_question():
-                        after_response = True
-                        continue
-
-                    if not self._post_greeting_prompt_used:
-                        status, next_state = self._run_post_greeting_plan_prompt()
-                        if next_state is not None:
-                            if next_state == State.IDLE:
-                                self._play_return_to_idle_chime()
-                            self._transition_to(next_state)
-                            return
-                        if status != "no_answer":
+                if text is None or text == "":
+                    if (
+                        self._post_greeting_person_id is not None
+                        and not self._post_greeting_prompt_used
+                    ):
+                        # On subsequent wakes, 50% of the time ask a remaining
+                        # interview question instead of the plan prompt.
+                        use_interview = (
+                            self._session_wake_count > 1
+                            and random.random() < 0.5
+                        )
+                        if use_interview and self._run_followup_interview_question():
                             after_response = True
                             continue
 
-                # First listen — prompt with "are you there?"
-                self._autonomy.note_silence(after_response=False)
-                self._refresh_autonomy_context()
-                prompt = random.choice(_ARE_YOU_THERE_PHRASES)
-                log.info("No speech on first listen — prompting: %r", prompt)
-                self._apply_active_led_theme()
-                servo_stop = None
-                try:
-                    servo_stop = self._begin_speech(emotion="neutral")
-                    self._synthesizer.speak(prompt)
-                except Exception:
-                    log.exception("Error speaking 'are you there' prompt")
-                finally:
-                    if servo_stop is not None:
-                        self._end_speech(servo_stop)
-                    else:
-                        self._wake_word.suppressed = False
+                        if not self._post_greeting_prompt_used:
+                            status, next_state = self._run_post_greeting_plan_prompt()
+                            if next_state is not None:
+                                if next_state == State.IDLE:
+                                    self._play_return_to_idle_chime()
+                                self._transition_to(next_state)
+                                return
+                            if status != "no_answer":
+                                after_response = True
+                                continue
 
-                # Second-chance listen
-                self._apply_listening_led_theme()
-                self._wake_word.pause()
-                try:
-                    text = self._transcriber.transcribe(
-                        wait_for_speech_seconds=config.WAKE_GOODBYE_TIMEOUT
-                    )
-                except Exception:
-                    log.exception("Transcription error in second-chance listen")
-                    text = None
-                finally:
-                    self._wake_word.resume()
-
-                if not text:   # None (timeout) or "" (Whisper got nothing)
+                    # First listen — prompt with "are you there?"
                     self._autonomy.note_silence(after_response=False)
                     self._refresh_autonomy_context()
-                    goodbye = random.choice(_GOODBYE_PHRASES)
-                    log.info("Still no speech — saying goodbye: %r", goodbye)
+                    prompt = random.choice(_ARE_YOU_THERE_PHRASES)
+                    log.info("No speech on first listen — prompting: %r", prompt)
                     self._apply_active_led_theme()
                     servo_stop = None
                     try:
                         servo_stop = self._begin_speech(emotion="neutral")
-                        self._synthesizer.speak(goodbye)
+                        self._synthesizer.speak(prompt)
                     except Exception:
-                        log.exception("Error speaking goodbye phrase")
+                        log.exception("Error speaking 'are you there' prompt")
                     finally:
                         if servo_stop is not None:
                             self._end_speech(servo_stop)
                         else:
                             self._wake_word.suppressed = False
-                    self._play_return_to_idle_chime()
-                    self._transition_to(State.IDLE)
-                    return
-                # else: second-chance produced text — fall through to process it
+
+                    # Second-chance listen
+                    self._apply_listening_led_theme()
+                    self._wake_word.pause()
+                    try:
+                        text = self._transcriber.transcribe(
+                            wait_for_speech_seconds=config.WAKE_GOODBYE_TIMEOUT
+                        )
+                    except Exception:
+                        log.exception("Transcription error in second-chance listen")
+                        text = None
+                    finally:
+                        self._wake_word.resume()
+
+                    if not text:   # None (timeout) or "" (Whisper got nothing)
+                        self._autonomy.note_silence(after_response=False)
+                        self._refresh_autonomy_context()
+                        goodbye = random.choice(_GOODBYE_PHRASES)
+                        log.info("Still no speech — saying goodbye: %r", goodbye)
+                        self._apply_active_led_theme()
+                        servo_stop = None
+                        try:
+                            servo_stop = self._begin_speech(emotion="neutral")
+                            self._synthesizer.speak(goodbye)
+                        except Exception:
+                            log.exception("Error speaking goodbye phrase")
+                        finally:
+                            if servo_stop is not None:
+                                self._end_speech(servo_stop)
+                            else:
+                                self._wake_word.suppressed = False
+                        self._play_return_to_idle_chime()
+                        self._transition_to(State.IDLE)
+                        return
+                    # else: second-chance produced text — fall through to process it
 
             # --- We have a transcription ---
             turn_after_response = after_response
