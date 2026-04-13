@@ -76,6 +76,122 @@ class _EndMarker:
     done: threading.Event | None = field(default=None)
 
 
+@dataclass
+class _SpeechChunk:
+    """Mono float32 speech samples plus whether the droid effect should run."""
+    samples: np.ndarray
+    apply_droid_effect: bool = False
+
+
+class _DroidVoiceEffect:
+    """Small stateful speech processor tuned for a droid/radio character."""
+
+    _HIGHPASS_HZ = 180.0
+    _LOWPASS_HZ = 4500.0
+    _COMPRESS_THRESHOLD = 0.16
+    _COMPRESS_RATIO = 4.0
+    _ATTACK_MS = 4.0
+    _RELEASE_MS = 90.0
+    _MAKEUP_GAIN = 1.15
+    _SATURATION_DRIVE = 1.35
+    _BITCRUSH_BITS = 11
+    _BITCRUSH_MIX = 0.18
+
+    def __init__(self, sample_rate: int) -> None:
+        self._sample_rate = sample_rate
+        self._hp_alpha = self._highpass_alpha(self._HIGHPASS_HZ, sample_rate)
+        self._lp_alpha = self._lowpass_alpha(self._LOWPASS_HZ, sample_rate)
+        self._attack_coeff = self._time_coeff(self._ATTACK_MS, sample_rate)
+        self._release_coeff = self._time_coeff(self._RELEASE_MS, sample_rate)
+        self._sat_norm = 1.0 / np.tanh(self._SATURATION_DRIVE)
+        self._bitcrush_levels = float((1 << (self._BITCRUSH_BITS - 1)) - 1)
+        self.reset()
+
+    @staticmethod
+    def _time_coeff(duration_ms: float, sample_rate: int) -> float:
+        samples = max(1.0, duration_ms * 0.001 * sample_rate)
+        return float(np.exp(-1.0 / samples))
+
+    @staticmethod
+    def _highpass_alpha(cutoff_hz: float, sample_rate: int) -> float:
+        dt = 1.0 / sample_rate
+        rc = 1.0 / (2.0 * np.pi * cutoff_hz)
+        return float(rc / (rc + dt))
+
+    @staticmethod
+    def _lowpass_alpha(cutoff_hz: float, sample_rate: int) -> float:
+        dt = 1.0 / sample_rate
+        rc = 1.0 / (2.0 * np.pi * cutoff_hz)
+        return float(dt / (rc + dt))
+
+    def reset(self) -> None:
+        self._hp_prev_input = 0.0
+        self._hp_prev_output = 0.0
+        self._lp_state_1 = 0.0
+        self._lp_state_2 = 0.0
+        self._compress_env = 0.0
+
+    def process(self, samples: np.ndarray) -> np.ndarray:
+        if samples.size == 0 or not config.ENABLE_DROID_EFFECT:
+            return samples
+
+        out = np.empty_like(samples, dtype=np.float32)
+        hp_alpha = self._hp_alpha
+        lp_alpha = self._lp_alpha
+        threshold = self._COMPRESS_THRESHOLD
+        ratio = self._COMPRESS_RATIO
+        attack_coeff = self._attack_coeff
+        release_coeff = self._release_coeff
+        makeup_gain = self._MAKEUP_GAIN
+        saturation_drive = self._SATURATION_DRIVE
+        saturation_norm = self._sat_norm
+        crush_mix = (
+            self._BITCRUSH_MIX if config.DROID_EFFECT_BITCRUSH_ENABLED else 0.0
+        )
+        crush_levels = self._bitcrush_levels
+        hp_prev_input = self._hp_prev_input
+        hp_prev_output = self._hp_prev_output
+        lp_state_1 = self._lp_state_1
+        lp_state_2 = self._lp_state_2
+        compress_env = self._compress_env
+
+        for i, sample in enumerate(samples):
+            bandpassed = hp_alpha * (hp_prev_output + float(sample) - hp_prev_input)
+            hp_prev_input = float(sample)
+            hp_prev_output = bandpassed
+
+            lp_state_1 += lp_alpha * (bandpassed - lp_state_1)
+            lp_state_2 += lp_alpha * (lp_state_1 - lp_state_2)
+            shaped = lp_state_2
+
+            level = abs(shaped)
+            coeff = attack_coeff if level > compress_env else release_coeff
+            compress_env = coeff * compress_env + (1.0 - coeff) * level
+            if compress_env > threshold:
+                compressed = threshold + (compress_env - threshold) / ratio
+                shaped *= (compressed / max(compress_env, 1e-6)) * makeup_gain
+            else:
+                shaped *= makeup_gain
+
+            shaped = np.tanh(shaped * saturation_drive) * saturation_norm
+            if crush_mix > 0.0:
+                crushed = np.round(shaped * crush_levels) / crush_levels
+                shaped += (crushed - shaped) * crush_mix
+
+            if shaped > 1.0:
+                shaped = 1.0
+            elif shaped < -1.0:
+                shaped = -1.0
+            out[i] = shaped
+
+        self._hp_prev_input = hp_prev_input
+        self._hp_prev_output = hp_prev_output
+        self._lp_state_1 = lp_state_1
+        self._lp_state_2 = lp_state_2
+        self._compress_env = compress_env
+        return out
+
+
 # ---------------------------------------------------------------------------
 # AudioPlayer
 # ---------------------------------------------------------------------------
@@ -99,13 +215,15 @@ class AudioPlayer:
         self._music_status_logged: bool = False
 
         # --- speech stream state ---
-        self._speech_queue: queue.SimpleQueue[np.ndarray | _EndMarker] = (
+        self._speech_queue: queue.SimpleQueue[_SpeechChunk | _EndMarker] = (
             queue.SimpleQueue()
         )
         self._speech_buf: np.ndarray | None = None
+        self._speech_buf_apply_droid_effect: bool = False
         self._speech_buf_pos: int = 0
         self._speech_active = threading.Event()
         self._speech_active.set()        # starts "idle"
+        self._droid_effect = _DroidVoiceEffect(SPEECH_SAMPLE_RATE)
 
         # --- speech worker thread (opens/closes stream on demand) ---
         self._speech_stop = threading.Event()
@@ -130,7 +248,12 @@ class AudioPlayer:
         playback queue. The chunk is played in order with any queued chunks."""
         if not pcm_bytes:
             return
-        self._speech_queue.put(np.frombuffer(pcm_bytes, dtype=np.int16).copy())
+        self._speech_queue.put(
+            _SpeechChunk(
+                samples=_pcm16_bytes_to_float32(pcm_bytes),
+                apply_droid_effect=config.ENABLE_DROID_EFFECT,
+            )
+        )
 
     def end_speech(self) -> None:
         """Signal that the TTS stream is complete. The player will drain any
@@ -156,14 +279,19 @@ class AudioPlayer:
         # Mix stereo (or higher) down to mono for the speech stream.
         if data.ndim == 2:
             data = data.mean(axis=1)
-        # float32 → int16 for the speech stream
-        samples = np.clip(data * 32767.0, -32768, 32767).astype(np.int16)
+        samples = np.clip(data.astype(np.float32, copy=False), -1.0, 1.0)
+        apply_droid_effect = _should_apply_droid_effect_to_file(path)
 
         done = threading.Event()
         self._speech_active.clear()
 
         for i in range(0, len(samples), _FILE_CHUNK_FRAMES):
-            self._speech_queue.put(samples[i : i + _FILE_CHUNK_FRAMES])
+            self._speech_queue.put(
+                _SpeechChunk(
+                    samples=samples[i : i + _FILE_CHUNK_FRAMES],
+                    apply_droid_effect=apply_droid_effect,
+                )
+            )
         self._speech_queue.put(_EndMarker(done=done))
 
         # block until the callback processes the end marker, or timeout
@@ -189,7 +317,9 @@ class AudioPlayer:
 
         # reset buffer state (audio callback checks these)
         self._speech_buf = None
+        self._speech_buf_apply_droid_effect = False
         self._speech_buf_pos = 0
+        self._droid_effect.reset()
         self._rms = 0.0
         self._audio_started.clear()
         self._speech_active.set()   # unblock any wait_for_speech() caller
@@ -339,8 +469,10 @@ class AudioPlayer:
                 continue
 
             # First audio chunk — prime the buffer, then open the stream.
-            self._speech_buf = item
+            self._speech_buf = item.samples
+            self._speech_buf_apply_droid_effect = item.apply_droid_effect
             self._speech_buf_pos = 0
+            self._droid_effect.reset()
             self._audio_started.clear()   # arm the event; callback sets it on first samples
 
             finished = threading.Event()
@@ -375,8 +507,9 @@ class AudioPlayer:
             self._speech_status_logged = True
 
         # Build mono scratch buffer; broadcast to all output channels at the end.
-        mono = np.zeros(frames, dtype=np.int16)
+        mono = np.zeros(frames, dtype=np.float32)
         filled = 0
+        block_apply_droid_effect = False
         stop_stream = False
 
         while filled < frames:
@@ -389,14 +522,15 @@ class AudioPlayer:
 
                 if isinstance(item, _EndMarker):
                     self._speech_buf = None
+                    self._speech_buf_apply_droid_effect = False
                     self._speech_buf_pos = 0
                     self._speech_active.set()
                     if item.done is not None:
                         item.done.set()
                     stop_stream = True
                     break
-                # item is an np.ndarray of int16 samples
-                self._speech_buf = item
+                self._speech_buf = item.samples
+                self._speech_buf_apply_droid_effect = item.apply_droid_effect
                 self._speech_buf_pos = 0
 
             take = min(
@@ -406,29 +540,34 @@ class AudioPlayer:
             mono[filled : filled + take] = (
                 self._speech_buf[self._speech_buf_pos : self._speech_buf_pos + take]
             )
+            block_apply_droid_effect = self._speech_buf_apply_droid_effect
             self._speech_buf_pos += take
             filled += take
 
-        # Apply software volume, then broadcast to every output channel.
-        if config.AUDIO_VOLUME != 1.0:
-            mono = (mono.astype(np.float32) * config.AUDIO_VOLUME).astype(np.int16)
-        for ch in range(outdata.shape[1]):
-            outdata[:, ch] = mono
-
-        # --- real-time RMS for mouth LED ---
-        # only compute on frames that actually contain audio, not padding
         if filled > 0:
-            chunk_f32 = mono[:filled].astype(np.float32)
-            rms_raw = float(np.sqrt(np.mean(chunk_f32 ** 2)))
-            # int16 max = 32767; scale to 0-1, apply gain, map to 0-255
-            brightness = min(255.0, (rms_raw / 32767.0) * config.MOUTH_LED_GAIN * 255.0)
+            if block_apply_droid_effect:
+                mono[:filled] = self._droid_effect.process(mono[:filled])
+
+            if config.AUDIO_VOLUME != 1.0:
+                mono[:filled] = np.clip(
+                    mono[:filled] * config.AUDIO_VOLUME,
+                    -1.0,
+                    1.0,
+                )
+            else:
+                np.clip(mono[:filled], -1.0, 1.0, out=mono[:filled])
+
+            rms_raw = float(np.sqrt(np.mean(mono[:filled] ** 2)))
+            brightness = min(255.0, rms_raw * config.MOUTH_LED_GAIN * 255.0)
             # Signal on the first non-silent callback so mouth LEDs can start
             # at the exact moment audio reaches the output device.
-            if not self._audio_started.is_set():
+            if rms_raw > 1e-4 and not self._audio_started.is_set():
                 log.info("First audio chunk playing — mouth LED start unlocked")
                 self._audio_started.set()
         else:
             brightness = 0.0
+
+        outdata[:] = _float32_to_int16(mono)[:, np.newaxis]
 
         # exponential smoothing to prevent harsh LED flicker
         alpha = config.MOUTH_LED_SMOOTHING
@@ -551,6 +690,23 @@ def _load_audio_file(
         sr = target_sr
 
     return data, sr
+
+
+def _pcm16_bytes_to_float32(pcm_bytes: bytes) -> np.ndarray:
+    return np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+
+def _float32_to_int16(samples: np.ndarray) -> np.ndarray:
+    return np.clip(samples * 32767.0, -32768.0, 32767.0).astype(np.int16)
+
+
+def _should_apply_droid_effect_to_file(path: Path) -> bool:
+    if not config.ENABLE_DROID_EFFECT or path.suffix.lower() != ".wav":
+        return False
+    try:
+        return path.resolve().parent == config.AUDIO_CACHE_DIR.resolve()
+    except OSError:
+        return False
 
 
 def _output_devices_to_try() -> list[int | None]:

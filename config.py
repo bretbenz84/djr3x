@@ -254,6 +254,13 @@ AUDIO_VOLUME: float = max(0.0, min(1.0, float(_optional("AUDIO_VOLUME", "0.5")))
 # Values above 1.0 boost volume; 1.0 = no change.
 SYNTHESIZER_VOLUME_GAIN: float = float(_optional("SYNTHESIZER_VOLUME_GAIN", "2.0"))
 
+# Speech-only playback effect that adds the DJ-R3X radio/droid character.
+# Applied in audio/player.py to live ElevenLabs PCM and cached .wav responses
+# before they are converted back to int16 for output. Music and .mp3 clips are
+# intentionally left untouched.
+ENABLE_DROID_EFFECT: bool = _optional("ENABLE_DROID_EFFECT", "true").lower() not in ("0", "false", "no")
+DROID_EFFECT_BITCRUSH_ENABLED: bool = _optional("DROID_EFFECT_BITCRUSH_ENABLED", "true").lower() not in ("0", "false", "no")
+
 # Silence-gated recording: stop capturing when RMS drops below threshold
 # for SILENCE_DURATION consecutive seconds (or MAX_RECORD_SECONDS elapses)
 SILENCE_THRESHOLD            = 300   # RMS amplitude (0–32767) — legacy, kept for reference

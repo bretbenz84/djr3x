@@ -13,3 +13,4 @@ assets/face_db.sqlite
 assets/models/*.dat
 assets/music/
 assets/face_debug/
+.VSCodeCounter/
