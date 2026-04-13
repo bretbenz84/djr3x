@@ -219,6 +219,59 @@ _PLAN_REPLY_LINES: tuple[str, ...] = (
     "So we're doing {summary}. Is this for fun, survival, or a terrible promise you made earlier?",
 )
 
+_CURIOUS_FOLLOWUP_QUESTIONS: tuple[dict[str, str], ...] = (
+    {
+        "key": "purpose_in_life",
+        "text": "Before you go all mysterious on me, what do you think your purpose in life actually is?",
+        "tags": "life,purpose,curiosity",
+    },
+    {
+        "key": "afterlife_belief",
+        "text": "Quick existential check, lifeform: what do you think happens after death?",
+        "tags": "belief,philosophy,afterlife,curiosity",
+    },
+    {
+        "key": "droids_dream",
+        "text": "Do you think droids dream, or is that just organic guilt dressed up as philosophy?",
+        "tags": "belief,philosophy,droids,curiosity",
+    },
+    {
+        "key": "core_values",
+        "text": "What do you value most when nobody's watching and the room gets honest?",
+        "tags": "values,belief,life,curiosity",
+    },
+    {
+        "key": "protect_first",
+        "text": "If everything went sideways at once, what would you protect first?",
+        "tags": "values,life,belief,curiosity",
+    },
+    {
+        "key": "people_change",
+        "text": "Be honest. Do you think people really change, or do they just get better at costume swaps?",
+        "tags": "belief,philosophy,values,curiosity",
+    },
+    {
+        "key": "unlimited_time",
+        "text": "If time stopped bullying you for a while, what would you do with unlimited time?",
+        "tags": "life,purpose,philosophy,curiosity",
+    },
+    {
+        "key": "fear_of_loss",
+        "text": "What are you actually afraid of losing, beneath the polished little lifeform routine?",
+        "tags": "life,values,belief,curiosity",
+    },
+    {
+        "key": "favorite_place",
+        "text": "What's your favorite place on planet Earth, and why does that place get your loyalty?",
+        "tags": "life,values,earth,curiosity",
+    },
+    {
+        "key": "deep_happiness",
+        "text": "What makes you most happy for real, not just socially acceptable happy?",
+        "tags": "life,values,happiness,curiosity",
+    },
+)
+
 _PLAN_SAME_DAY_FOLLOWUP_LINES: tuple[str, ...] = (
     "So, {name}, how's {summary} going? Be honest. I can handle disappointment.",
     "{name}, are you actually doing {summary}, or was that just aspirational theater?",
@@ -437,6 +490,7 @@ class StateMachine:
         self._post_greeting_person_id: int | None = None
         self._post_greeting_person_name: str | None = None
         self._post_greeting_prompt_used: bool = False
+        self._curious_questions_asked_this_session: set[str] = set()
         self._angry_mode: bool = False
         self._last_wake_greeting_used_vision: bool = False
 
@@ -1459,6 +1513,7 @@ class StateMachine:
             self._post_greeting_person_id = None
             self._post_greeting_person_name = None
             self._post_greeting_prompt_used = False
+            self._curious_questions_asked_this_session.clear()
             self._llm.clear_person_context()
             if self._angry_mode:
                 self._angry_mode = False
@@ -1942,6 +1997,25 @@ class StateMachine:
         value = str(memory.get("value") or "").strip()
         key = str(memory.get("key") or "")
         raw_quote = str(memory.get("raw_quote") or "").strip()
+        answer_text = str(memory.get("answer_text") or "").strip()
+
+        if memory.get("category") == "curiosity":
+            summary = self._summarize_curiosity_answer(answer_text or raw_quote or value, limit=110)
+            question_text = str(memory.get("question_text") or "").strip().rstrip("?!.")
+            if summary and question_text:
+                pool = (
+                    f"{name}, last time I asked {question_text.lower()}, and you said {summary}. Still standing by that?",
+                    f"I've still got this in my databanks, {name}: when I asked {question_text.lower()}, you said {summary}. You still believe that?",
+                    f"{name}, you once told me {summary} when I asked {question_text.lower()}. Was that wisdom, or were your organics improvising?",
+                )
+                return _pick_no_repeat(pool, "curiosity_memory_followup")
+            if summary:
+                pool = (
+                    f"{name}, you told me {summary} before the silence swallowed you. Still true?",
+                    f"Still thinking about this one, {name}: {summary}. You standing by it?",
+                    f"{name}, you gave me {summary} once already. Was that the real answer or just premium lifeform theater?",
+                )
+                return _pick_no_repeat(pool, "curiosity_memory_followup_summary")
 
         if memory.get("category") == "plan" or key in {"today_plan", "weekend_plan"}:
             followup = self._llm.generate_activity_followup(
@@ -1960,6 +2034,90 @@ class StateMachine:
             return _pick_no_repeat(pool, "plan_memory_followup")
 
         return self._llm.generate_followup(value, memory.get("created_at", ""))
+
+    @staticmethod
+    def _summarize_curiosity_answer(answer: str, limit: int = 180) -> str:
+        """Trim a stored philosophical answer into a short spoken fragment."""
+        text = answer.strip().strip("\"'").rstrip(".!?")
+        if not text:
+            return ""
+        if len(text) > limit:
+            text = text[:limit].rstrip(",;: ")
+        return text
+
+    def _refresh_person_context_for_person(self, person_id: int) -> None:
+        """Reload LLM memory context after storing a new memory for the active person."""
+        if person_id not in {self._last_known_person_id, self._post_greeting_person_id}:
+            return
+        try:
+            context = self._face_db.get_memories_as_context(person_id)
+        except Exception:
+            log.exception("Failed refreshing person context for person_id=%d", person_id)
+            return
+        if context:
+            self._llm.set_person_context(context)
+
+    def _pick_curious_followup_question(self, person_id: int) -> dict[str, str] | None:
+        """Choose a deeper follow-up question, avoiding recent repeats when possible."""
+        try:
+            memories = self._face_db.get_memories(person_id)
+        except Exception:
+            log.exception("Curious follow-up: failed loading memories for person_id=%d", person_id)
+            memories = []
+
+        previously_asked = {
+            str(memory.get("question_text") or "").strip()
+            for memory in memories
+            if memory.get("category") == "curiosity" and memory.get("question_text")
+        }
+        excluded = previously_asked | self._curious_questions_asked_this_session
+        candidates = [
+            question
+            for question in _CURIOUS_FOLLOWUP_QUESTIONS
+            if question["text"] not in excluded
+        ]
+        if not candidates:
+            candidates = [
+                question
+                for question in _CURIOUS_FOLLOWUP_QUESTIONS
+                if question["text"] not in self._curious_questions_asked_this_session
+            ] or list(_CURIOUS_FOLLOWUP_QUESTIONS)
+        if not candidates:
+            return None
+
+        picked = random.choice(candidates)
+        self._curious_questions_asked_this_session.add(picked["text"])
+        return picked
+
+    def _store_curious_followup_exchange(
+        self,
+        person_id: int,
+        question: dict[str, str],
+        answer: str,
+    ) -> None:
+        """Persist a deeper question/answer exchange for a known person."""
+        answer_text = answer.strip()
+        if not answer_text:
+            return
+        summary = self._summarize_curiosity_answer(answer_text)
+        try:
+            self._face_db.add_memory(
+                person_id=person_id,
+                category="curiosity",
+                key=question["key"],
+                value=summary or answer_text[:200],
+                raw_quote=answer_text,
+                question_text=question["text"],
+                answer_text=answer_text,
+                tags=question["tags"],
+            )
+            self._refresh_person_context_for_person(person_id)
+            log.info(
+                "Curious follow-up stored for person_id=%d: Q=%r A=%r",
+                person_id, question["text"], answer_text,
+            )
+        except Exception:
+            log.exception("Curious follow-up: failed storing exchange")
 
     def _run_post_greeting_plan_prompt(self) -> tuple[str, State | None]:
         """Ask a known person what they're doing, store the answer, and riff on it.
@@ -2127,6 +2285,11 @@ class StateMachine:
         """Try a few extra interactions before dropping from ACTIVE to IDLE."""
         silence_budget = max(0.0, config.POST_RESPONSE_LINGER_MAX_SECONDS)
         max_attempts = max(1, config.POST_RESPONSE_LINGER_ATTEMPTS)
+        person_id = self._last_known_person_id
+        deep_attempts_remaining = min(
+            max_attempts,
+            max(0, config.POST_RESPONSE_DEEP_QUESTION_ATTEMPTS),
+        )
 
         for attempt in range(1, max_attempts + 1):
             if (
@@ -2143,8 +2306,22 @@ class StateMachine:
                 silence_budget,
             )
 
+            curious_question: dict[str, str] | None = None
+            if person_id is not None and deep_attempts_remaining > 0:
+                curious_question = self._pick_curious_followup_question(person_id)
+                if curious_question is not None:
+                    deep_attempts_remaining -= 1
+                    line = curious_question["text"]
+                    log.info(
+                        "Linger phase: asking curious follow-up for person_id=%d: %r",
+                        person_id,
+                        line,
+                    )
+                    self._speak_simple(line, emotion="neutral")
+                    self._player.wait_for_speech()
+
             used_curiosity = False
-            if (
+            if curious_question is None and (
                 attempt > 1
                 and self._camera.is_available()
                 and random.random() < config.POST_RESPONSE_LINGER_CURIOSITY_CHANCE
@@ -2154,7 +2331,7 @@ class StateMachine:
                     restore_idle_theme=False,
                 )
 
-            if not used_curiosity:
+            if curious_question is None and not used_curiosity:
                 line = _pick_no_repeat(_LINGER_PROMPT_LINES, "linger_prompt")
                 self._speak_simple(line, emotion="neutral")
                 self._player.wait_for_speech()
@@ -2168,6 +2345,14 @@ class StateMachine:
             silence_budget = max(0.0, silence_budget - (time.monotonic() - listen_started))
             if answer:
                 log.info("Linger phase: heard response %r", answer)
+                if curious_question is not None:
+                    cmd = parse(answer, allow_fuzzy=False)
+                    if cmd is None and person_id is not None:
+                        self._store_curious_followup_exchange(
+                            person_id,
+                            curious_question,
+                            answer,
+                        )
                 return answer
 
         final_line = _pick_no_repeat(_LINGER_FINAL_LINES, "linger_final")
@@ -2311,7 +2496,12 @@ class StateMachine:
             if pending:
                 return pending[0]
 
-            for memory in self._face_db.get_memories(person_id):
+            memories = self._face_db.get_memories(person_id)
+            for memory in memories:
+                if memory.get("category") == "curiosity" and memory.get("answer_text"):
+                    return memory
+
+            for memory in memories:
                 if memory.get("category") in {"event", "plan"}:
                     return memory
         except Exception:

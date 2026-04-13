@@ -446,6 +446,9 @@ ACTIVE_TIMEOUT_SECONDS   = 8.0   # seconds of silence after a response before re
 WAKE_NO_SPEECH_TIMEOUT   = 8.0   # seconds to wait for first speech after wake word
 WAKE_GOODBYE_TIMEOUT     = 6.0   # seconds to wait after "are you there?" before saying goodbye
 POST_RESPONSE_LINGER_ATTEMPTS: int = int(_optional("POST_RESPONSE_LINGER_ATTEMPTS", "3"))
+POST_RESPONSE_DEEP_QUESTION_ATTEMPTS: int = int(
+    _optional("POST_RESPONSE_DEEP_QUESTION_ATTEMPTS", "2")
+)
 POST_RESPONSE_LINGER_MAX_SECONDS: float = float(_optional("POST_RESPONSE_LINGER_MAX_SECONDS", "18.0"))
 POST_RESPONSE_LINGER_LISTEN_TIMEOUT: float = float(_optional("POST_RESPONSE_LINGER_LISTEN_TIMEOUT", "5.0"))
 POST_RESPONSE_LINGER_CURIOSITY_CHANCE: float = float(

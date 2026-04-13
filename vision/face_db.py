@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS memories (
     key              TEXT,
     value            TEXT,
     raw_quote        TEXT,
+    question_text    TEXT,
+    answer_text      TEXT,
+    tags             TEXT,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at       TIMESTAMP,
     follow_up_after  TIMESTAMP,
@@ -102,6 +105,7 @@ class FaceDB:
             self._conn.execute(_CREATE_ENCODINGS)
             self._conn.execute(_CREATE_MEMORIES)
         self._ensure_people_columns()
+        self._ensure_memories_columns()
 
     def _ensure_people_columns(self) -> None:
         """Backfill newer people-table columns when upgrading an existing DB."""
@@ -116,6 +120,20 @@ class FaceDB:
                 self._conn.execute(
                     "ALTER TABLE people ADD COLUMN daily_visit_count INTEGER DEFAULT 0"
                 )
+
+    def _ensure_memories_columns(self) -> None:
+        """Backfill newer memories-table columns when upgrading an existing DB."""
+        cols = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(memories)").fetchall()
+        }
+        with self._conn:
+            if "question_text" not in cols:
+                self._conn.execute("ALTER TABLE memories ADD COLUMN question_text TEXT")
+            if "answer_text" not in cols:
+                self._conn.execute("ALTER TABLE memories ADD COLUMN answer_text TEXT")
+            if "tags" not in cols:
+                self._conn.execute("ALTER TABLE memories ADD COLUMN tags TEXT")
 
     def _log_startup_stats(self) -> None:
         """Log people/encoding counts so we can confirm the DB persisted correctly."""
@@ -346,6 +364,9 @@ class FaceDB:
         """Remove a person and all their encodings."""
         with self._conn:
             self._conn.execute(
+                "DELETE FROM memories WHERE person_id = ?", (person_id,)
+            )
+            self._conn.execute(
                 "DELETE FROM face_encodings WHERE person_id = ?", (person_id,)
             )
             self._conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
@@ -371,6 +392,9 @@ class FaceDB:
         with self._conn:
             for person_id in matching_ids:
                 self._conn.execute(
+                    "DELETE FROM memories WHERE person_id = ?", (person_id,)
+                )
+                self._conn.execute(
                     "DELETE FROM face_encodings WHERE person_id = ?", (person_id,)
                 )
                 self._conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
@@ -385,6 +409,7 @@ class FaceDB:
     def delete_all_people(self) -> None:
         """Remove all people and all stored face encodings."""
         with self._conn:
+            self._conn.execute("DELETE FROM memories")
             self._conn.execute("DELETE FROM face_encodings")
             self._conn.execute("DELETE FROM people")
         log.info("FaceDB: deleted all people and encodings")
@@ -402,14 +427,25 @@ class FaceDB:
         raw_quote: str,
         expires_at: Optional[str] = None,
         follow_up_after: Optional[str] = None,
+        question_text: Optional[str] = None,
+        answer_text: Optional[str] = None,
+        tags: Optional[str] = None,
     ) -> int:
         """Insert a new memory for a person. Returns the new memory id."""
         with self._conn:
             cur = self._conn.execute(
                 """INSERT INTO memories
-                   (person_id, category, key, value, raw_quote, expires_at, follow_up_after)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (person_id, category, key, value, raw_quote, expires_at, follow_up_after),
+                   (
+                       person_id, category, key, value, raw_quote,
+                       question_text, answer_text, tags,
+                       expires_at, follow_up_after
+                   )
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    person_id, category, key, value, raw_quote,
+                    question_text, answer_text, tags,
+                    expires_at, follow_up_after,
+                ),
             )
         memory_id: int = cur.lastrowid  # type: ignore[assignment]
         log.info(
@@ -421,7 +457,8 @@ class FaceDB:
     def get_memories(self, person_id: int) -> list[dict]:
         """Return all non-expired memories for a person, newest first."""
         rows = self._conn.execute(
-            """SELECT id, category, key, value, raw_quote, created_at,
+            """SELECT id, category, key, value, raw_quote, question_text,
+                      answer_text, tags, created_at,
                       expires_at, follow_up_after, followed_up
                FROM memories
                WHERE person_id = ?
@@ -434,7 +471,8 @@ class FaceDB:
     def get_pending_followups(self, person_id: int) -> list[dict]:
         """Return memories whose follow_up_after time has passed and haven't been asked."""
         rows = self._conn.execute(
-            """SELECT id, category, key, value, raw_quote, created_at,
+            """SELECT id, category, key, value, raw_quote, question_text,
+                      answer_text, tags, created_at,
                       expires_at, follow_up_after
                FROM memories
                WHERE person_id = ?
@@ -470,7 +508,8 @@ class FaceDB:
     ) -> Optional[dict]:
         """Return the newest memory for *person_id*/*key* on the given local day."""
         row = self._conn.execute(
-            """SELECT id, category, key, value, raw_quote, created_at,
+            """SELECT id, category, key, value, raw_quote, question_text,
+                      answer_text, tags, created_at,
                       expires_at, follow_up_after, followed_up
                FROM memories
                WHERE person_id = ?
@@ -487,7 +526,8 @@ class FaceDB:
     ) -> Optional[dict]:
         """Return the newest memory for *person_id*/*key* within a local date range."""
         row = self._conn.execute(
-            """SELECT id, category, key, value, raw_quote, created_at,
+            """SELECT id, category, key, value, raw_quote, question_text,
+                      answer_text, tags, created_at,
                       expires_at, follow_up_after, followed_up
                FROM memories
                WHERE person_id = ?
@@ -550,7 +590,18 @@ class FaceDB:
             return ""
         sentences: list[str] = []
         for m in memories:
-            value = m["value"].strip()
+            if m.get("category") == "curiosity" and m.get("answer_text"):
+                question_text = str(m.get("question_text") or "").strip().rstrip("?!.")
+                answer_text = str(m.get("answer_text") or "").strip()
+                if answer_text:
+                    if question_text:
+                        value = f"once told Rex, when asked {question_text.lower()}, that {answer_text}"
+                    else:
+                        value = f"once told Rex that {answer_text}"
+                else:
+                    value = ""
+            else:
+                value = str(m.get("value") or "").strip()
             if not value:
                 continue
             # Prepend person's name if the sentence doesn't already start with it.
