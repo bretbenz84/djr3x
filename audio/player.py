@@ -105,6 +105,7 @@ class _DroidVoiceEffect:
         self._release_coeff = self._time_coeff(self._RELEASE_MS, sample_rate)
         self._sat_norm = 1.0 / np.tanh(self._SATURATION_DRIVE)
         self._bitcrush_levels = float((1 << (self._BITCRUSH_BITS - 1)) - 1)
+        self._two_pi_over_sr = (2.0 * np.pi) / sample_rate
         self.reset()
 
     @staticmethod
@@ -130,6 +131,8 @@ class _DroidVoiceEffect:
         self._lp_state_1 = 0.0
         self._lp_state_2 = 0.0
         self._compress_env = 0.0
+        self._tremolo_phase = 0.0
+        self._ring_mod_phase = 0.0
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         if samples.size == 0 or not config.ENABLE_DROID_EFFECT:
@@ -145,6 +148,15 @@ class _DroidVoiceEffect:
         makeup_gain = self._MAKEUP_GAIN
         saturation_drive = self._SATURATION_DRIVE
         saturation_norm = self._sat_norm
+        tremolo_enabled = config.ENABLE_DROID_TREMOLO
+        tremolo_rate = max(0.0, config.DROID_TREMOLO_RATE_HZ)
+        tremolo_depth = config.DROID_TREMOLO_DEPTH
+        tremolo_phase = self._tremolo_phase
+        ring_mod_enabled = config.ENABLE_DROID_RING_MOD
+        ring_mod_rate = max(0.0, config.DROID_RING_MOD_RATE_HZ)
+        ring_mod_depth = config.DROID_RING_MOD_DEPTH
+        ring_mod_phase = self._ring_mod_phase
+        phase_scale = self._two_pi_over_sr
         crush_mix = (
             self._BITCRUSH_MIX if config.DROID_EFFECT_BITCRUSH_ENABLED else 0.0
         )
@@ -174,6 +186,20 @@ class _DroidVoiceEffect:
                 shaped *= makeup_gain
 
             shaped = np.tanh(shaped * saturation_drive) * saturation_norm
+            if tremolo_enabled and tremolo_depth > 0.0 and tremolo_rate > 0.0:
+                tremolo = 1.0 - tremolo_depth + tremolo_depth * (
+                    0.5 * (1.0 + np.sin(tremolo_phase))
+                )
+                shaped *= tremolo
+                tremolo_phase += tremolo_rate * phase_scale
+                if tremolo_phase >= 2.0 * np.pi:
+                    tremolo_phase -= 2.0 * np.pi
+            if ring_mod_enabled and ring_mod_depth > 0.0 and ring_mod_rate > 0.0:
+                carrier = np.sin(ring_mod_phase)
+                shaped *= (1.0 - ring_mod_depth) + ring_mod_depth * carrier
+                ring_mod_phase += ring_mod_rate * phase_scale
+                if ring_mod_phase >= 2.0 * np.pi:
+                    ring_mod_phase -= 2.0 * np.pi
             if crush_mix > 0.0:
                 crushed = np.round(shaped * crush_levels) / crush_levels
                 shaped += (crushed - shaped) * crush_mix
@@ -189,6 +215,8 @@ class _DroidVoiceEffect:
         self._lp_state_1 = lp_state_1
         self._lp_state_2 = lp_state_2
         self._compress_env = compress_env
+        self._tremolo_phase = tremolo_phase
+        self._ring_mod_phase = ring_mod_phase
         return out
 
 

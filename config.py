@@ -260,6 +260,12 @@ SYNTHESIZER_VOLUME_GAIN: float = float(_optional("SYNTHESIZER_VOLUME_GAIN", "2.0
 # intentionally left untouched.
 ENABLE_DROID_EFFECT: bool = _optional("ENABLE_DROID_EFFECT", "true").lower() not in ("0", "false", "no")
 DROID_EFFECT_BITCRUSH_ENABLED: bool = _optional("DROID_EFFECT_BITCRUSH_ENABLED", "true").lower() not in ("0", "false", "no")
+ENABLE_DROID_TREMOLO: bool = _optional("ENABLE_DROID_TREMOLO", "true").lower() not in ("0", "false", "no")
+DROID_TREMOLO_RATE_HZ: float = float(_optional("DROID_TREMOLO_RATE_HZ", "5.6"))
+DROID_TREMOLO_DEPTH: float = max(0.0, min(0.25, float(_optional("DROID_TREMOLO_DEPTH", "0.06"))))
+ENABLE_DROID_RING_MOD: bool = _optional("ENABLE_DROID_RING_MOD", "false").lower() not in ("0", "false", "no")
+DROID_RING_MOD_RATE_HZ: float = float(_optional("DROID_RING_MOD_RATE_HZ", "32.0"))
+DROID_RING_MOD_DEPTH: float = max(0.0, min(0.5, float(_optional("DROID_RING_MOD_DEPTH", "0.12"))))
 
 # Silence-gated recording: stop capturing when RMS drops below threshold
 # for SILENCE_DURATION consecutive seconds (or MAX_RECORD_SECONDS elapses)
