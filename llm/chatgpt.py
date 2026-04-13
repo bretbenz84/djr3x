@@ -174,6 +174,7 @@ class ChatGPTClient:
         # Prepended to the system prompt when set; cleared on IDLE.
         self._person_context: str = ""
         self._mood_context: str = ""
+        self._behavior_context: str = ""
 
     # ------------------------------------------------------------------
     # Public interface
@@ -276,6 +277,8 @@ class ChatGPTClient:
                 )
             if self._mood_context:
                 suffix += f"\n\n{self._mood_context}"
+            if self._behavior_context:
+                suffix += f"\n\n{self._behavior_context}"
 
             if suffix:
                 effective_system: dict[str, str] = {
@@ -361,6 +364,16 @@ class ChatGPTClient:
         """Remove the injected memory context (called on IDLE entry)."""
         self._person_context = ""
         log.debug("ChatGPT: person context cleared")
+
+    def set_behavior_context(self, context: str) -> None:
+        """Overlay lightweight runtime behavior guidance onto the system prompt."""
+        self._behavior_context = context.strip()
+        log.debug("ChatGPT: behavior context set (%d chars)", len(self._behavior_context))
+
+    def clear_behavior_context(self) -> None:
+        """Clear runtime behavior guidance."""
+        self._behavior_context = ""
+        log.debug("ChatGPT: behavior context cleared")
 
     def set_angry_mode(self, enabled: bool) -> None:
         """Overlay a grumpier runtime style onto Rex's normal voice."""

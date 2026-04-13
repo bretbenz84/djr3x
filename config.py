@@ -421,6 +421,29 @@ FACE_APPEAR_ABSENT_SECONDS: float = 8.0   # no-face gap required before appearan
 FACE_APPEAR_FRAME_COUNT:    int   = 2     # consecutive detections required to confirm appearance
 FACE_WAKE_LISTEN_TIMEOUT:   float = 10.0  # seconds to wait for speech after face-triggered "Hi There"
 
+# Lightweight autonomy layer — self-initiated prompts, timing variance, and
+# slight imperfection layered on top of the core reactive pipeline.
+AUTONOMY_ENABLED: bool = _optional("AUTONOMY_ENABLED", "true").lower() not in ("0", "false", "no")
+AUTONOMY_IDLE_AGENDA_MIN_SECONDS: float = float(_optional("AUTONOMY_IDLE_AGENDA_MIN_SECONDS", "25.0"))
+AUTONOMY_IDLE_AGENDA_MAX_SECONDS: float = float(_optional("AUTONOMY_IDLE_AGENDA_MAX_SECONDS", "75.0"))
+AUTONOMY_PROACTIVE_LISTEN_TIMEOUT: float = float(_optional("AUTONOMY_PROACTIVE_LISTEN_TIMEOUT", "6.0"))
+AUTONOMY_CLARIFICATION_TIMEOUT: float = float(_optional("AUTONOMY_CLARIFICATION_TIMEOUT", "5.0"))
+AUTONOMY_MEMORY_STALE_DAYS: float = float(_optional("AUTONOMY_MEMORY_STALE_DAYS", "7.0"))
+AUTONOMY_MEMORY_TRIGGER_COOLDOWN_SECONDS: float = float(
+    _optional("AUTONOMY_MEMORY_TRIGGER_COOLDOWN_SECONDS", "240.0")
+)
+AUTONOMY_RESPONSE_DELAY_MIN_SECONDS: float = float(
+    _optional("AUTONOMY_RESPONSE_DELAY_MIN_SECONDS", "0.05")
+)
+AUTONOMY_RESPONSE_DELAY_MAX_SECONDS: float = float(
+    _optional("AUTONOMY_RESPONSE_DELAY_MAX_SECONDS", "0.35")
+)
+AUTONOMY_NON_RESPONSE_CHANCE: float = float(_optional("AUTONOMY_NON_RESPONSE_CHANCE", "0.06"))
+AUTONOMY_CLARIFICATION_CHANCE: float = float(_optional("AUTONOMY_CLARIFICATION_CHANCE", "0.08"))
+AUTONOMY_HESITATION_CHANCE: float = float(_optional("AUTONOMY_HESITATION_CHANCE", "0.12"))
+AUTONOMY_SELF_CORRECTION_CHANCE: float = float(_optional("AUTONOMY_SELF_CORRECTION_CHANCE", "0.08"))
+AUTONOMY_FOLLOWUP_CHANCE: float = float(_optional("AUTONOMY_FOLLOWUP_CHANCE", "0.16"))
+
 # ---------------------------------------------------------------------------
 # Vision — webcam capture
 # ---------------------------------------------------------------------------

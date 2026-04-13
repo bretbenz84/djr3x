@@ -49,6 +49,7 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from autonomy import AgendaDecision, AutonomyLayer, ResponseDecision
 import config
 from audio.player import AudioPlayer
 from commands.parser import normalize, parse
@@ -254,6 +255,17 @@ _PROMPT_COMMAND_ACTIONS: set[str] = {
     "recall_preference",
 }
 
+_AUTONOMY_GUARD_ACTIONS: set[str] = _PROMPT_COMMAND_ACTIONS | {
+    "tell_time",
+    "tell_date",
+    "tell_location",
+    "tell_weather",
+    "stop_idle_clips",
+    "chatty_on",
+    "chatty_off",
+    "i_spy",
+}
+
 _I_SPY_START_LINES: list[str] = [
     "I Spy? Ohhh, now we're playing preschool in a cantina. Fine. Try to keep up, lifeform.",
     "An I Spy round? Bold choice for someone with the visual instincts of a stormtrooper.",
@@ -327,6 +339,7 @@ class StateMachine:
         # LLM
         self._llm = ChatGPTClient()
         self._greeter = Greeter()
+        self._autonomy = AutonomyLayer()
 
         # Vision
         self._camera = Camera()
@@ -406,6 +419,7 @@ class StateMachine:
 
         # Animation player — shares hardware refs with the rest of the machine
         self._animations = AnimationPlayer(self._servos, self._leds)
+        self._refresh_autonomy_context()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -668,6 +682,8 @@ class StateMachine:
     def _run_idle(self) -> None:
         """Enter IDLE: set LEDs/servos to rest, then wait for a wake word."""
         log.info("→ IDLE")
+        self._autonomy.update_for_state(State.IDLE.value)
+        self._refresh_autonomy_context()
 
         # Send EYE first so the head Nano has eyeColor set before IDLE arrives.
         # The IDLE handler activates the blink system only when eyeColor is
@@ -687,6 +703,7 @@ class StateMachine:
             self._angry_mode = False
             self._llm.set_angry_mode(False)
             log.info("ACTIVE entry: angry mode cleared")
+            self._refresh_autonomy_context()
 
         # On entry (startup or return from ACTIVE/SLEEP), immediately check whether
         # a face is already in view — bypasses the 8-second absence timer so Rex
@@ -710,6 +727,7 @@ class StateMachine:
             deadline = time.monotonic() + interval
             triggered      = False
             face_triggered = False
+            autonomy_triggered = False
 
             while time.monotonic() < deadline:
                 remaining = max(0.0, deadline - time.monotonic())
@@ -718,6 +736,9 @@ class StateMachine:
                     break
                 if self._face_wake_event.is_set():
                     face_triggered = True
+                    break
+                if self._maybe_run_autonomy_agenda():
+                    autonomy_triggered = True
                     break
 
             if triggered:
@@ -732,6 +753,11 @@ class StateMachine:
                 self._run_face_triggered_greeting()
                 # _run_face_triggered_greeting() transitions to ACTIVE when the
                 # user speaks; if it returns without a transition we stay IDLE.
+                if self._state != State.IDLE:
+                    return
+                continue
+
+            if autonomy_triggered:
                 if self._state != State.IDLE:
                     return
                 continue
@@ -962,6 +988,8 @@ class StateMachine:
             On timeout, Rex returns to IDLE directly (no prompt).
         """
         log.info("→ ACTIVE")
+        self._autonomy.note_activation()
+        self._refresh_autonomy_context()
 
         self._apply_active_led_theme()
 
@@ -1067,6 +1095,8 @@ class StateMachine:
                 if text == "":
                     log.info("Empty transcription treated as silence/no-response")
                 if after_response:
+                    self._autonomy.note_silence(after_response=True)
+                    self._refresh_autonomy_context()
                     # If music is playing, the mic likely picked up the track.
                     # Don't return to IDLE — keep listening for real commands.
                     if self._player.is_music_playing:
@@ -1108,6 +1138,8 @@ class StateMachine:
                             continue
 
                 # First listen — prompt with "are you there?"
+                self._autonomy.note_silence(after_response=False)
+                self._refresh_autonomy_context()
                 prompt = random.choice(_ARE_YOU_THERE_PHRASES)
                 log.info("No speech on first listen — prompting: %r", prompt)
                 self._apply_active_led_theme()
@@ -1137,6 +1169,8 @@ class StateMachine:
                     self._wake_word.resume()
 
                 if not text:   # None (timeout) or "" (Whisper got nothing)
+                    self._autonomy.note_silence(after_response=False)
+                    self._refresh_autonomy_context()
                     goodbye = random.choice(_GOODBYE_PHRASES)
                     log.info("Still no speech — saying goodbye: %r", goodbye)
                     self._apply_active_led_theme()
@@ -1157,11 +1191,24 @@ class StateMachine:
                 # else: second-chance produced text — fall through to process it
 
             # --- We have a transcription ---
+            turn_after_response = after_response
             after_response = True
+            text, response_plan = self._prepare_autonomy_response(
+                text,
+                after_response=turn_after_response,
+            )
+            if not text:
+                self._apply_active_led_theme()
+                continue
+
             log.info("Transcribed: %r", text)
 
             # --- Speaking indicator ---
             self._apply_active_led_theme()
+
+            guard_cmd = self._autonomy_guard_command(text)
+            self._autonomy.note_heard_text(text, is_commandish=guard_cmd is not None)
+            self._refresh_autonomy_context()
 
             mood_shift = self._classify_angry_intent(text)
             if mood_shift == "on":
@@ -1189,6 +1236,18 @@ class StateMachine:
                 self._player.wait_for_speech()
                 self._apply_active_led_theme()
                 continue
+
+            if response_plan.skip_response:
+                log.info("Autonomy: intentionally letting low-info input pass without reply: %r", text)
+                self._apply_active_led_theme()
+                continue
+
+            self._autonomy_delay(response_plan.delay_seconds)
+            if response_plan.preface:
+                log.info("Autonomy preface: %r", response_plan.preface)
+                self._speak_simple(response_plan.preface, emotion="neutral")
+                self._player.wait_for_speech()
+                self._apply_active_led_theme()
 
             # --- Parse and respond ---
             _elapsed = f" [+{time.monotonic() - self._pipeline_t0:.1f}s]"
@@ -1245,6 +1304,9 @@ class StateMachine:
                     self._play_return_to_idle_chime()
                 self._transition_to(next_state)
                 return
+
+            self._maybe_speak_autonomy_followup(response_plan)
+            self._player.wait_for_speech()
 
             # Restore ACTIVE indicators for next listen turn.
             self._apply_active_led_theme()
@@ -1348,6 +1410,7 @@ class StateMachine:
             self._leds.stop_mouth()
             self._leds._send_head(config.LED_CMD_SPEAK_STOP)
         self._state = new_state
+        self._refresh_autonomy_context()
 
     # ------------------------------------------------------------------
     # Wake word callback  (called from WakeWordDetector audio thread)
@@ -4097,11 +4160,154 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
+    def _refresh_autonomy_context(self) -> None:
+        """Push the current autonomy state into the LLM runtime overlay."""
+        if not config.AUTONOMY_ENABLED:
+            self._llm.clear_behavior_context()
+            return
+        self._autonomy.update_for_state(self._state.value)
+        self._llm.set_behavior_context(self._autonomy.build_behavior_context())
+
+    def _maybe_run_autonomy_agenda(self) -> bool:
+        """Fire a low-frequency self-initiated idle action when due."""
+        if (
+            not config.AUTONOMY_ENABLED
+            or self._state != State.IDLE
+            or self._shutdown_event.is_set()
+            or not self._autonomy.idle_agenda_due()
+        ):
+            return False
+
+        face_visible = bool(
+            self._head_tracker is not None
+            and self._head_tracker.face_recently_seen(within_seconds=2.0)
+        )
+        try:
+            known_people = self._face_db.list_people()
+        except Exception:
+            log.exception("Autonomy agenda: failed loading people list")
+            known_people = []
+
+        decision = self._autonomy.plan_idle_agenda(
+            face_visible=face_visible,
+            known_people=known_people,
+        )
+        self._refresh_autonomy_context()
+        if decision is None:
+            return False
+
+        log.info("Autonomy agenda: %s — %r", decision.kind, decision.line)
+        self._run_autonomy_agenda(decision)
+        return True
+
+    def _run_autonomy_agenda(self, decision: AgendaDecision) -> None:
+        """Speak an autonomy-driven idle line and optionally open the mic."""
+        self._apply_active_led_theme()
+        self._speak_simple(decision.line, emotion=decision.emotion)
+        self._player.wait_for_speech()
+
+        if not decision.listen_after or self._shutdown_event.is_set():
+            self._apply_idle_led_theme()
+            return
+
+        answer = self._listen_for_prompt_answer(config.AUTONOMY_PROACTIVE_LISTEN_TIMEOUT)
+        if answer:
+            log.info("Autonomy agenda: proactive reply heard %r", answer)
+            self._autonomy.note_proactive_result(answered=True)
+            self._refresh_autonomy_context()
+            self._face_triggered_wake_text = answer
+            self._pipeline_t0 = time.monotonic()
+            self._transition_to(State.ACTIVE)
+            return
+
+        log.info("Autonomy agenda: no reply")
+        self._autonomy.note_proactive_result(answered=False)
+        self._refresh_autonomy_context()
+        self._apply_idle_led_theme()
+
+    def _autonomy_guard_command(self, text: str, exact_cmd=None):
+        """Return a command that should bypass autonomy quirks for this turn."""
+        cmd = exact_cmd if exact_cmd is not None else parse(text, allow_fuzzy=False)
+        if cmd is not None:
+            return cmd
+        fuzzy_cmd = parse(text, allow_fuzzy=True)
+        if fuzzy_cmd is not None and fuzzy_cmd.action in _AUTONOMY_GUARD_ACTIONS:
+            return fuzzy_cmd
+        return None
+
+    def _prepare_autonomy_response(
+        self,
+        text: str,
+        *,
+        after_response: bool,
+    ) -> tuple[str | None, ResponseDecision]:
+        """Apply clarification behavior before a turn is fully processed."""
+        active_text = text
+        plan = ResponseDecision()
+        for _ in range(2):
+            exact_cmd = parse(active_text, allow_fuzzy=False)
+            guard_cmd = self._autonomy_guard_command(active_text, exact_cmd)
+            plan = self._autonomy.plan_response(
+                active_text,
+                is_commandish=exact_cmd is not None,
+                guarded=guard_cmd is not None,
+                after_response=after_response,
+            )
+            self._refresh_autonomy_context()
+            if not plan.clarification:
+                return active_text, plan
+
+            retry_text = self._run_autonomy_clarification(plan.clarification)
+            if not retry_text:
+                self._autonomy.note_silence(after_response=after_response)
+                self._refresh_autonomy_context()
+                return None, ResponseDecision()
+            active_text = retry_text
+
+        return active_text, plan
+
+    def _run_autonomy_clarification(self, line: str) -> str | None:
+        """Ask for a repeat when autonomy decides Rex misheard something."""
+        log.info("Autonomy clarification: %r", line)
+        self._speak_simple(line, emotion="neutral")
+        self._player.wait_for_speech()
+        reply = self._listen_for_prompt_answer(config.AUTONOMY_CLARIFICATION_TIMEOUT)
+        if reply:
+            log.info("Autonomy clarification reply: %r", reply)
+        return reply
+
+    def _autonomy_delay(self, seconds: float) -> None:
+        """Sleep in small increments so shutdown remains responsive."""
+        if seconds <= 0.0:
+            return
+        deadline = time.monotonic() + seconds
+        while not self._shutdown_event.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return
+            time.sleep(min(0.05, remaining))
+
+    def _maybe_speak_autonomy_followup(self, plan: ResponseDecision) -> None:
+        """Occasionally extend a conversation with a short extra prompt."""
+        if (
+            not plan.followup
+            or self._shutdown_event.is_set()
+            or self._state != State.ACTIVE
+        ):
+            return
+        self._autonomy.note_followup()
+        self._refresh_autonomy_context()
+        log.info("Autonomy follow-up: %r", plan.followup)
+        self._autonomy_delay(min(0.18, plan.delay_seconds))
+        self._speak_simple(plan.followup, emotion="neutral")
+
     def _set_angry_mode(self, enabled: bool) -> None:
         """Enable or disable angry mode and immediately update persona + LEDs."""
         self._angry_mode = enabled
+        self._autonomy.note_anger(enabled)
         self._llm.set_angry_mode(enabled)
         log.info("Angry mode state -> %s", "ON" if enabled else "OFF")
+        self._refresh_autonomy_context()
         if self._state == State.IDLE:
             self._apply_idle_led_theme()
         elif self._state == State.ACTIVE:
