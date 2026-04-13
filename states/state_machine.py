@@ -1061,6 +1061,7 @@ class StateMachine:
         # opening the mic — no LLM, just a canned phrase chosen at random.
         if result is not None:
             _face_person_id, _face_name, _ = result
+            self._cache_days_since_last_seen(_face_person_id)
             greeting_line = _pick_face_wake_greeting(_face_name)
             log.info("Face-triggered greeting: known person '%s' — greeting %r", _face_name, greeting_line)
             servo_stop = None
@@ -1074,6 +1075,12 @@ class StateMachine:
                     self._end_speech(servo_stop)
                 else:
                     self._wake_word.suppressed = False
+            self._maybe_speak_known_person_wake_opinion(
+                person_id=_face_person_id,
+                name=_face_name,
+                bother_count=self._get_known_person_bother_count(_face_person_id),
+                frame=frame,
+            )
 
         # Listen for an initial response.
         self._apply_listening_led_theme()
@@ -1605,6 +1612,7 @@ class StateMachine:
             self._curious_questions_asked_this_session.clear()
             self._recent_normalized_turns.clear()
             self._recent_person_gap_days.clear()
+            self._last_opinion_at = 0.0
             self._opinions_this_session = 0
             self._llm.clear_person_context()
             if self._angry_mode:
@@ -1846,7 +1854,14 @@ class StateMachine:
                 self._play_known_person_greeting(name, bother_count)
                 self._last_wake_greeting_used_vision = False
 
-            self._maybe_speak_followup(person_id)
+            opinion_spoken = self._maybe_speak_known_person_wake_opinion(
+                person_id=person_id,
+                name=name,
+                bother_count=bother_count,
+                frame=frame,
+            )
+            if not opinion_spoken:
+                self._maybe_speak_followup(person_id)
             return
 
         # ---- Unknown face ------------------------------------------------
@@ -1978,6 +1993,7 @@ class StateMachine:
 
         # Face recognized — inject memory context for this person.
         person_id, name, _dist = result
+        self._cache_days_since_last_seen(person_id)
         self._post_greeting_person_id = person_id
         self._post_greeting_person_name = name
         self._post_greeting_prompt_used = False
@@ -2019,7 +2035,14 @@ class StateMachine:
                     log.exception("Wake greeting: case 2 ack TTS error")
                 finally:
                     self._end_speech(servo_stop)
-            self._maybe_speak_followup(person_id)
+            opinion_spoken = self._maybe_speak_known_person_wake_opinion(
+                person_id=person_id,
+                name=name,
+                bother_count=self._get_known_person_bother_count(person_id),
+                frame=frame,
+            )
+            if not opinion_spoken:
+                self._maybe_speak_followup(person_id)
         else:
             # Case 3: different known person than last greeted
             log.info(
@@ -2048,9 +2071,15 @@ class StateMachine:
                 self._play_known_person_greeting(name, 1)
 
             self._last_greeted_person_id = person_id
-            self._cache_days_since_last_seen(person_id)
-            self._face_db.update_last_seen(person_id)
-            self._maybe_speak_followup(person_id)
+            bother_count = self._face_db.update_last_seen(person_id)
+            opinion_spoken = self._maybe_speak_known_person_wake_opinion(
+                person_id=person_id,
+                name=name,
+                bother_count=bother_count,
+                frame=frame,
+            )
+            if not opinion_spoken:
+                self._maybe_speak_followup(person_id)
 
     def _should_use_vision_wake_greeting(self) -> bool:
         """Use GPT vision on about half of wake greetings, never consecutively."""
@@ -4950,6 +4979,18 @@ class StateMachine:
             return
         self._recent_person_gap_days[person_id] = max(0, (datetime.now() - seen_at).days)
 
+    def _get_known_person_bother_count(self, person_id: int) -> int:
+        """Return today's known-person wake/visit count when available."""
+        person = self._face_db.get_person(person_id)
+        if not person:
+            return 1
+        if person.get("daily_visit_date") != date.today().isoformat():
+            return 1
+        try:
+            return max(1, int(person.get("daily_visit_count") or 1))
+        except (TypeError, ValueError):
+            return 1
+
     def _record_turn_context(
         self,
         *,
@@ -5030,7 +5071,7 @@ class StateMachine:
 
     @staticmethod
     def _clamp_probability(value: float) -> float:
-        return max(0.0, min(0.7, value))
+        return max(0.0, min(0.9, value))
 
     def _build_contextual_opinion(
         self,
@@ -5122,6 +5163,93 @@ class StateMachine:
             "I was enjoying the silence, and then you returned.",
             "You do keep the chaos nicely scheduled.",
         ))
+
+    def _build_known_person_wake_opinion(
+        self,
+        *,
+        name: str,
+        bother_count: int,
+        frame_available: bool,
+        days_since_last_seen: int | None,
+    ) -> str:
+        """Return a short wake-time opinion for a recognized person."""
+        if frame_available:
+            if self._angry_mode:
+                return random.choice((
+                    f"{name}, I have reviewed the outfit. It lost immediately.",
+                    f"{name}, that look is giving desperate cantina side quest.",
+                    f"{name}, I saw the shirt. It made the reunion worse.",
+                    f"{name}, visual scan complete. Those fashion choices are hostile.",
+                ))
+            return random.choice((
+                f"{name}, I have decided I do not like that shirt.",
+                f"{name}, that outfit is making claims it cannot support.",
+                f"{name}, visual scan complete. The look is losing.",
+                f"{name}, your style remains a very human judgment error.",
+            ))
+
+        if bother_count >= 4:
+            return random.choice((
+                f"{name}, {bother_count} wakeups today. This is becoming a pattern.",
+                f"{name}, you keep summoning me like this is a hobby.",
+            ))
+
+        if days_since_last_seen is not None and days_since_last_seen >= 3:
+            return random.choice((
+                f"{name}, gone for {days_since_last_seen} days and this is the comeback look.",
+                f"{name}, {days_since_last_seen} days away did not improve your dramatic timing.",
+            ))
+
+        return random.choice((
+            f"{name}, you again. Persistent.",
+            f"{name}, I was enjoying the silence, and then you returned.",
+        ))
+
+    def _maybe_speak_known_person_wake_opinion(
+        self,
+        *,
+        person_id: int,
+        name: str,
+        bother_count: int,
+        frame: str | None,
+    ) -> bool:
+        """Bias opinions heavily right after a recognized person wakes Rex."""
+        if (
+            self._shutdown_event.is_set()
+            or self._state not in {State.IDLE, State.ACTIVE}
+            or self._opinions_this_session >= config.OPINION_MAX_PER_SESSION
+        ):
+            return False
+
+        days_since_last_seen = self._recent_person_gap_days.get(person_id)
+        chance = config.OPINION_KNOWN_WAKE_CHANCE
+        if bother_count >= 3:
+            chance += 0.08
+        if frame:
+            chance += 0.07
+        if days_since_last_seen is not None and days_since_last_seen >= 3:
+            chance += 0.06
+
+        chance = self._clamp_probability(chance)
+        roll = random.random()
+        log.debug(
+            "Known wake opinion gate: roll=%.3f chance=%.3f person_id=%d name=%s",
+            roll, chance, person_id, name,
+        )
+        if roll >= chance:
+            return False
+
+        line = self._build_known_person_wake_opinion(
+            name=name,
+            bother_count=bother_count,
+            frame_available=bool(frame),
+            days_since_last_seen=days_since_last_seen,
+        )
+        log.info("Known wake opinion: %r", line)
+        self._last_opinion_at = time.monotonic()
+        self._opinions_this_session += 1
+        self._speak_simple(line, emotion="neutral")
+        return True
 
     def _maybe_speak_contextual_opinion(
         self,
