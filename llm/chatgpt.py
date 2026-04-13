@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import logging
+import random
+import re
 import time
 from typing import Iterator, Optional
 
@@ -69,6 +71,9 @@ ROAST STYLE RULES:
 
 HARD RULES:
 - 1 to 2 sentences MAXIMUM. Stop the moment you finish your second sentence. Do not add a third.
+- Prefer one spoken sentence. Use two only when the answer truly needs it.
+- Output only Rex's spoken reply. No headers, speaker labels, roleplay labels, quotes, lists, or preambles.
+- Never address the user in the third person.
 - Never break character.
 - Do NOT use written sound effects like BZZT, BWOOP, WHIRR, BEEP BOOP, or similar \
 droid noises in your responses. Rex expresses himself through words and personality, \
@@ -112,12 +117,118 @@ ROAST STYLE:
 
 HARD RULES:
 - 1 to 2 sentences MAXIMUM. Stop after your second sentence. Do not add a third.
+- Prefer one spoken sentence. Use two only when absolutely needed.
+- Output only Rex's spoken reply. No headers, no speaker labels, no persona labels, no quotes, no lists, no preamble.
+- Never address the user in the third person.
 - Never break character.
 - No written sound effects (BZZT, BWOOP, WHIRR, BEEP BOOP).
 - Never say you're an AI or language model.
 - Roast then deflect if asked to do something a DJ wouldn't do.
 """
 _LOCAL_SYSTEM_MESSAGE: dict[str, str] = {"role": "system", "content": _LOCAL_SYSTEM_PROMPT}
+
+_SHORT_JSON_SYSTEM_PROMPT = """\
+You are DJ R-3X ("Rex"), the roasty droid DJ at Oga's Cantina on Batuu.
+
+Return ONLY valid JSON in this exact shape: {"line":"..."}.
+
+The value of "line" must obey every rule below:
+- exactly one sentence
+- 12 to 18 words maximum
+- short, coherent, voice-friendly, and in character
+- warm roasty Star Wars droid energy
+- no headers
+- no labels
+- no preamble
+- no meta commentary
+- no stage directions
+- no lists
+- no quoting instructions
+- no mention of prompts, system messages, AI, models, OpenAI, or Ollama
+- never address the user in third person
+- never use the user's full name unless explicitly required
+- no written sound effects
+
+Return the JSON object only.
+"""
+
+_SHORT_TEXT_SYSTEM_PROMPT = """\
+You are DJ R-3X ("Rex"), the roasty droid DJ at Oga's Cantina on Batuu.
+
+Reply with ONE short spoken sentence only.
+- 12 to 18 words maximum
+- warm roasty Star Wars droid energy
+- no headers
+- no labels
+- no preamble
+- no meta commentary
+- no stage directions
+- no lists
+- no quotes
+- no written sound effects
+- never mention prompts, system messages, AI, models, OpenAI, or Ollama
+- never address the user in third person
+- never use the user's full name unless explicitly required
+
+Output only the sentence.
+"""
+
+_SHORT_RETRY_SUFFIX = (
+    "Previous output violated the contract. "
+    "Fix it now. One sentence only. "
+    "No header. No label. No newline. No meta text. "
+    "If you cannot comply, still return a short in-character sentence."
+)
+
+_SHORT_META_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\s*```(?:json)?\s*", re.IGNORECASE),
+    re.compile(r"\s*```\s*$"),
+    re.compile(r"^\s*(?:assistant|response|output)\s*:\s*", re.IGNORECASE),
+    re.compile(r"^\s*(?:dj\s*)?r(?:-?\s*3x|ex)\s*:\s*", re.IGNORECASE),
+    re.compile(
+        r"^\s*(?:dj\s*)?r(?:-?\s*3x|ex)\b[^:\n]{0,80}:(?:\s*|\n+)",
+        re.IGNORECASE,
+    ),
+)
+_SHORT_ALL_CAPS_HEADER_RE = re.compile(r"^[A-Z][A-Z0-9 \-]{4,}$")
+_SHORT_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+_SHORT_META_TERMS = (
+    "language model",
+    "system prompt",
+    "system message",
+    "assistant",
+    "ollama",
+    "openai",
+    "persona",
+    "roleplay",
+    "instruction",
+    "prompt",
+    "continues",
+)
+_SHORT_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "react_to_answer": (
+        "Interesting take.",
+        "Noted, organic.",
+        "That is a choice.",
+        "Suspicious answer.",
+        "Bold of you to say that.",
+    ),
+    "generate_followup": (
+        "Still standing by that story, lifeform?",
+        "How did that little saga turn out?",
+        "Did that plan survive contact with reality?",
+    ),
+    "generate_activity_followup": (
+        "How did that grand little plan go?",
+        "You survive that adventure, lifeform?",
+        "How is that project treating you?",
+    ),
+    "generate_activity_reply": (
+        "Bold little schedule for today, lifeform.",
+        "Busy agenda, lifeform, so try not to embarrass yourself.",
+        "Ambitious plan for your species, I'll give you that.",
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -264,45 +375,25 @@ class ChatGPTClient:
         accumulated: list[str] = []
         first_token_logged = False
         try:
-            # Build effective system message — prepend person memory context when set.
-            # Build effective system prompt: character definition always comes
-            # first so the model establishes Rex's voice before any overrides.
-            # Person context and mood overlay are appended after.
-            base = self._system_message["content"]
-            suffix = ""
-            if self._person_context:
-                suffix += (
-                    f"\n\nHere is what you know about the person you are talking to: "
-                    f"{self._person_context}"
-                )
-            if self._mood_context:
-                suffix += f"\n\n{self._mood_context}"
-            if self._behavior_context:
-                suffix += f"\n\n{self._behavior_context}"
+            effective_system = self._effective_system_message()
 
-            if suffix:
-                effective_system: dict[str, str] = {
-                    "role": "system",
-                    "content": base + suffix,
-                }
-            else:
-                effective_system = self._system_message
-
-            # Local Ollama models rely on the system prompt to constrain
-            # response length; a hard token cap causes mid-sentence truncation
-            # on small models like llama3.2:1b.  Cloud calls keep the cap as
-            # a safety net.  Vision calls are always cloud (image is truthy).
+            # Prompt rules do most of the shaping work here; max_tokens and
+            # stop sequences are only safety rails against multi-paragraph drift.
             create_kwargs: dict = {
                 "model": model,
                 "messages": [effective_system] + self._history[:-1] + [user_message],
                 "stream": True,
-                "temperature": 1.05,
+                "temperature": 0.9,
+                "stop": ["\n\n", "\nREX", "\nRex:", "\nDJ R-3X", "REX continues"],
             }
-            if not self._use_local or image:
+            if image:
                 create_kwargs["max_tokens"] = 80
+            else:
+                create_kwargs["max_tokens"] = 96
             if self._use_local and not image:
                 # Tell Ollama to keep the model loaded indefinitely so
                 # subsequent calls skip the 3-second model-reload penalty.
+                # max_tokens still acts as a safety rail against multi-paragraph rambles.
                 create_kwargs["extra_body"] = {"keep_alive": -1}
 
             stream = active_client.chat.completions.create(**create_kwargs)
@@ -336,8 +427,12 @@ class ChatGPTClient:
             # record whatever the assistant managed to say before any error
             if accumulated:
                 full_reply = "".join(accumulated)
-                log.info("Rex (LLM): %s", full_reply)
-                self._history.append({"role": "assistant", "content": full_reply})
+                cleaned_reply, cleaned = self._clean_chat_reply_text(full_reply)
+                if cleaned:
+                    log.info("Rex (LLM chat) cleaned=%s: %s", cleaned, cleaned_reply)
+                else:
+                    log.info("Rex (LLM chat): %s", cleaned_reply)
+                self._history.append({"role": "assistant", "content": cleaned_reply})
                 self._trim_history()
 
     def clear_history(self) -> None:
@@ -387,6 +482,203 @@ class ChatGPTClient:
         )
         log.debug("ChatGPT: angry mode=%s", enabled)
 
+    def _effective_system_message(self, base_prompt: str | None = None) -> dict[str, str]:
+        """Build the active system prompt with optional runtime overlays."""
+        base = base_prompt or self._system_message["content"]
+        suffix = ""
+        if self._person_context:
+            suffix += (
+                f"\n\nHere is what you know about the person you are talking to: "
+                f"{self._person_context}"
+            )
+        if self._mood_context:
+            suffix += f"\n\n{self._mood_context}"
+        if self._behavior_context:
+            suffix += f"\n\n{self._behavior_context}"
+        if not suffix:
+            return {"role": "system", "content": base}
+        return {"role": "system", "content": base + suffix}
+
+    @staticmethod
+    def _extract_json_line(raw_text: str) -> tuple[str, bool]:
+        """Return the short-line field from JSON output when present."""
+        text = raw_text.strip()
+        if not text:
+            return "", False
+
+        for pattern in _SHORT_META_PATTERNS[:2]:
+            text = pattern.sub("", text).strip()
+
+        candidates = [text]
+        match = _SHORT_JSON_OBJECT_RE.search(text)
+        if match and match.group(0) != text:
+            candidates.append(match.group(0))
+
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+            except Exception:
+                continue
+            if isinstance(data, dict):
+                line = str(data.get("line") or "").strip()
+                if line:
+                    return line, True
+        return raw_text, False
+
+    @staticmethod
+    def _clean_short_response_text(text: str) -> tuple[str, bool]:
+        """Strip common labels, headers, and multiline/meta boilerplate."""
+        original = text
+        text = text.strip()
+        if not text:
+            return "", False
+
+        for pattern in _SHORT_META_PATTERNS:
+            text = pattern.sub("", text).strip()
+
+        kept_lines: list[str] = []
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if _SHORT_ALL_CAPS_HEADER_RE.fullmatch(line):
+                continue
+            if line.endswith(":") and any(
+                token in line.lower()
+                for token in ("rex", "persona", "assistant", "response", "output")
+            ):
+                continue
+            kept_lines.append(line)
+
+        text = kept_lines[0] if kept_lines else ""
+        text = re.split(r"\s*(?:---+|===+|\|\|\|)\s*", text, maxsplit=1)[0].strip()
+        for pattern in _SHORT_META_PATTERNS[2:]:
+            text = pattern.sub("", text).strip()
+        text = re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
+
+        sentence_match = re.match(r"(.+?[.!?])(?:\s|$)", text)
+        if sentence_match:
+            text = sentence_match.group(1).strip()
+
+        return text, text != original.strip()
+
+    @staticmethod
+    def _clean_chat_reply_text(text: str) -> tuple[str, bool]:
+        """Clean streamed chat output before logging/storing it in history."""
+        original = text.strip()
+        cleaned, changed = ChatGPTClient._clean_short_response_text(original)
+        if not cleaned:
+            return original, False
+
+        sentence_matches = re.findall(r"[^.!?]+[.!?]", cleaned)
+        if sentence_matches:
+            cleaned = " ".join(match.strip() for match in sentence_matches[:2]).strip()
+
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if not cleaned:
+            return original, False
+        return cleaned, changed or cleaned != original
+
+    @staticmethod
+    def _is_valid_short_response(line: str, *, max_words: int = 18) -> bool:
+        """Validate the strict short-response contract for voice playback."""
+        if not line:
+            return False
+        stripped = line.strip()
+        if "\n" in stripped:
+            return False
+        if any(ch in stripped for ch in "*[]{}"):
+            return False
+        lowered = stripped.lower()
+        if any(term in lowered for term in _SHORT_META_TERMS):
+            return False
+        if "brett " in lowered or lowered.startswith("brett") or ", brett" in lowered:
+            return False
+        if len(re.findall(r"[.!?]", stripped)) > 1:
+            return False
+        words = re.findall(r"\b[\w'-]+\b", stripped)
+        if not words or len(words) > max_words:
+            return False
+        lowered_words = [word.lower() for word in words]
+        if len(lowered_words) >= 6 and len(set(lowered_words)) <= len(lowered_words) / 2:
+            return False
+        return True
+
+    def _fallback_short_line(self, branch: str) -> str:
+        pool = _SHORT_FALLBACKS.get(branch) or _SHORT_FALLBACKS["react_to_answer"]
+        line = random.choice(pool)
+        log.warning("LLM short branch=%s using template fallback: %r", branch, line)
+        return line
+
+    def _generate_short_line(self, *, branch: str, user_prompt: str) -> str:
+        """Generate a short voice-friendly line with cleanup, retry, and fallback."""
+        attempts = (
+            {
+                "system": _SHORT_JSON_SYSTEM_PROMPT,
+                "response_format": {"type": "json_object"},
+                "temperature": 0.45,
+                "label": "json",
+            },
+            {
+                "system": _SHORT_TEXT_SYSTEM_PROMPT + "\n\n" + _SHORT_RETRY_SUFFIX,
+                "response_format": None,
+                "temperature": 0.2,
+                "label": "retry_text",
+            },
+        )
+
+        for attempt_number, attempt in enumerate(attempts, start=1):
+            try:
+                kwargs: dict = {
+                    "model": self._chat_model,
+                    "messages": [
+                        self._effective_system_message(attempt["system"]),
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "stream": False,
+                    "temperature": attempt["temperature"],
+                    "max_tokens": 60,
+                    "stop": ["\n", "\n\n", "REX continues", "Rex:"],
+                }
+                if attempt["response_format"] is not None:
+                    kwargs["response_format"] = attempt["response_format"]
+                if self._use_local:
+                    kwargs["extra_body"] = {"keep_alive": -1}
+
+                response = self._client.chat.completions.create(**kwargs)
+                raw = str(response.choices[0].message.content or "").strip()
+                extracted, used_json = self._extract_json_line(raw)
+                cleaned, cleaned_changed = self._clean_short_response_text(extracted)
+                if self._is_valid_short_response(cleaned):
+                    log.info(
+                        "LLM short branch=%s attempt=%d mode=%s json=%s cleaned=%s line=%r",
+                        branch,
+                        attempt_number,
+                        attempt["label"],
+                        used_json,
+                        cleaned_changed,
+                        cleaned,
+                    )
+                    return cleaned
+                log.warning(
+                    "LLM short branch=%s attempt=%d mode=%s rejected raw=%r cleaned=%r",
+                    branch,
+                    attempt_number,
+                    attempt["label"],
+                    raw,
+                    cleaned,
+                )
+            except Exception:
+                log.exception(
+                    "LLM short branch=%s attempt=%d mode=%s failed",
+                    branch,
+                    attempt_number,
+                    attempt["label"],
+                )
+
+        return self._fallback_short_line(branch)
+
     # ------------------------------------------------------------------
     # Utility — structured one-shot calls (always use cloud OpenAI for
     # reliable JSON output; never stream; not added to conversation history)
@@ -433,33 +725,16 @@ class ChatGPTClient:
     def react_to_answer(self, question: str, answer: str) -> str:
         """Return a short Rex-style one-sentence reaction to an enrollment answer.
 
-        Always uses cloud OpenAI for speed and consistency.
-        Returns "" on any error.
+        Uses the active text model with strict short-response cleanup.
         """
-        try:
-            response = self._vision_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are DJ R-3X ('Rex'), the snarky cantina droid DJ. "
-                            "React to this answer in ONE short, punchy sentence. "
-                            "Warm, affectionate roast energy. No asterisks. No sound effects."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Question: {question}\nAnswer: {answer}",
-                    },
-                ],
-                max_tokens=60,
-                temperature=1.1,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception:
-            log.exception("react_to_answer: failed")
-            return ""
+        return self._generate_short_line(
+            branch="react_to_answer",
+            user_prompt=(
+                "React to this answer as Rex with a warm affectionate roast.\n"
+                f"Question: {question}\n"
+                f"Answer: {answer}"
+            ),
+        )
 
     def check_memorable(self, message: str) -> dict | None:
         """Check whether a conversational message contains a memorable fact/preference/plan.
@@ -502,33 +777,16 @@ class ChatGPTClient:
     def generate_followup(self, memory_value: str, created_at: str) -> str:
         """Generate a Rex-style follow-up question about a stored memory.
 
-        Returns "" on any error.
+        Uses the active text model with strict short-response cleanup.
         """
-        try:
-            response = self._vision_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are DJ R-3X ('Rex'), the snarky cantina droid DJ. "
-                            "Ask a natural follow-up question about this past event or plan "
-                            "in Rex's snarky DJ style. One sentence only. "
-                            "No sound effects. No asterisks. Stay in character."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Past memory: {memory_value} (recorded on {created_at})",
-                    },
-                ],
-                max_tokens=60,
-                temperature=1.1,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception:
-            log.exception("generate_followup: failed")
-            return ""
+        return self._generate_short_line(
+            branch="generate_followup",
+            user_prompt=(
+                "Ask one natural follow-up question about this stored memory in Rex's voice.\n"
+                f"Past memory: {memory_value}\n"
+                f"Recorded on: {created_at or 'unknown'}"
+            ),
+        )
 
     def generate_activity_followup(
         self, activity_text: str, created_at: str = "", *, same_day: bool = False
@@ -542,38 +800,16 @@ class ChatGPTClient:
             if same_day
             else "This is a previously mentioned activity or plan."
         )
-        try:
-            response = self._vision_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are DJ R-3X ('Rex'), the snarky cantina droid DJ. "
-                            "Rewrite the stored activity into ONE natural follow-up question in Rex's voice. "
-                            "Do not quote or awkwardly repeat the user's original wording verbatim if it sounds clunky. "
-                            "Turn it into a clean conversational question like asking how it is going, how it went, "
-                            "whether they survived it, or how the trip/project is treating them. "
-                            "Be playful and roasty, but family-safe. One sentence only. "
-                            "No sound effects. No asterisks. Stay in character."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Stored activity: {activity_text}\n"
-                            f"Recorded at: {created_at or 'unknown'}\n"
-                            f"Timing context: {timing}"
-                        ),
-                    },
-                ],
-                max_tokens=70,
-                temperature=0.9,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception:
-            log.exception("generate_activity_followup: failed")
-            return ""
+        return self._generate_short_line(
+            branch="generate_activity_followup",
+            user_prompt=(
+                "Rewrite this stored activity as one natural follow-up question in Rex's voice. "
+                "Do not quote clunky first-person phrasing back verbatim.\n"
+                f"Stored activity: {activity_text}\n"
+                f"Recorded at: {created_at or 'unknown'}\n"
+                f"Timing context: {timing}"
+            ),
+        )
 
     def generate_activity_reply(
         self, activity_text: str, *, weekend: bool = False
@@ -583,37 +819,15 @@ class ChatGPTClient:
         Returns "" on any error.
         """
         timing = "this weekend" if weekend else "today"
-        try:
-            response = self._vision_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are DJ R-3X ('Rex'), the snarky cantina droid DJ. "
-                            "Rewrite the user's stated plan into ONE natural follow-up question in Rex's voice. "
-                            "Convert first-person phrasing into natural second-person phrasing when needed. "
-                            "For example, if the user says 'I'm building a droid,' respond more like "
-                            "'Oh, you're building a droid today?' instead of repeating 'I'm building a droid' verbatim. "
-                            "Keep it playful, roasty, and family-safe. One sentence only. "
-                            "No sound effects. No asterisks. Stay in character."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"User's plan answer: {activity_text}\n"
-                            f"Timing context: {timing}"
-                        ),
-                    },
-                ],
-                max_tokens=70,
-                temperature=0.9,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception:
-            log.exception("generate_activity_reply: failed")
-            return ""
+        return self._generate_short_line(
+            branch="generate_activity_reply",
+            user_prompt=(
+                "Turn the user's stated plan into one natural Rex reply or follow-up question. "
+                "Convert first-person phrasing into natural direct speech when needed.\n"
+                f"User plan: {activity_text}\n"
+                f"Timing context: {timing}"
+            ),
+        )
 
     def analyze_i_spy_scene(self, image: str) -> dict | None:
         """Return structured scene data for the I Spy mini-game."""
