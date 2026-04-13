@@ -1632,14 +1632,7 @@ class StateMachine:
         # ---- Known person ------------------------------------------------
         if result is not None:
             person_id, name, _dist = result
-            self._face_db.update_last_seen(person_id)
-
-            today = date.today()
-            if today != self._recognized_today_date:
-                self._recognized_today_date = today
-                self._recognized_today_counts.clear()
-            bother_count = self._recognized_today_counts.get(person_id, 0) + 1
-            self._recognized_today_counts[person_id] = bother_count
+            bother_count = self._face_db.update_last_seen(person_id)
 
             self._last_known_person_id = person_id
             self._session_greeted_person_id = person_id
@@ -1654,7 +1647,7 @@ class StateMachine:
                 self._llm.set_person_context(_ctx)
 
             log.info(
-                "Wake greeting: first wake — known person '%s' (visit count today=%d)",
+                "Wake greeting: first wake — known person '%s' (bother count today=%d)",
                 name, bother_count,
             )
 

@@ -1,0 +1,58 @@
+Date : 2026-04-13 15:20:40
+Directory : /Users/bbenziger/djr3x
+Total : 18 files,  2610 codes, 582 comments, 381 blanks, all 3573 lines
+
+Languages
++--------------------+------------+------------+------------+------------+------------+
+| language           | files      | code       | comment    | blank      | total      |
++--------------------+------------+------------+------------+------------+------------+
+| Python             |         14 |      2,569 |        566 |        381 |      3,516 |
+| pip requirements   |          1 |         26 |          0 |          0 |         26 |
+| JSON with Comments |          1 |         23 |          0 |          0 |         23 |
+| C++                |          1 |          8 |         16 |          1 |         25 |
+| JSON               |          1 |        -16 |          0 |         -1 |        -17 |
++--------------------+------------+------------+------------+------------+------------+
+
+Directories
++--------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                   | files      | code       | comment    | blank      | total      |
++--------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                      |         18 |      2,610 |        582 |        381 |      3,573 |
+| . (Files)                                              |          2 |         92 |         22 |          6 |        120 |
+| .claude                                                |          2 |          7 |          0 |         -1 |          6 |
+| arduino                                                |          1 |          8 |         16 |          1 |         25 |
+| arduino/head_nano                                      |          1 |          8 |         16 |          1 |         25 |
+| audio                                                  |          1 |         23 |          7 |          4 |         34 |
+| autonomy                                               |          2 |        340 |         32 |         71 |        443 |
+| commands                                               |          1 |         20 |         14 |          7 |         41 |
+| hardware                                               |          2 |         79 |         46 |         10 |        135 |
+| llm                                                    |          1 |        217 |         23 |         11 |        251 |
+| speech                                                 |          2 |         47 |         31 |          3 |         81 |
+| states                                                 |          1 |      1,372 |        180 |        189 |      1,741 |
+| vision                                                 |          3 |        405 |        211 |         80 |        696 |
++--------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++--------------------------------------------------------+--------------------+------------+------------+------------+------------+
+| filename                                               | language           | code       | comment    | blank      | total      |
++--------------------------------------------------------+--------------------+------------+------------+------------+------------+
+| /Users/bbenziger/djr3x/.claude/settings.json           | JSON with Comments |         23 |          0 |          0 |         23 |
+| /Users/bbenziger/djr3x/.claude/settings.local.json     | JSON               |        -16 |          0 |         -1 |        -17 |
+| /Users/bbenziger/djr3x/arduino/head_nano/head_nano.ino | C++                |          8 |         16 |          1 |         25 |
+| /Users/bbenziger/djr3x/audio/player.py                 | Python             |         23 |          7 |          4 |         34 |
+| /Users/bbenziger/djr3x/autonomy/__init__.py            | Python             |          2 |          1 |          3 |          6 |
+| /Users/bbenziger/djr3x/autonomy/layer.py               | Python             |        338 |         31 |         68 |        437 |
+| /Users/bbenziger/djr3x/commands/command_list.py        | Python             |         20 |         14 |          7 |         41 |
+| /Users/bbenziger/djr3x/config.py                       | Python             |         66 |         22 |          6 |         94 |
+| /Users/bbenziger/djr3x/hardware/leds.py                | Python             |          3 |          4 |          0 |          7 |
+| /Users/bbenziger/djr3x/hardware/servos.py              | Python             |         76 |         42 |         10 |        128 |
+| /Users/bbenziger/djr3x/llm/chatgpt.py                  | Python             |        217 |         23 |         11 |        251 |
+| /Users/bbenziger/djr3x/requirements.txt                | pip requirements   |         26 |          0 |          0 |         26 |
+| /Users/bbenziger/djr3x/speech/synthesizer.py           | Python             |          1 |          0 |          0 |          1 |
+| /Users/bbenziger/djr3x/speech/transcriber.py           | Python             |         46 |         31 |          3 |         80 |
+| /Users/bbenziger/djr3x/states/state_machine.py         | Python             |      1,372 |        180 |        189 |      1,741 |
+| /Users/bbenziger/djr3x/vision/camera.py                | Python             |         14 |         14 |          4 |         32 |
+| /Users/bbenziger/djr3x/vision/face_db.py               | Python             |        122 |         62 |         18 |        202 |
+| /Users/bbenziger/djr3x/vision/head_tracker.py          | Python             |        269 |        135 |         58 |        462 |
+| Total                                                  |                    |      2,610 |        582 |        381 |      3,573 |
++--------------------------------------------------------+--------------------+------------+------------+------------+------------+

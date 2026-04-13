@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS people (
     first_seen  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_seen   TIMESTAMP,
     visit_count INTEGER DEFAULT 1,
+    daily_visit_date TEXT,
+    daily_visit_count INTEGER DEFAULT 0,
     notes       TEXT
 );
 """
@@ -99,6 +101,21 @@ class FaceDB:
             self._conn.execute(_CREATE_PEOPLE)
             self._conn.execute(_CREATE_ENCODINGS)
             self._conn.execute(_CREATE_MEMORIES)
+        self._ensure_people_columns()
+
+    def _ensure_people_columns(self) -> None:
+        """Backfill newer people-table columns when upgrading an existing DB."""
+        cols = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(people)").fetchall()
+        }
+        with self._conn:
+            if "daily_visit_date" not in cols:
+                self._conn.execute("ALTER TABLE people ADD COLUMN daily_visit_date TEXT")
+            if "daily_visit_count" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE people ADD COLUMN daily_visit_count INTEGER DEFAULT 0"
+                )
 
     def _log_startup_stats(self) -> None:
         """Log people/encoding counts so we can confirm the DB persisted correctly."""
@@ -215,17 +232,33 @@ class FaceDB:
         )
         return person_id, name, distance
 
-    def update_last_seen(self, person_id: int) -> None:
-        """Stamp last_seen to now and increment visit_count."""
+    def update_last_seen(self, person_id: int) -> int:
+        """Stamp last_seen to now, increment visit_count, and return today's count."""
         with self._conn:
             self._conn.execute(
                 """UPDATE people
                    SET last_seen   = CURRENT_TIMESTAMP,
-                       visit_count = visit_count + 1
+                       visit_count = visit_count + 1,
+                       daily_visit_count = CASE
+                           WHEN daily_visit_date = date('now', 'localtime')
+                           THEN daily_visit_count + 1
+                           ELSE 1
+                       END,
+                       daily_visit_date = date('now', 'localtime')
                  WHERE id = ?""",
                 (person_id,),
             )
-        log.debug("FaceDB: updated last_seen for person id=%d", person_id)
+        row = self._conn.execute(
+            "SELECT daily_visit_count FROM people WHERE id = ?",
+            (person_id,),
+        ).fetchone()
+        daily_count = int(row["daily_visit_count"]) if row is not None else 1
+        log.debug(
+            "FaceDB: updated last_seen for person id=%d (daily_visit_count=%d)",
+            person_id,
+            daily_count,
+        )
+        return daily_count
 
     def add_encoding(self, person_id: int, encoding: np.ndarray) -> None:
         """Store an additional encoding for an existing person."""
@@ -239,7 +272,10 @@ class FaceDB:
     def get_person(self, person_id: int) -> Optional[dict]:
         """Return a dict with name, visit_count, first_seen, last_seen, or None."""
         row = self._conn.execute(
-            "SELECT name, visit_count, first_seen, last_seen FROM people WHERE id = ?",
+            """SELECT name, visit_count, first_seen, last_seen,
+                      daily_visit_date, daily_visit_count
+               FROM people
+               WHERE id = ?""",
             (person_id,),
         ).fetchone()
         if row is None:
@@ -249,7 +285,10 @@ class FaceDB:
     def list_people(self) -> list[dict]:
         """Return all known people ordered by name."""
         rows = self._conn.execute(
-            "SELECT id, name, visit_count, first_seen, last_seen FROM people ORDER BY name"
+            """SELECT id, name, visit_count, first_seen, last_seen,
+                      daily_visit_date, daily_visit_count
+               FROM people
+               ORDER BY name"""
         ).fetchall()
         return [dict(r) for r in rows]
 

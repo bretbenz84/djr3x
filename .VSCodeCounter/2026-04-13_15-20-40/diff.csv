@@ -1,0 +1,20 @@
+"filename", "language", "Python", "pip requirements", "JSON with Comments", "C++", "JSON", "comment", "blank", "total"
+"/Users/bbenziger/djr3x/.claude/settings.json", "JSON with Comments", 0, 0, 23, 0, 0, 0, 0, 23
+"/Users/bbenziger/djr3x/.claude/settings.local.json", "JSON", 0, 0, 0, 0, -16, 0, -1, -17
+"/Users/bbenziger/djr3x/arduino/head_nano/head_nano.ino", "C++", 0, 0, 0, 8, 0, 16, 1, 25
+"/Users/bbenziger/djr3x/audio/player.py", "Python", 23, 0, 0, 0, 0, 7, 4, 34
+"/Users/bbenziger/djr3x/autonomy/__init__.py", "Python", 2, 0, 0, 0, 0, 1, 3, 6
+"/Users/bbenziger/djr3x/autonomy/layer.py", "Python", 338, 0, 0, 0, 0, 31, 68, 437
+"/Users/bbenziger/djr3x/commands/command_list.py", "Python", 20, 0, 0, 0, 0, 14, 7, 41
+"/Users/bbenziger/djr3x/config.py", "Python", 66, 0, 0, 0, 0, 22, 6, 94
+"/Users/bbenziger/djr3x/hardware/leds.py", "Python", 3, 0, 0, 0, 0, 4, 0, 7
+"/Users/bbenziger/djr3x/hardware/servos.py", "Python", 76, 0, 0, 0, 0, 42, 10, 128
+"/Users/bbenziger/djr3x/llm/chatgpt.py", "Python", 217, 0, 0, 0, 0, 23, 11, 251
+"/Users/bbenziger/djr3x/requirements.txt", "pip requirements", 0, 26, 0, 0, 0, 0, 0, 26
+"/Users/bbenziger/djr3x/speech/synthesizer.py", "Python", 1, 0, 0, 0, 0, 0, 0, 1
+"/Users/bbenziger/djr3x/speech/transcriber.py", "Python", 46, 0, 0, 0, 0, 31, 3, 80
+"/Users/bbenziger/djr3x/states/state_machine.py", "Python", 1372, 0, 0, 0, 0, 180, 189, 1741
+"/Users/bbenziger/djr3x/vision/camera.py", "Python", 14, 0, 0, 0, 0, 14, 4, 32
+"/Users/bbenziger/djr3x/vision/face_db.py", "Python", 122, 0, 0, 0, 0, 62, 18, 202
+"/Users/bbenziger/djr3x/vision/head_tracker.py", "Python", 269, 0, 0, 0, 0, 135, 58, 462
+"Total", "-", 2569, 26, 23, 8, -16, 582, 381, 3573
