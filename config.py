@@ -444,6 +444,14 @@ AUTONOMY_HESITATION_CHANCE: float = float(_optional("AUTONOMY_HESITATION_CHANCE"
 AUTONOMY_SELF_CORRECTION_CHANCE: float = float(_optional("AUTONOMY_SELF_CORRECTION_CHANCE", "0.08"))
 AUTONOMY_FOLLOWUP_CHANCE: float = float(_optional("AUTONOMY_FOLLOWUP_CHANCE", "0.16"))
 
+# Chatty mode curiosity — occasional head-turn scene inspection during idle
+# atmosphere clips.
+CHATTY_CURIOSITY_CHANCE: float = float(_optional("CHATTY_CURIOSITY_CHANCE", "0.28"))
+CHATTY_CURIOSITY_COOLDOWN_SECONDS: float = float(
+    _optional("CHATTY_CURIOSITY_COOLDOWN_SECONDS", "150.0")
+)
+CHATTY_CURIOSITY_SETTLE_SECS: float = float(_optional("CHATTY_CURIOSITY_SETTLE_SECS", "1.0"))
+
 # ---------------------------------------------------------------------------
 # Vision — webcam capture
 # ---------------------------------------------------------------------------

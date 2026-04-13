@@ -662,6 +662,110 @@ class ChatGPTClient:
             log.exception("analyze_i_spy_scene: failed")
             return None
 
+    def analyze_chatty_scene(self, image: str) -> dict | None:
+        """Return a detailed scene description and a short curious Rex reaction."""
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Analyze this scene for a curious droid scanning the room. "
+                            "Return JSON with keys: scene_description and interesting_details. "
+                            "scene_description must be a detailed 3-5 sentence description of what is visible, "
+                            "covering layout, objects, decor, colors, lighting, and any obvious people, pets, "
+                            "or activity if present. interesting_details must be an array of 2 to 4 short, "
+                            "specific details worth commenting on. Be factual and concrete."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Describe everything visible and call out a few interesting details.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image}",
+                                    "detail": "low",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=400,
+                temperature=0.2,
+            )
+            result = json.loads(response.choices[0].message.content)
+        except Exception:
+            log.exception("analyze_chatty_scene: description step failed")
+            return None
+
+        description = str(result.get("scene_description") or "").strip()
+        details = result.get("interesting_details")
+        if not isinstance(details, list):
+            details = []
+        details = [str(item).strip() for item in details if str(item).strip()]
+        if not description:
+            log.warning("analyze_chatty_scene: empty scene description")
+            return None
+
+        reaction = self.generate_chatty_scene_reaction(description, details)
+        if not reaction:
+            return None
+        return {
+            "scene_description": description,
+            "interesting_details": details,
+            "reaction": reaction,
+        }
+
+    def generate_chatty_scene_reaction(
+        self, scene_description: str, interesting_details: list[str]
+    ) -> str:
+        """Turn a scene description into a short curious in-character line."""
+        details_text = "\n".join(f"- {detail}" for detail in interesting_details) or "- No standout details extracted."
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are DJ R-3X ('Rex'), the droid DJ at Oga's Cantina. "
+                            "React to the scene in 1 or 2 short sentences MAX. "
+                            "This mode should feel curious, playful, and genuinely interested in the world. "
+                            "A light roast is okay, but wonder and fascination should lead. "
+                            "Mention one or two specific visible details. "
+                            "Do not sound like a dry narrator. "
+                            "Do not mention cameras, photos, images, or analysis. "
+                            "No asterisks. No written sound effects."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Scene description:\n{scene_description}\n\n"
+                            f"Interesting details:\n{details_text}"
+                        ),
+                    },
+                ],
+                max_tokens=80,
+                temperature=1.0,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception:
+            log.exception("generate_chatty_scene_reaction: failed")
+            if interesting_details:
+                detail = interesting_details[0].rstrip(".")
+                return (
+                    f"Huh. {detail}. This room keeps giving me new material, and frankly I respect the commitment."
+                )
+            return ""
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

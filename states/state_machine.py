@@ -167,6 +167,12 @@ _IDLE_CLIPS: list[str] = [
     "Astromech Joke.mp3",
 ]
 
+_CHATTY_CURIOSITY_LINES_FALLBACK: tuple[str, ...] = (
+    "I took a look around and now I have questions. Mostly about everyone's decorating choices.",
+    "This room is giving me new visual material, and some of it is deeply suspicious.",
+    "I keep scanning the room and somehow it gets more interesting instead of less. Very rude.",
+)
+
 _PLAN_QUESTION_WEEKDAY: tuple[str, ...] = (
     "{name}, what are you doing today besides wandering over here like a lost tourist on Batuu?",
     "All right, {name}, what's on today's agenda? Try to make it sound less tragic than it probably is.",
@@ -381,6 +387,7 @@ class StateMachine:
         # re-enabled automatically the next time the wake word fires.
         # Clips only play when BOTH this AND _chatty_mode are True.
         self._idle_clips_enabled: bool = True
+        self._last_chatty_curiosity_at: float = 0.0
 
         # Tracks the person_id of the last face-recognised visitor so that a
         # "call me X" command can update their name without a second camera scan.
@@ -798,6 +805,21 @@ class StateMachine:
                 self._leds._send_head(config.LED_CMD_SPEAK_STOP)
 
             # Handle wake word or face-appear that arrived during clip playback.
+            if self._wake_event.is_set():
+                self._wake_event.clear()
+                self._transition_to(
+                    State.SHUTDOWN if self._shutdown_event.is_set() else State.ACTIVE
+                )
+                return
+            if self._face_wake_event.is_set():
+                self._face_wake_event.clear()
+                self._run_face_triggered_greeting()
+                if self._state != State.IDLE:
+                    return
+
+            self._maybe_run_chatty_curiosity()
+            if self._state != State.IDLE:
+                return
             if self._wake_event.is_set():
                 self._wake_event.clear()
                 self._transition_to(
@@ -3675,6 +3697,135 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
         return None
+
+    # ------------------------------------------------------------------
+    # Chatty curiosity
+    # ------------------------------------------------------------------
+
+    def _maybe_run_chatty_curiosity(self) -> None:
+        """Occasionally inspect the room during chatty idle playback."""
+        if (
+            not self._chatty_mode
+            or not self._idle_clips_enabled
+            or self._state != State.IDLE
+            or self._shutdown_event.is_set()
+            or not self._camera.is_available()
+        ):
+            return
+
+        now = time.monotonic()
+        if now - self._last_chatty_curiosity_at < config.CHATTY_CURIOSITY_COOLDOWN_SECONDS:
+            return
+        if random.random() >= config.CHATTY_CURIOSITY_CHANCE:
+            return
+
+        self._last_chatty_curiosity_at = now
+        self._run_chatty_curiosity_moment()
+
+    def _run_chatty_curiosity_moment(self) -> None:
+        """Turn toward the room, capture one frame, and react briefly."""
+        log.info("Chatty curiosity: starting environment scan")
+        restore = None
+        tracker_paused = False
+        try:
+            if self._head_tracker is not None:
+                self._head_tracker.pause("chatty curiosity")
+                tracker_paused = True
+
+            restore = self._prepare_chatty_curiosity_pose()
+            frame = self._camera.capture_frame()
+            if not frame:
+                log.warning("Chatty curiosity: camera capture returned no frame")
+                return
+
+            scene = self._llm.analyze_chatty_scene(frame)
+            if not scene:
+                log.warning("Chatty curiosity: vision analysis returned no result")
+                return
+
+            description = str(scene.get("scene_description") or "").strip()
+            details = scene.get("interesting_details") or []
+            reaction = str(scene.get("reaction") or "").strip()
+            if description:
+                log.info("Chatty curiosity saw: %s", description)
+            if details:
+                log.info("Chatty curiosity details: %s", details)
+
+            if not reaction:
+                reaction = _pick_no_repeat(_CHATTY_CURIOSITY_LINES_FALLBACK, "chatty_curiosity_fallback")
+            if self._shutdown_event.is_set() or self._state != State.IDLE:
+                return
+
+            self._apply_active_led_theme()
+            self._speak_simple(reaction, emotion="neutral")
+            self._player.wait_for_speech()
+        except Exception:
+            log.exception("Chatty curiosity: unexpected failure")
+        finally:
+            self._restore_servo_pose(restore)
+            if self._head_tracker is not None and tracker_paused:
+                self._head_tracker.resume("chatty curiosity done")
+            if self._state == State.IDLE:
+                self._apply_idle_led_theme()
+
+    def _prepare_chatty_curiosity_pose(self) -> dict[int, int] | None:
+        """Turn to a plausible room-scanning pose before a chatty vision capture."""
+        if self._servos is None:
+            time.sleep(config.CHATTY_CURIOSITY_SETTLE_SECS)
+            return None
+
+        pan_cfg = config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]
+        lift_cfg = config.SERVO_CHANNELS[config.SERVO_HEAD_LIFT]
+        tilt_cfg = config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]
+        restore = {
+            config.SERVO_VISOR: config.SERVO_CHANNELS[config.SERVO_VISOR]["neutral"],
+            config.SERVO_HEAD_PAN: pan_cfg["neutral"],
+            config.SERVO_HEAD_LIFT: lift_cfg["neutral"],
+            config.SERVO_HEAD_TILT: config.IDLE_HEAD_TILT_REST,
+        }
+
+        def _bounded(channel_cfg: dict, target: int) -> int:
+            return max(channel_cfg["min"], min(channel_cfg["max"], target))
+
+        poses = (
+            {
+                config.SERVO_HEAD_PAN: _bounded(pan_cfg, pan_cfg["neutral"] - 1100),
+                config.SERVO_HEAD_LIFT: _bounded(lift_cfg, lift_cfg["neutral"] + 180),
+                config.SERVO_HEAD_TILT: _bounded(tilt_cfg, tilt_cfg["neutral"] + 140),
+            },
+            {
+                config.SERVO_HEAD_PAN: _bounded(pan_cfg, pan_cfg["neutral"] + 1100),
+                config.SERVO_HEAD_LIFT: _bounded(lift_cfg, lift_cfg["neutral"] + 180),
+                config.SERVO_HEAD_TILT: _bounded(tilt_cfg, tilt_cfg["neutral"] + 140),
+            },
+            {
+                config.SERVO_HEAD_PAN: _bounded(pan_cfg, pan_cfg["neutral"] - 650),
+                config.SERVO_HEAD_LIFT: _bounded(lift_cfg, lift_cfg["neutral"] - 160),
+                config.SERVO_HEAD_TILT: _bounded(tilt_cfg, tilt_cfg["neutral"] - 80),
+            },
+            {
+                config.SERVO_HEAD_PAN: _bounded(pan_cfg, pan_cfg["neutral"] + 650),
+                config.SERVO_HEAD_LIFT: _bounded(lift_cfg, lift_cfg["neutral"] - 160),
+                config.SERVO_HEAD_TILT: _bounded(tilt_cfg, tilt_cfg["neutral"] - 80),
+            },
+            {
+                config.SERVO_HEAD_PAN: pan_cfg["neutral"],
+                config.SERVO_HEAD_LIFT: _bounded(lift_cfg, lift_cfg["neutral"] - 220),
+                config.SERVO_HEAD_TILT: _bounded(tilt_cfg, tilt_cfg["neutral"] + 220),
+            },
+        )
+        target = random.choice(poses)
+
+        self._servos.set_channel_speed(config.SERVO_VISOR, config.SERVO_DEFAULT_SPEED)
+        self._servos.set_channel_speed(config.SERVO_HEAD_PAN, config.SERVO_DEFAULT_SPEED)
+        self._servos.set_channel_speed(config.SERVO_HEAD_LIFT, config.SERVO_DEFAULT_SPEED)
+        self._servos.set_channel_speed(config.SERVO_HEAD_TILT, config.SERVO_DEFAULT_SPEED)
+        self._servos.set_position(config.SERVO_VISOR, config.CAMERA_POSE_VISOR)
+        self._servos.set_position(config.SERVO_HEAD_PAN, target[config.SERVO_HEAD_PAN])
+        self._servos.set_position(config.SERVO_HEAD_LIFT, target[config.SERVO_HEAD_LIFT])
+        self._servos.set_position(config.SERVO_HEAD_TILT, target[config.SERVO_HEAD_TILT])
+        time.sleep(config.CHATTY_CURIOSITY_SETTLE_SECS)
+        return restore
 
     # ------------------------------------------------------------------
     # Camera pose helpers

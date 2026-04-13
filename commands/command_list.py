@@ -1032,11 +1032,17 @@ COMMANDS: list[Command] = [
 
     Command(
         phrases=[
+            "chatty mode",
+            "chatty mode on",
             "activate chatty mode",
+            "enable chatty mode",
             "activate demo mode",
+            "demo mode",
+            "demo mode on",
             "start chatty mode",
             "turn on chatty mode",
             "enable demo mode",
+            "be chatty",
         ],
         response=[
             (
@@ -1070,11 +1076,13 @@ COMMANDS: list[Command] = [
 
     Command(
         phrases=[
+            "chatty mode off",
             "deactivate chatty mode",
             "deactivate demo mode",
             "stop chatty mode",
             "turn off chatty mode",
             "disable demo mode",
+            "demo mode off",
         ],
         response=[
             (
