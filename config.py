@@ -227,6 +227,16 @@ MIC_CHANNELS          = int(_optional("MIC_CHANNELS", "2"))  # physical mic chan
 AUDIO_OUTPUT_CHANNELS = 2     # speaker output channels (stereo — ReSpeaker Lite requires 2)
 AUDIO_CHUNK_SIZE   = 1024    # frames per buffer read
 AUDIO_FORMAT       = 8       # pyaudio.paInt16 == 8 (avoids importing pyaudio here)
+AUDIO_OUTPUT_BLOCKSIZE = int(
+    _optional(
+        "AUDIO_OUTPUT_BLOCKSIZE",
+        "0" if PLATFORM == "macos_silicon" else str(AUDIO_CHUNK_SIZE),
+    )
+)
+AUDIO_OUTPUT_LATENCY = _optional(
+    "AUDIO_OUTPUT_LATENCY",
+    "high" if PLATFORM == "macos_silicon" else "low",
+)
 
 AUDIO_INPUT_DEVICE  = _optional_int("AUDIO_INPUT_DEVICE")   # None → system default
 AUDIO_OUTPUT_DEVICE = _optional_int("AUDIO_OUTPUT_DEVICE")  # None → system default

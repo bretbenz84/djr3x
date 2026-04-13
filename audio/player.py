@@ -40,6 +40,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+import io
+import subprocess
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +95,8 @@ class AudioPlayer:
         # reach the output device.  Used by LEDController.start_mouth() so the
         # mouth doesn't pre-glow before sound comes out of the speakers.
         self._audio_started: threading.Event = threading.Event()
+        self._speech_status_logged: bool = False
+        self._music_status_logged: bool = False
 
         # --- speech stream state ---
         self._speech_queue: queue.SimpleQueue[np.ndarray | _EndMarker] = (
@@ -352,7 +356,8 @@ class AudioPlayer:
                 samplerate=SPEECH_SAMPLE_RATE,
                 channels=config.AUDIO_OUTPUT_CHANNELS,
                 dtype="int16",
-                blocksize=config.AUDIO_CHUNK_SIZE,
+                blocksize=config.AUDIO_OUTPUT_BLOCKSIZE,
+                latency=config.AUDIO_OUTPUT_LATENCY,
                 callback=self._speech_callback,
                 finished_callback=finished.set,
             ):
@@ -360,6 +365,7 @@ class AudioPlayer:
 
             # Stream is fully closed — zero out RMS so LEDs go dark.
             self._rms = 0.0
+            self._speech_status_logged = False
 
     # ------------------------------------------------------------------
     # Internal — speech callback (sounddevice audio thread)
@@ -372,6 +378,10 @@ class AudioPlayer:
         _time,                  # CffiData timestamp — unused
         _status: sd.CallbackFlags,
     ) -> None:
+        if _status and not self._speech_status_logged:
+            log.warning("AudioPlayer speech callback status: %s", _status)
+            self._speech_status_logged = True
+
         # Build mono scratch buffer; broadcast to all output channels at the end.
         mono = np.zeros(frames, dtype=np.int16)
         filled = 0
@@ -467,6 +477,9 @@ class AudioPlayer:
 
             def _callback(outdata: np.ndarray, frames: int, _t, _s) -> None:
                 nonlocal pos
+                if _s and not self._music_status_logged:
+                    log.warning("AudioPlayer music callback status: %s", _s)
+                    self._music_status_logged = True
                 if self._music_stop.is_set():
                     outdata[:] = 0.0
                     raise sd.CallbackStop()
@@ -485,10 +498,14 @@ class AudioPlayer:
                 samplerate=sr,
                 channels=channels,
                 dtype="float32",
+                blocksize=config.AUDIO_OUTPUT_BLOCKSIZE,
+                latency=config.AUDIO_OUTPUT_LATENCY,
                 callback=_callback,
                 finished_callback=finished.set,
             ):
                 finished.wait()
+
+            self._music_status_logged = False
 
             if not loop or self._music_stop.is_set():
                 break
@@ -512,11 +529,14 @@ def _load_audio_file(
     suffix = path.suffix.lower()
 
     if suffix == ".mp3":
-        import subprocess
-        import io
+        ffmpeg_cmd = [
+            "ffmpeg", "-loglevel", "error", "-i", str(path),
+        ]
+        if target_sr is not None:
+            ffmpeg_cmd.extend(["-ar", str(target_sr)])
+        ffmpeg_cmd.extend(["-f", "wav", "pipe:1"])
         result = subprocess.run(
-            ["ffmpeg", "-loglevel", "error", "-i", str(path),
-             "-ar", str(config.SPEECH_SAMPLE_RATE), "-f", "wav", "pipe:1"],
+            ffmpeg_cmd,
             capture_output=True,
             check=True,
         )
