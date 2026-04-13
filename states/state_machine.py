@@ -2132,23 +2132,22 @@ class StateMachine:
 
     def _run_post_response_linger_phase(self) -> str | None:
         """Try a few extra interactions before dropping from ACTIVE to IDLE."""
-        deadline = time.monotonic() + config.POST_RESPONSE_LINGER_MAX_SECONDS
+        silence_budget = max(0.0, config.POST_RESPONSE_LINGER_MAX_SECONDS)
         max_attempts = max(1, config.POST_RESPONSE_LINGER_ATTEMPTS)
 
         for attempt in range(1, max_attempts + 1):
             if (
                 self._state != State.ACTIVE
                 or self._shutdown_event.is_set()
-                or time.monotonic() >= deadline
+                or silence_budget <= 0.0
             ):
                 break
 
-            remaining = deadline - time.monotonic()
             log.info(
                 "Linger phase: attempt %d/%d (remaining %.1f s)",
                 attempt,
                 max_attempts,
-                max(0.0, remaining),
+                silence_budget,
             )
 
             used_curiosity = False
@@ -2167,12 +2166,13 @@ class StateMachine:
                 self._speak_simple(line, emotion="neutral")
                 self._player.wait_for_speech()
 
-            remaining = deadline - time.monotonic()
-            listen_timeout = min(config.POST_RESPONSE_LINGER_LISTEN_TIMEOUT, max(0.0, remaining))
+            listen_timeout = min(config.POST_RESPONSE_LINGER_LISTEN_TIMEOUT, silence_budget)
             if listen_timeout <= 0.0:
                 break
 
+            listen_started = time.monotonic()
             answer = self._listen_for_prompt_answer(listen_timeout)
+            silence_budget = max(0.0, silence_budget - (time.monotonic() - listen_started))
             if answer:
                 log.info("Linger phase: heard response %r", answer)
                 return answer
