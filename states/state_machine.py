@@ -2171,12 +2171,10 @@ class StateMachine:
             if question["text"] not in excluded
         ]
         if not candidates:
-            candidates = [
-                question
-                for question in _CURIOUS_FOLLOWUP_QUESTIONS
-                if question["text"] not in self._curious_questions_asked_this_session
-            ] or list(_CURIOUS_FOLLOWUP_QUESTIONS)
-        if not candidates:
+            log.info(
+                "Curious follow-up: no unanswered questions remain for person_id=%d",
+                person_id,
+            )
             return None
 
         picked = random.choice(candidates)
@@ -2431,7 +2429,7 @@ class StateMachine:
     def _run_post_response_linger_phase(self) -> str | None:
         """Try a few extra interactions before dropping from ACTIVE to IDLE."""
         silence_budget = max(0.0, config.POST_RESPONSE_LINGER_MAX_SECONDS)
-        max_attempts = max(1, config.POST_RESPONSE_LINGER_ATTEMPTS)
+        max_attempts = min(4, max(1, config.POST_RESPONSE_LINGER_ATTEMPTS))
         person_id = self._last_known_person_id
         deep_attempts_remaining = min(
             max_attempts,
