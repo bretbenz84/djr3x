@@ -450,12 +450,45 @@ class StateMachine:
 
     def start(self) -> None:
         """Warmup all subsystems. Call once before run()."""
+        filler_line = random.choice([
+            "Uh... hang on... startup routines are still rattling around in here...",
+            "Um... almost ready... just waking up the rest of my circuits...",
+            "Okay... okay... one second... systems are still coming online...",
+            "Hmmm... give me a second here... getting everything spun up...",
+        ])
+        startup_error: list[Exception | None] = [None]
+
+        def _speak_startup_filler() -> None:
+            servo_stop = None
+            try:
+                servo_stop = self._begin_speech(emotion="neutral")
+                self._synthesizer.speak(filler_line)
+            except Exception:
+                log.exception("StateMachine: startup filler speech failed")
+            finally:
+                if servo_stop is not None:
+                    self._end_speech(servo_stop)
+                else:
+                    self._wake_word.suppressed = False
+
+        filler_thread = threading.Thread(
+            target=_speak_startup_filler,
+            daemon=True,
+            name="djr3x-startup-filler",
+        )
+        filler_thread.start()
+
+        # Give the filler line a brief head start so the user hears speech
+        # before the expensive warmup path starts hammering models and I/O.
+        filler_started = self._player.wait_for_audio_start(timeout=1.5)
+        if not filler_started:
+            log.info("StateMachine: startup filler audio did not begin before warmup")
+
         log.info("StateMachine: warming up subsystems …")
 
         self._transcriber.warmup()   # no-op for Whisper; kept for interface consistency
         self._transcriber.calibrate_noise_floor()
         self._llm.warmup()           # pre-loads Ollama model into GPU memory (no-op for cloud)
-        startup_error: list[Exception | None] = [None]
 
         def _finish_startup() -> None:
             try:
@@ -485,25 +518,8 @@ class StateMachine:
         )
         startup_thread.start()
 
-        filler_line = random.choice([
-            "Uh... hang on... startup routines are still rattling around in here...",
-            "Um... almost ready... just waking up the rest of my circuits...",
-            "Okay... okay... one second... systems are still coming online...",
-            "Hmmm... give me a second here... getting everything spun up...",
-        ])
-        servo_stop = None
-        try:
-            servo_stop = self._begin_speech(emotion="neutral")
-            self._synthesizer.speak(filler_line)
-        except Exception:
-            log.exception("StateMachine: startup filler speech failed")
-        finally:
-            if servo_stop is not None:
-                self._end_speech(servo_stop)
-            else:
-                self._wake_word.suppressed = False
-
         startup_thread.join()
+        filler_thread.join()
         if startup_error[0] is not None:
             raise startup_error[0]
 
