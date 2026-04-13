@@ -142,6 +142,22 @@ _GOODBYE_PHRASES: list[str] = [
     "Ok fine, I get it — I'm too much for you. Most beings are, honestly.",
 ]
 
+_LINGER_PROMPT_LINES: tuple[str, ...] = (
+    "You just gonna leave me hanging like that, lifeform?",
+    "Wow. Silent treatment already? I haven't even hit my most annoying material yet.",
+    "You there, or am I performing for decorative furniture now?",
+    "I can keep this going, but only if you contribute literally anything.",
+    "Oh, so we're doing the whole dramatic silence thing. Bold choice.",
+)
+
+_LINGER_FINAL_LINES: tuple[str, ...] = (
+    "Wow, didn't know I was that boring. Going back to sleep.",
+    "Guess I'm boring you. Humans really are easy to lose.",
+    "All right, later skater. I'll be here rotting in peace.",
+    "Fine. I'll stop talking to the furniture.",
+    "Nothing? Incredible. I'm ending this before the room files a complaint.",
+)
+
 _SHUTDOWN_PHRASES: list[str] = [
     "Shutting down — and honestly? I've had worse audiences. Not many, but some.",
     "Going offline. Try not to let the cantina fall apart without me. You will, but try.",
@@ -1127,12 +1143,17 @@ class StateMachine:
                         )
                         continue
                     log.info(
-                        "Follow-up silence timeout (%.0f s) — returning to IDLE",
+                        "Follow-up silence timeout (%.0f s) — entering linger phase",
                         config.ACTIVE_TIMEOUT_SECONDS,
                     )
-                    self._play_return_to_idle_chime()
-                    self._transition_to(State.IDLE)
-                    return
+                    linger_text = self._run_post_response_linger_phase()
+                    if linger_text:
+                        text = linger_text
+                        log.info("Linger phase produced response: %r", text)
+                    else:
+                        self._play_return_to_idle_chime()
+                        self._transition_to(State.IDLE)
+                        return
 
                 if (
                     self._post_greeting_person_id is not None
@@ -2092,6 +2113,59 @@ class StateMachine:
         finally:
             self._wake_word.resume()
             self._apply_active_led_theme()
+
+    def _run_post_response_linger_phase(self) -> str | None:
+        """Try a few extra interactions before dropping from ACTIVE to IDLE."""
+        deadline = time.monotonic() + config.POST_RESPONSE_LINGER_MAX_SECONDS
+        max_attempts = max(1, config.POST_RESPONSE_LINGER_ATTEMPTS)
+
+        for attempt in range(1, max_attempts + 1):
+            if (
+                self._state != State.ACTIVE
+                or self._shutdown_event.is_set()
+                or time.monotonic() >= deadline
+            ):
+                break
+
+            remaining = deadline - time.monotonic()
+            log.info(
+                "Linger phase: attempt %d/%d (remaining %.1f s)",
+                attempt,
+                max_attempts,
+                max(0.0, remaining),
+            )
+
+            used_curiosity = False
+            if (
+                attempt > 1
+                and self._camera.is_available()
+                and random.random() < config.POST_RESPONSE_LINGER_CURIOSITY_CHANCE
+            ):
+                used_curiosity = self._run_environment_curiosity_comment(
+                    reason="linger phase",
+                    restore_idle_theme=False,
+                )
+
+            if not used_curiosity:
+                line = _pick_no_repeat(_LINGER_PROMPT_LINES, "linger_prompt")
+                self._speak_simple(line, emotion="neutral")
+                self._player.wait_for_speech()
+
+            remaining = deadline - time.monotonic()
+            listen_timeout = min(config.POST_RESPONSE_LINGER_LISTEN_TIMEOUT, max(0.0, remaining))
+            if listen_timeout <= 0.0:
+                break
+
+            answer = self._listen_for_prompt_answer(listen_timeout)
+            if answer:
+                log.info("Linger phase: heard response %r", answer)
+                return answer
+
+        final_line = _pick_no_repeat(_LINGER_FINAL_LINES, "linger_final")
+        log.info("Linger phase exhausted — final line: %r", final_line)
+        self._speak_simple(final_line, emotion="neutral")
+        self._player.wait_for_speech()
+        return None
 
     def _store_plan_memory(self, person_id: int, name: str, answer: str) -> None:
         """Store a post-greeting plan/activity answer as a memory row."""
@@ -3724,49 +3798,67 @@ class StateMachine:
 
     def _run_chatty_curiosity_moment(self) -> None:
         """Turn toward the room, capture one frame, and react briefly."""
-        log.info("Chatty curiosity: starting environment scan")
+        self._run_environment_curiosity_comment(
+            reason="chatty curiosity",
+            restore_idle_theme=True,
+        )
+
+    def _run_environment_curiosity_comment(
+        self,
+        *,
+        reason: str,
+        restore_idle_theme: bool,
+    ) -> bool:
+        """Capture the room and speak a short curious reaction."""
+        log.info("%s: starting environment scan", reason)
         restore = None
         tracker_paused = False
         try:
             if self._head_tracker is not None:
-                self._head_tracker.pause("chatty curiosity")
+                self._head_tracker.pause(reason)
                 tracker_paused = True
 
             restore = self._prepare_chatty_curiosity_pose()
             frame = self._camera.capture_frame()
             if not frame:
-                log.warning("Chatty curiosity: camera capture returned no frame")
-                return
+                log.warning("%s: camera capture returned no frame", reason)
+                return False
 
             scene = self._llm.analyze_chatty_scene(frame)
             if not scene:
-                log.warning("Chatty curiosity: vision analysis returned no result")
-                return
+                log.warning("%s: vision analysis returned no result", reason)
+                return False
 
             description = str(scene.get("scene_description") or "").strip()
             details = scene.get("interesting_details") or []
             reaction = str(scene.get("reaction") or "").strip()
             if description:
-                log.info("Chatty curiosity saw: %s", description)
+                log.info("%s saw: %s", reason, description)
             if details:
-                log.info("Chatty curiosity details: %s", details)
+                log.info("%s details: %s", reason, details)
 
             if not reaction:
-                reaction = _pick_no_repeat(_CHATTY_CURIOSITY_LINES_FALLBACK, "chatty_curiosity_fallback")
-            if self._shutdown_event.is_set() or self._state != State.IDLE:
-                return
+                reaction = _pick_no_repeat(
+                    _CHATTY_CURIOSITY_LINES_FALLBACK, "chatty_curiosity_fallback"
+                )
+            if self._shutdown_event.is_set() or self._state not in (State.IDLE, State.ACTIVE):
+                return False
 
             self._apply_active_led_theme()
             self._speak_simple(reaction, emotion="neutral")
             self._player.wait_for_speech()
+            return True
         except Exception:
-            log.exception("Chatty curiosity: unexpected failure")
+            log.exception("%s: unexpected failure", reason)
+            return False
         finally:
             self._restore_servo_pose(restore)
             if self._head_tracker is not None and tracker_paused:
-                self._head_tracker.resume("chatty curiosity done")
-            if self._state == State.IDLE:
+                self._head_tracker.resume(f"{reason} done")
+            if restore_idle_theme and self._state == State.IDLE:
                 self._apply_idle_led_theme()
+            elif self._state == State.ACTIVE:
+                self._apply_active_led_theme()
 
     def _prepare_chatty_curiosity_pose(self) -> dict[int, int] | None:
         """Turn to a plausible room-scanning pose before a chatty vision capture."""
