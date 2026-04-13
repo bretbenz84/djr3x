@@ -220,6 +220,40 @@ _PLAN_REPLY_LINES: tuple[str, ...] = (
     "So we're doing {summary}. Is this for fun, survival, or a terrible promise you made earlier?",
 )
 
+_PROMPT_ACK_PHILOSOPHY_LINES: tuple[str, ...] = (
+    "Interesting take.",
+    "Bold answer. I almost respect it.",
+    "Fascinating. I was hoping for something less human.",
+    "I will file that under: suspiciously sincere.",
+    "Huh. That is a choice.",
+)
+
+_PROMPT_ACK_PREFERENCE_LINES: tuple[str, ...] = (
+    "Noted, organic.",
+    "Interesting preference. Your taste remains... active.",
+    "Bold choice. Your species stays committed to the bit.",
+    "Filed. I am judging you gently and continuously.",
+    "Huh. You really went with that.",
+)
+
+_PROMPT_ACK_PLAN_LINES: tuple[str, ...] = (
+    "Noted. Your schedule remains alarmingly organic.",
+    "Interesting. I will log that little adventure.",
+    "Bold plan. Try to survive your own itinerary.",
+    "Filed. Your day continues to concern me in small ways.",
+    "Huh. That sounds like a very committed lifeform decision.",
+)
+
+_PROMPT_ACK_GENERAL_LINES: tuple[str, ...] = (
+    "Interesting take.",
+    "Noted, organic.",
+    "Huh. That is a choice.",
+    "Bold answer. I almost respect it.",
+    "Filed. Continue being weird.",
+)
+
+_HANDLED_PROMPT_RESPONSE = "__handled_prompt_response__"
+
 _CURIOUS_FOLLOWUP_QUESTIONS: tuple[dict[str, str], ...] = (
     {
         "key": "purpose_in_life",
@@ -1246,6 +1280,10 @@ class StateMachine:
                     )
                     linger_text = self._run_post_response_linger_phase()
                     if linger_text:
+                        if linger_text == _HANDLED_PROMPT_RESPONSE:
+                            after_response = True
+                            self._apply_active_led_theme()
+                            continue
                         text = linger_text
                         log.info("Linger phase produced response: %r", text)
                     else:
@@ -2175,6 +2213,59 @@ class StateMachine:
         except Exception:
             log.exception("Curious follow-up: failed storing exchange")
 
+    @staticmethod
+    def _pick_prompt_acknowledgement(
+        *,
+        category: str = "",
+        key: str = "",
+        tags: str = "",
+    ) -> str:
+        """Return a short canned acknowledgement for prompted answers."""
+        category_l = category.lower().strip()
+        key_l = key.lower().strip()
+        tags_l = tags.lower().strip()
+        haystack = " ".join(part for part in (category_l, key_l, tags_l) if part)
+
+        if any(
+            token in haystack
+            for token in ("belief", "philosophy", "purpose", "value", "afterlife", "dream")
+        ):
+            pool = _PROMPT_ACK_PHILOSOPHY_LINES
+            rotation_key = "prompt_ack_philosophy"
+        elif any(
+            token in haystack
+            for token in ("preference", "favorite", "music", "movie", "food", "hobby", "pet", "drink")
+        ):
+            pool = _PROMPT_ACK_PREFERENCE_LINES
+            rotation_key = "prompt_ack_preference"
+        elif any(
+            token in haystack
+            for token in ("plan", "event", "today_plan", "weekend_plan", "activity")
+        ):
+            pool = _PROMPT_ACK_PLAN_LINES
+            rotation_key = "prompt_ack_plan"
+        else:
+            pool = _PROMPT_ACK_GENERAL_LINES
+            rotation_key = "prompt_ack_general"
+        return _pick_no_repeat(pool, rotation_key)
+
+    def _speak_prompt_acknowledgement(
+        self,
+        *,
+        category: str = "",
+        key: str = "",
+        tags: str = "",
+    ) -> None:
+        """Speak a short canned acknowledgement for a prompted answer."""
+        line = self._pick_prompt_acknowledgement(category=category, key=key, tags=tags)
+        servo_stop = self._begin_speech(emotion="neutral")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("Prompt acknowledgement: TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
     def _run_post_greeting_plan_prompt(self) -> tuple[str, State | None]:
         """Ask a known person what they're doing, store the answer, and riff on it.
 
@@ -2404,11 +2495,17 @@ class StateMachine:
                 if curious_question is not None:
                     cmd = parse(answer, allow_fuzzy=False)
                     if cmd is None and person_id is not None:
+                        self._speak_prompt_acknowledgement(
+                            category="curiosity",
+                            key=curious_question.get("key", ""),
+                            tags=curious_question.get("tags", ""),
+                        )
                         self._store_curious_followup_exchange(
                             person_id,
                             curious_question,
                             answer,
                         )
+                        return _HANDLED_PROMPT_RESPONSE
                 return answer
 
         final_line = _pick_no_repeat(_LINGER_FINAL_LINES, "linger_final")
@@ -2480,7 +2577,11 @@ class StateMachine:
             return "transition", self._execute_command(cmd, answer)
 
         self._store_plan_memory(person_id, name, answer)
-        self._speak_plan_reply(answer)
+        self._speak_prompt_acknowledgement(
+            category=str(memory.get("category") or "plan"),
+            key=str(memory.get("key") or "today_plan"),
+            tags=str(memory.get("tags") or ""),
+        )
         return "answered", None
 
     def _run_memory_followup_prompt(
@@ -2520,7 +2621,11 @@ class StateMachine:
             return "transition", self._execute_command(cmd, answer)
 
         self._store_prompt_memory_response(person_id, prompt, answer)
-        self._speak_plan_reply(answer)
+        self._speak_prompt_acknowledgement(
+            category=str(memory.get("category") or ""),
+            key=str(memory.get("key") or ""),
+            tags=str(memory.get("tags") or ""),
+        )
         return "answered", None
 
     def _get_relevant_plan_memory(self, person_id: int) -> dict | None:
