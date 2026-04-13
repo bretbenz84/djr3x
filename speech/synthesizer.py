@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import shutil
 import time
 import wave
 from pathlib import Path
@@ -70,12 +71,13 @@ class Synthesizer:
             return
 
         log.info("Speaking: %s", text)
-        cached = _cache_path(text)
-        if cached.exists():
+        cached = _resolve_cache_path(text)
+        if cached is not None:
             log.debug("TTS cache hit: %s", cached.name)
             self._player.play_file(cached)
             return
 
+        cached = _cache_path(text)
         log.debug("TTS streaming from ElevenLabs: %.60s…", text)
         try:
             chunks = self._client.text_to_speech.stream(
@@ -189,9 +191,39 @@ def _cache_path(text: str) -> Path:
     return config.AUDIO_CACHE_DIR / f"{digest}.wav"
 
 
+def _legacy_cache_path(text: str) -> Path:
+    digest = hashlib.sha256(text.encode()).hexdigest()[:16]
+    return config.LEGACY_AUDIO_CACHE_DIR / f"{digest}.wav"
+
+
+def _resolve_cache_path(text: str) -> Path | None:
+    """Return the cache path to play, preferring the new cache directory.
+
+    Legacy hashed files stored directly in assets/audio/ are migrated into
+    assets/audio/cachedspeech/ the first time they are reused.
+    """
+    current = _cache_path(text)
+    if current.exists():
+        return current
+
+    legacy = _legacy_cache_path(text)
+    if not legacy.exists() or legacy == current:
+        return None
+
+    try:
+        current.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy), str(current))
+        log.debug("Migrated TTS cache %s -> %s", legacy.name, current.parent)
+        return current
+    except OSError:
+        log.warning("Failed to migrate TTS cache %s -> %s", legacy, current, exc_info=True)
+        return legacy
+
+
 def _write_wav_cache(path: Path, pcm_bytes: bytes) -> None:
     """Write raw PCM int16 mono bytes to a .wav file at SPEECH_SAMPLE_RATE."""
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(path), "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)              # int16 = 2 bytes per sample

@@ -734,7 +734,11 @@ def _should_apply_droid_effect_to_file(path: Path) -> bool:
     if not config.ENABLE_DROID_EFFECT or path.suffix.lower() != ".wav":
         return False
     try:
-        return path.resolve().parent == config.AUDIO_CACHE_DIR.resolve()
+        resolved_parent = path.resolve().parent
+        return resolved_parent in {
+            config.AUDIO_CACHE_DIR.resolve(),
+            config.LEGACY_AUDIO_CACHE_DIR.resolve(),
+        }
     except OSError:
         return False
 

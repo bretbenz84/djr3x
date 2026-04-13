@@ -16,15 +16,17 @@ from platform_utils import get_platform
 
 PROJECT_ROOT       = Path(__file__).parent.resolve()
 ASSETS_DIR         = PROJECT_ROOT / "assets"
-AUDIO_CACHE_DIR    = ASSETS_DIR / "audio"
+AUDIO_DIR          = ASSETS_DIR / "audio"
+LEGACY_AUDIO_CACHE_DIR = AUDIO_DIR
+AUDIO_CACHE_DIR    = AUDIO_DIR / "cachedspeech"
 MODELS_DIR         = ASSETS_DIR / "models"
-STARTUP_CHIME_PATH   = ASSETS_DIR / "audio" / "startup_chime.mp3"
-STARTUP_MUSIC_PATH   = ASSETS_DIR / "audio" / "light_speed.mp3"
-STARTUP_INTRO_PATH   = ASSETS_DIR / "audio" / "Roger Control.mp3"
-STARTUP_INTRO_PATH_ALT = ASSETS_DIR / "audio" / "This is your cap.mp3"
+STARTUP_CHIME_PATH   = AUDIO_DIR / "startup_chime.mp3"
+STARTUP_MUSIC_PATH   = AUDIO_DIR / "light_speed.mp3"
+STARTUP_INTRO_PATH   = AUDIO_DIR / "Roger Control.mp3"
+STARTUP_INTRO_PATH_ALT = AUDIO_DIR / "This is your cap.mp3"
 # File that persists which intro clip played last (to avoid back-to-back repeats).
 STARTUP_INTRO_LAST_PLAYED = PROJECT_ROOT / ".last_startup_intro"
-SHUTDOWN_MUSIC_PATH  = ASSETS_DIR / "audio" / "hyperdrive_down.mp3"
+SHUTDOWN_MUSIC_PATH  = AUDIO_DIR / "hyperdrive_down.mp3"
 CANTINA_BAND_PATH    = ASSETS_DIR / "music" / "Cantina Band.mp3"
 
 DANCE_SHORT_DURATION = 12.0   # seconds of dancing before the fade starts

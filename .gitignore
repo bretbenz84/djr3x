@@ -6,8 +6,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-assets/audio/*.wav
-assets/audio/*.mp3
+assets/audio/cachedspeech/
 djr3x.log*
 assets/face_db.sqlite
 assets/models/*.dat
