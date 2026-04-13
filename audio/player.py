@@ -356,8 +356,8 @@ class AudioPlayer:
                 samplerate=SPEECH_SAMPLE_RATE,
                 channels=config.AUDIO_OUTPUT_CHANNELS,
                 dtype="int16",
-                blocksize=config.AUDIO_OUTPUT_BLOCKSIZE,
-                latency=config.AUDIO_OUTPUT_LATENCY,
+                blocksize=config.SPEECH_OUTPUT_BLOCKSIZE,
+                latency=config.SPEECH_OUTPUT_LATENCY,
                 callback=self._speech_callback,
                 finished_callback=finished.set,
             ):

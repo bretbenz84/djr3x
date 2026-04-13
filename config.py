@@ -237,6 +237,10 @@ AUDIO_OUTPUT_LATENCY = _optional(
     "AUDIO_OUTPUT_LATENCY",
     "high" if PLATFORM == "macos_silicon" else "low",
 )
+SPEECH_OUTPUT_BLOCKSIZE = int(
+    _optional("SPEECH_OUTPUT_BLOCKSIZE", str(AUDIO_CHUNK_SIZE))
+)
+SPEECH_OUTPUT_LATENCY = _optional("SPEECH_OUTPUT_LATENCY", "low")
 
 AUDIO_INPUT_DEVICE  = _optional_int("AUDIO_INPUT_DEVICE")   # None → system default
 AUDIO_OUTPUT_DEVICE = _optional_int("AUDIO_OUTPUT_DEVICE")  # None → system default
