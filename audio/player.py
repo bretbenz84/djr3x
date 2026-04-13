@@ -255,21 +255,13 @@ class AudioPlayer:
         """Play the startup chime through the music output path (no mouth-LED
         RMS tracking).  Uses ffmpeg to decode the MP3 to raw PCM in memory.
         No-ops silently if the file is missing or ffmpeg is unavailable."""
-        import subprocess
-        import io
         path = Path(config.STARTUP_CHIME_PATH)
         if not path.exists():
             return
         try:
-            result = subprocess.run(
-                ["ffmpeg", "-loglevel", "error", "-i", str(path),
-                 "-ar", str(config.SPEECH_SAMPLE_RATE), "-f", "wav", "pipe:1"],
-                capture_output=True,
-                check=True,
-            )
+            data, sr = _load_audio_file(path, target_sr=None)
         except (subprocess.CalledProcessError, FileNotFoundError):
             return
-        data, sr = sf.read(io.BytesIO(result.stdout), dtype="float32", always_2d=False)
         self.stop_music()
         self._music_stop.clear()
         self._music_thread = threading.Thread(
