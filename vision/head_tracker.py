@@ -173,6 +173,7 @@ class HeadTracker:
         self._search_active: bool = False
         self._search_step_index: int = 0
         self._search_step_started_at: float = 0.0
+        self._search_step_move_duration: float = 0.0
         self._search_burst_started_at: float = 0.0
         self._search_cooldown_until: float = 0.0
 
@@ -313,6 +314,7 @@ class HeadTracker:
         self._search_active = False
         self._search_step_index = 0
         self._search_step_started_at = 0.0
+        self._search_step_move_duration = 0.0
         self._search_burst_started_at = 0.0
         self._search_cooldown_until = cooldown_until
         if was_active:
@@ -362,14 +364,36 @@ class HeadTracker:
             self._servos.set_channel_speed(_CH_TILT, speed)
             self._servos.set_position(_CH_TILT, tilt)
 
+    def _estimate_move_duration(
+        self,
+        neck: int,
+        lift: int,
+        tilt: int,
+        *,
+        speed: int,
+    ) -> float:
+        """Estimate how long the slowest search axis will take to reach target."""
+        if speed <= 0:
+            return 0.0
+        with self._state_lock:
+            neck_delta = abs(neck - self._sent_neck)
+            lift_delta = abs(lift - self._sent_lift)
+            tilt_delta = abs(tilt - self._sent_tilt)
+        # Pololu speed units are qµs per 10 ms, so:
+        # duration_seconds = delta_qµs / speed * 0.01
+        max_delta = max(neck_delta, lift_delta, tilt_delta)
+        return (max_delta / float(speed)) * 0.01
+
     def _advance_face_search(self, now: float) -> None:
         """Run one step of the deterministic face-search sweep."""
         if now < self._search_cooldown_until:
             return
 
         search_speed = int(getattr(self._cfg, "HEAD_SEARCH_SPEED", _TRACKING_SPEED))
-        step_hold = float(getattr(self._cfg, "HEAD_SEARCH_STEP_HOLD_SECONDS", "0.8"))
-        burst_seconds = float(getattr(self._cfg, "HEAD_SEARCH_BURST_SECONDS", "6.0"))
+        post_move_pause = float(
+            getattr(self._cfg, "HEAD_SEARCH_STEP_HOLD_SECONDS", "0.75")
+        )
+        burst_seconds = float(getattr(self._cfg, "HEAD_SEARCH_BURST_SECONDS", "12.0"))
         cooldown_seconds = float(
             getattr(self._cfg, "HEAD_SEARCH_COOLDOWN_SECONDS", "1.5")
         )
@@ -401,13 +425,23 @@ class HeadTracker:
             )
             return
 
-        if self._search_step_started_at and (now - self._search_step_started_at) < step_hold:
+        if (
+            self._search_step_started_at
+            and (now - self._search_step_started_at)
+            < (self._search_step_move_duration + post_move_pause)
+        ):
             return
 
         if self._search_step_started_at:
             self._search_step_index += 1
         self._search_step_started_at = now
         step_name, neck, lift, tilt = self._search_targets_for_step(self._search_step_index)
+        self._search_step_move_duration = self._estimate_move_duration(
+            neck,
+            lift,
+            tilt,
+            speed=search_speed,
+        )
         log.debug("HeadTracker: face search step=%s", step_name)
         self._apply_direct_targets(
             neck,
