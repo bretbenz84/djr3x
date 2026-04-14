@@ -541,6 +541,7 @@ class StateMachine:
         self._post_greeting_person_name: str | None = None
         self._post_greeting_prompt_used: bool = False
         self._curious_questions_asked_this_session: set[str] = set()
+        self._post_response_prompt_count: int = 0
         self._angry_mode: bool = False
         self._last_wake_greeting_used_vision: bool = False
         self._last_opinion_at: float = 0.0
@@ -1389,6 +1390,7 @@ class StateMachine:
                 continue
 
             log.info("Transcribed: %r", text)
+            self._post_response_prompt_count = 0
 
             # --- Speaking indicator ---
             self._apply_active_led_theme()
@@ -1610,6 +1612,7 @@ class StateMachine:
             self._post_greeting_person_name = None
             self._post_greeting_prompt_used = False
             self._curious_questions_asked_this_session.clear()
+            self._post_response_prompt_count = 0
             self._recent_normalized_turns.clear()
             self._recent_person_gap_days.clear()
             self._last_opinion_at = 0.0
@@ -2458,7 +2461,25 @@ class StateMachine:
     def _run_post_response_linger_phase(self) -> str | None:
         """Try a few extra interactions before dropping from ACTIVE to IDLE."""
         silence_budget = max(0.0, config.POST_RESPONSE_LINGER_MAX_SECONDS)
-        max_attempts = min(4, max(1, config.POST_RESPONSE_LINGER_ATTEMPTS))
+        prompt_limit = min(4, max(1, config.POST_RESPONSE_TOTAL_PROMPT_LIMIT))
+        remaining_prompt_budget = max(0, prompt_limit - self._post_response_prompt_count)
+        if remaining_prompt_budget <= 0:
+            final_line = _pick_no_repeat(_LINGER_FINAL_LINES, "linger_final")
+            log.info(
+                "Linger phase: prompt budget exhausted (%d/%d) — final line: %r",
+                self._post_response_prompt_count,
+                prompt_limit,
+                final_line,
+            )
+            self._speak_simple(final_line, emotion="neutral")
+            self._player.wait_for_speech()
+            return None
+
+        max_attempts = min(
+            4,
+            max(1, config.POST_RESPONSE_LINGER_ATTEMPTS),
+            remaining_prompt_budget,
+        )
         person_id = self._last_known_person_id
         deep_attempts_remaining = min(
             max_attempts,
@@ -2485,11 +2506,14 @@ class StateMachine:
                 curious_question = self._pick_curious_followup_question(person_id)
                 if curious_question is not None:
                     deep_attempts_remaining -= 1
+                    self._post_response_prompt_count += 1
                     line = curious_question["text"]
                     log.info(
-                        "Linger phase: asking curious follow-up for person_id=%d: %r",
+                        "Linger phase: asking curious follow-up for person_id=%d: %r (prompt %d/%d)",
                         person_id,
                         line,
+                        self._post_response_prompt_count,
+                        prompt_limit,
                     )
                     self._speak_simple(line, emotion="neutral")
                     self._player.wait_for_speech()
@@ -2506,9 +2530,23 @@ class StateMachine:
                 )
 
             if curious_question is None and not used_curiosity:
+                self._post_response_prompt_count += 1
                 line = _pick_no_repeat(_LINGER_PROMPT_LINES, "linger_prompt")
+                log.info(
+                    "Linger phase: generic prompt %d/%d: %r",
+                    self._post_response_prompt_count,
+                    prompt_limit,
+                    line,
+                )
                 self._speak_simple(line, emotion="neutral")
                 self._player.wait_for_speech()
+            elif used_curiosity:
+                self._post_response_prompt_count += 1
+                log.info(
+                    "Linger phase: environmental prompt %d/%d",
+                    self._post_response_prompt_count,
+                    prompt_limit,
+                )
 
             listen_timeout = min(config.POST_RESPONSE_LINGER_LISTEN_TIMEOUT, silence_budget)
             if listen_timeout <= 0.0:
