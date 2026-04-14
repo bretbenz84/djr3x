@@ -207,6 +207,9 @@ SERVO_ELBOW_SPEAK_INTERVAL_MIN = float(_optional("SERVO_ELBOW_SPEAK_INTERVAL_MIN
 SERVO_ELBOW_SPEAK_INTERVAL_MAX = float(_optional("SERVO_ELBOW_SPEAK_INTERVAL_MAX", "0.75"))  # longer hold keeps speech arm motion from rocking too quickly
 SERVO_HAND_SPEAK_SPEED          = int(_optional("SERVO_HAND_SPEAK_SPEED",          "255"))  # ch 5 max speed — used only for the wake greeting wave
 SERVO_HAND_SPEAK_SPEED_RELAXED  = int(_optional("SERVO_HAND_SPEAK_SPEED_RELAXED",   "30"))   # ch 5 speed during normal speech — slow and relaxed
+SERVO_NECK_SPEAK_SPEED          = int(_optional("SERVO_NECK_SPEAK_SPEED",           "18"))
+SERVO_HEAD_LIFT_SPEAK_SPEED     = int(_optional("SERVO_HEAD_LIFT_SPEAK_SPEED",      "9"))
+SERVO_HEAD_TILT_SPEAK_SPEED     = int(_optional("SERVO_HEAD_TILT_SPEAK_SPEED",      "8"))
 
 # Maestro move speed (0 = unlimited; units = (0.25µs) / (10ms))
 SERVO_DEFAULT_SPEED        = 20
@@ -569,6 +572,15 @@ HEAD_TRACKING_Y_MARGIN: float = float(_optional("HEAD_TRACKING_Y_MARGIN", "0.10"
 # Values below 0.5 shift the neutral point toward the top of the frame so
 # faces at normal viewing height (upper-middle) produce a downward tilt.
 HEAD_TRACKING_TILT_Y_BIAS: float = float(_optional("HEAD_TRACKING_TILT_Y_BIAS", "0.35"))
+HEAD_TRACKING_SPEED_DELTA_FULL_SCALE: int = int(
+    _optional("HEAD_TRACKING_SPEED_DELTA_FULL_SCALE", "1400")
+)
+HEAD_TRACKING_NECK_SPEED_MIN: int = int(_optional("HEAD_TRACKING_NECK_SPEED_MIN", "24"))
+HEAD_TRACKING_NECK_SPEED_MAX: int = int(_optional("HEAD_TRACKING_NECK_SPEED_MAX", "85"))
+HEAD_TRACKING_LIFT_SPEED_MIN: int = int(_optional("HEAD_TRACKING_LIFT_SPEED_MIN", "8"))
+HEAD_TRACKING_LIFT_SPEED_MAX: int = int(_optional("HEAD_TRACKING_LIFT_SPEED_MAX", "22"))
+HEAD_TRACKING_TILT_SPEED_MIN: int = int(_optional("HEAD_TRACKING_TILT_SPEED_MIN", "8"))
+HEAD_TRACKING_TILT_SPEED_MAX: int = int(_optional("HEAD_TRACKING_TILT_SPEED_MAX", "20"))
 # Deterministic no-face scan used while Rex is awake/idle without a face lock.
 HEAD_SEARCH_ENABLED: bool = _optional("HEAD_SEARCH_ENABLED", "true").lower() not in (
     "0", "false", "no"
@@ -588,6 +600,11 @@ HEAD_SEARCH_COOLDOWN_SECONDS: float = float(
 HEAD_SEARCH_SPEED: int = int(
     _optional("HEAD_SEARCH_SPEED", "20")
 )
+HEAD_SEARCH_NECK_SPEED: int = int(
+    _optional("HEAD_SEARCH_NECK_SPEED", str(HEAD_SEARCH_SPEED))
+)
+HEAD_SEARCH_LIFT_SPEED: int = int(_optional("HEAD_SEARCH_LIFT_SPEED", "8"))
+HEAD_SEARCH_TILT_SPEED: int = int(_optional("HEAD_SEARCH_TILT_SPEED", "8"))
 
 # When True, Rex runs a 5-question interview after enrolling a new person and
 # stores the answers as persistent memories in the face DB.

@@ -347,14 +347,14 @@ class ServoController:
 
         # Keep the head pointed generally toward the last tracked face, with
         # only a small conversational wobble layered on top.
-        neck_wobble = max(50, int((neck_hi - neck_lo) * (0.02 + 0.03 * intensity)))
+        neck_wobble = max(40, int((neck_hi - neck_lo) * (0.012 + 0.020 * intensity)))
         neck_pos = _clamp(
             base_neck + random.randint(-neck_wobble, neck_wobble),
             neck_lo, neck_hi,
         )
 
         # Preserve the last tracked face height so a low face stays low.
-        lift_spread = max(60, int((lift_hi - lift_lo) * (0.025 + 0.04 * intensity)))
+        lift_spread = max(30, int((lift_hi - lift_lo) * (0.010 + 0.018 * intensity)))
         lift_pos = _clamp(
             base_lift + random.randint(-lift_spread, lift_spread),
             lift_lo, lift_hi,
@@ -362,8 +362,8 @@ class ServoController:
 
         # Preserve the last tracked tilt with a slight downward bias so speech
         # never drifts upward away from a low face.
-        tilt_up_wobble = max(35, int((tilt_hi - tilt_lo) * 0.02))
-        tilt_down_wobble = max(60, int((tilt_hi - tilt_lo) * (0.03 + 0.05 * intensity)))
+        tilt_up_wobble = max(20, int((tilt_hi - tilt_lo) * 0.012))
+        tilt_down_wobble = max(35, int((tilt_hi - tilt_lo) * (0.018 + 0.028 * intensity)))
         tilt_pos = _clamp(
             base_tilt + random.randint(-tilt_up_wobble, tilt_down_wobble),
             tilt_lo, tilt_hi,
@@ -440,9 +440,21 @@ class ServoController:
         )
 
         with self._lock:
-            # Restore emotion speed on head/visor — idle loop may have slowed them
-            for ch in (0, 1, 2, 3):
-                self._send_speed(ch, self._current_speed)
+            # Restore speech speeds on head/visor — keep lift/tilt calmer
+            # while speaking, while letting the visor stay lively.
+            self._send_speed(
+                config.SERVO_HEAD_PAN,
+                min(self._current_speed, config.SERVO_NECK_SPEAK_SPEED),
+            )
+            self._send_speed(
+                config.SERVO_HEAD_LIFT,
+                min(self._current_speed, config.SERVO_HEAD_LIFT_SPEAK_SPEED),
+            )
+            self._send_speed(
+                config.SERVO_HEAD_TILT,
+                min(self._current_speed, config.SERVO_HEAD_TILT_SPEAK_SPEED),
+            )
+            self._send_speed(config.SERVO_VISOR, self._current_speed)
             self._send_target(0, neck_pos)
             self._send_target(1, lift_pos)
             self._send_target(2, tilt_pos)

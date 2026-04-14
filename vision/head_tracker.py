@@ -63,8 +63,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# Maestro speed used for tracking moves (units: 0.25 µs / 10 ms; 0 = unlimited).
-_TRACKING_SPEED: int = 200
+# Fallback max speed when no per-axis tracking config is provided.
+_TRACKING_SPEED: int = 85
 
 _CH_NECK = 0
 _CH_LIFT = 1
@@ -285,19 +285,22 @@ class HeadTracker:
 
     def _search_targets_for_step(self, step_index: int) -> tuple[str, int, int, int]:
         """Return the deterministic servo targets for one face-search step."""
+        with self._state_lock:
+            current_neck = self._sent_neck
+            current_lift = self._sent_lift
+            current_tilt = self._sent_tilt
         steps = (
-            ("center", self._neck_neutral, self._lift_neutral, self._tilt_neutral),
-            ("neck_left", self._neck_min, self._lift_neutral, self._tilt_neutral),
-            ("neck_right", self._neck_max, self._lift_neutral, self._tilt_neutral),
+            ("neck_left", self._neck_min, current_lift, current_tilt),
+            ("neck_right", self._neck_max, current_lift, current_tilt),
             (
                 "tilt_down",
-                self._neck_neutral,
-                self._lift_neutral,
+                current_neck,
+                current_lift,
                 self._cfg.SERVO_CHANNELS[_CH_TILT]["max"],
             ),
             (
-                "head_down",
-                self._neck_neutral,
+                "headlift_down",
+                current_neck,
                 self._lift_min,
                 self._cfg.SERVO_CHANNELS[_CH_TILT]["max"],
             ),
@@ -330,7 +333,9 @@ class HeadTracker:
         lift: int,
         tilt: int,
         *,
-        speed: int,
+        neck_speed: int,
+        lift_speed: int,
+        tilt_speed: int,
         force: bool = False,
     ) -> None:
         """Apply non-smoothed tracking/search targets immediately."""
@@ -356,14 +361,20 @@ class HeadTracker:
         if self._pause_event.is_set() or self._servos is None:
             return
         if send_neck:
-            self._servos.set_channel_speed(_CH_NECK, speed)
+            self._servos.set_channel_speed(_CH_NECK, neck_speed)
             self._servos.set_tracking_position(_CH_NECK, neck)
         if send_lift:
-            self._servos.set_channel_speed(_CH_LIFT, speed)
+            self._servos.set_channel_speed(_CH_LIFT, lift_speed)
             self._servos.set_tracking_position(_CH_LIFT, lift)
         if send_tilt:
-            self._servos.set_channel_speed(_CH_TILT, speed)
+            self._servos.set_channel_speed(_CH_TILT, tilt_speed)
             self._servos.set_tracking_position(_CH_TILT, tilt)
+
+    def _movement_duration(self, delta: int, speed: int) -> float:
+        """Estimate the travel time for one axis at the given Maestro speed."""
+        if speed <= 0 or delta <= 0:
+            return 0.0
+        return (delta / float(speed)) * 0.01
 
     def _estimate_move_duration(
         self,
@@ -371,26 +382,70 @@ class HeadTracker:
         lift: int,
         tilt: int,
         *,
-        speed: int,
+        neck_speed: int,
+        lift_speed: int,
+        tilt_speed: int,
     ) -> float:
         """Estimate how long the slowest search axis will take to reach target."""
-        if speed <= 0:
-            return 0.0
         with self._state_lock:
             neck_delta = abs(neck - self._sent_neck)
             lift_delta = abs(lift - self._sent_lift)
             tilt_delta = abs(tilt - self._sent_tilt)
-        # Pololu speed units are qµs per 10 ms, so:
-        # duration_seconds = delta_qµs / speed * 0.01
-        max_delta = max(neck_delta, lift_delta, tilt_delta)
-        return (max_delta / float(speed)) * 0.01
+        return max(
+            self._movement_duration(neck_delta, neck_speed),
+            self._movement_duration(lift_delta, lift_speed),
+            self._movement_duration(tilt_delta, tilt_speed),
+        )
+
+    def _search_axis_speeds(self) -> tuple[int, int, int]:
+        """Return the per-axis search speeds."""
+        neck_speed = int(
+            getattr(
+                self._cfg,
+                "HEAD_SEARCH_NECK_SPEED",
+                getattr(self._cfg, "HEAD_SEARCH_SPEED", 20),
+            )
+        )
+        lift_speed = int(
+            getattr(
+                self._cfg,
+                "HEAD_SEARCH_LIFT_SPEED",
+                max(1, neck_speed // 2),
+            )
+        )
+        tilt_speed = int(
+            getattr(
+                self._cfg,
+                "HEAD_SEARCH_TILT_SPEED",
+                max(1, neck_speed // 2),
+            )
+        )
+        return neck_speed, lift_speed, tilt_speed
+
+    def _tracking_speed_for_delta(self, channel: int, delta: int) -> int:
+        """Return a dynamic tracking speed based on remaining travel."""
+        full_scale = max(
+            1,
+            int(getattr(self._cfg, "HEAD_TRACKING_SPEED_DELTA_FULL_SCALE", 1400)),
+        )
+        ratio = max(0.0, min(1.0, delta / float(full_scale)))
+        if channel == _CH_NECK:
+            speed_min = int(getattr(self._cfg, "HEAD_TRACKING_NECK_SPEED_MIN", 24))
+            speed_max = int(getattr(self._cfg, "HEAD_TRACKING_NECK_SPEED_MAX", _TRACKING_SPEED))
+        elif channel == _CH_LIFT:
+            speed_min = int(getattr(self._cfg, "HEAD_TRACKING_LIFT_SPEED_MIN", 8))
+            speed_max = int(getattr(self._cfg, "HEAD_TRACKING_LIFT_SPEED_MAX", 22))
+        else:
+            speed_min = int(getattr(self._cfg, "HEAD_TRACKING_TILT_SPEED_MIN", 8))
+            speed_max = int(getattr(self._cfg, "HEAD_TRACKING_TILT_SPEED_MAX", 20))
+        return max(speed_min, min(speed_max, int(round(speed_min + ratio * (speed_max - speed_min)))))
 
     def _advance_face_search(self, now: float) -> None:
         """Run one step of the deterministic face-search sweep."""
         if now < self._search_cooldown_until:
             return
 
-        search_speed = int(getattr(self._cfg, "HEAD_SEARCH_SPEED", _TRACKING_SPEED))
+        neck_speed, lift_speed, tilt_speed = self._search_axis_speeds()
         post_move_pause = float(
             getattr(self._cfg, "HEAD_SEARCH_STEP_HOLD_SECONDS", "0.75")
         )
@@ -411,14 +466,8 @@ class HeadTracker:
 
         if (now - self._search_burst_started_at) >= burst_seconds:
             log.info(
-                "HeadTracker: face search burst expired after %.1f s — recentering",
+                "HeadTracker: face search burst expired after %.1f s — cooling down",
                 burst_seconds,
-            )
-            self._apply_direct_targets(
-                self._neck_neutral,
-                self._lift_neutral,
-                self._tilt_neutral,
-                speed=search_speed,
             )
             self._stop_face_search(
                 reason="burst timeout",
@@ -441,14 +490,18 @@ class HeadTracker:
             neck,
             lift,
             tilt,
-            speed=search_speed,
+            neck_speed=neck_speed,
+            lift_speed=lift_speed,
+            tilt_speed=tilt_speed,
         )
         log.debug("HeadTracker: face search step=%s", step_name)
         self._apply_direct_targets(
             neck,
             lift,
             tilt,
-            speed=search_speed,
+            neck_speed=neck_speed,
+            lift_speed=lift_speed,
+            tilt_speed=tilt_speed,
             force=True,
         )
 
@@ -639,9 +692,12 @@ class HeadTracker:
                 new_neck = int(round(self._smooth_neck))
                 new_lift = int(round(self._smooth_lift))
                 new_tilt = int(round(self._smooth_tilt))
-                send_neck = abs(new_neck - self._sent_neck) >= dead_zone
-                send_lift = abs(new_lift - self._sent_lift) >= dead_zone
-                send_tilt = abs(new_tilt - self._sent_tilt) >= dead_zone
+                delta_neck = abs(new_neck - self._sent_neck)
+                delta_lift = abs(new_lift - self._sent_lift)
+                delta_tilt = abs(new_tilt - self._sent_tilt)
+                send_neck = delta_neck >= dead_zone
+                send_lift = delta_lift >= dead_zone
+                send_tilt = delta_tilt >= dead_zone
                 if send_neck:
                     self._sent_neck = new_neck
                 if send_lift:
@@ -652,14 +708,22 @@ class HeadTracker:
             # ── Servo commands (outside lock — never hold it during IO) ───
             if not self._pause_event.is_set() and self._servos is not None:
                 if send_neck:
-                    # Restore tracking speed in case set_emotion() changed it.
-                    self._servos.set_channel_speed(_CH_NECK, _TRACKING_SPEED)
+                    self._servos.set_channel_speed(
+                        _CH_NECK,
+                        self._tracking_speed_for_delta(_CH_NECK, delta_neck),
+                    )
                     self._servos.set_tracking_position(_CH_NECK, new_neck)
                 if send_lift:
-                    self._servos.set_channel_speed(_CH_LIFT, _TRACKING_SPEED)
+                    self._servos.set_channel_speed(
+                        _CH_LIFT,
+                        self._tracking_speed_for_delta(_CH_LIFT, delta_lift),
+                    )
                     self._servos.set_tracking_position(_CH_LIFT, new_lift)
                 if send_tilt:
-                    self._servos.set_channel_speed(_CH_TILT, _TRACKING_SPEED)
+                    self._servos.set_channel_speed(
+                        _CH_TILT,
+                        self._tracking_speed_for_delta(_CH_TILT, delta_tilt),
+                    )
                     self._servos.set_tracking_position(_CH_TILT, new_tilt)
 
             # ── FPS health check ──────────────────────────────────────────
