@@ -130,6 +130,13 @@ class ServoController:
         self._elbow_speak_direction: int = 1
         self._elbow_speak_target: int | None = None
         self._next_elbow_speak_at: float = 0.0
+        # Updated by HeadTracker on every face detection so speech can keep
+        # facing the last known person instead of re-centering to neutral.
+        self._face_tracking_baseline: dict[int, int] = {
+            config.SERVO_HEAD_PAN: config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["neutral"],
+            config.SERVO_HEAD_LIFT: config.SERVO_CHANNELS[config.SERVO_HEAD_LIFT]["neutral"],
+            config.SERVO_HEAD_TILT: config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["neutral"],
+        }
         # Set by pause_arm_idle() to prevent the idle loop from sending conflicting
         # commands to ch 4/5/7 while an arm animation is running.
         self._arm_idle_pause = threading.Event()
@@ -314,43 +321,62 @@ class ServoController:
         """
         intensity = max(0.0, min(1.0, float(intensity)))
 
-        neck_lo,  neck_hi  = self._effective_limits(0)   # neck
-        lift_lo,  lift_hi  = self._effective_limits(1)   # headlift
-        tilt_lo,  tilt_hi  = self._effective_limits(2)   # headtilt
+        # Use the physical head limits rather than emotion overrides so speech
+        # motion can stay pointed at the last tracked face instead of being
+        # forced back toward the emotion's neutral/upward range.
+        neck_lo,  neck_hi  = (
+            config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["min"],
+            config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["max"],
+        )
+        lift_lo,  lift_hi  = (
+            config.SERVO_CHANNELS[config.SERVO_HEAD_LIFT]["min"],
+            config.SERVO_CHANNELS[config.SERVO_HEAD_LIFT]["max"],
+        )
+        tilt_lo,  tilt_hi  = (
+            config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["min"],
+            config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["max"],
+        )
         visor_lo, visor_hi = self._effective_limits(3)   # visor
+        with self._lock:
+            base_neck = self._face_tracking_baseline[config.SERVO_HEAD_PAN]
+            base_lift = self._face_tracking_baseline[config.SERVO_HEAD_LIFT]
+            base_tilt = self._face_tracking_baseline[config.SERVO_HEAD_TILT]
+        base_neck = _clamp(base_neck, neck_lo, neck_hi)
+        base_lift = _clamp(base_lift, lift_lo, lift_hi)
+        base_tilt = _clamp(base_tilt, tilt_lo, tilt_hi)
 
-        # neck moves up on louder speech; small random jitter keeps it lively
-        jitter = random.randint(-80, 80)
+        # Keep the head pointed generally toward the last tracked face, with
+        # only a small conversational wobble layered on top.
+        neck_wobble = max(50, int((neck_hi - neck_lo) * (0.02 + 0.03 * intensity)))
         neck_pos = _clamp(
-            int(neck_lo + intensity * (neck_hi - neck_lo)) + jitter,
+            base_neck + random.randint(-neck_wobble, neck_wobble),
             neck_lo, neck_hi,
         )
 
-        # headlift wobbles gently around center
-        lift_center = (lift_lo + lift_hi) // 2
-        lift_spread = int((lift_hi - lift_lo) * 0.15)
+        # Preserve the last tracked face height so a low face stays low.
+        lift_spread = max(60, int((lift_hi - lift_lo) * (0.025 + 0.04 * intensity)))
         lift_pos = _clamp(
-            lift_center + random.randint(-lift_spread, lift_spread),
+            base_lift + random.randint(-lift_spread, lift_spread),
             lift_lo, lift_hi,
         )
 
-        # headtilt rises with intensity (inverted: lower qµs = head up).
-        # Constrain to [min, neutral] — can tilt up from neutral but never
-        # goes below neutral (which would point the head down).
-        tilt_neutral = config.SERVO_CHANNELS[2]["neutral"]
-        tilt_ceiling = tilt_neutral   # never go below neutral
+        # Preserve the last tracked tilt with a slight downward bias so speech
+        # never drifts upward away from a low face.
+        tilt_up_wobble = max(35, int((tilt_hi - tilt_lo) * 0.02))
+        tilt_down_wobble = max(60, int((tilt_hi - tilt_lo) * (0.03 + 0.05 * intensity)))
         tilt_pos = _clamp(
-            int(tilt_ceiling - intensity * (tilt_ceiling - tilt_lo)),
-            tilt_lo, tilt_ceiling,
+            base_tilt + random.randint(-tilt_up_wobble, tilt_down_wobble),
+            tilt_lo, tilt_hi,
         )
 
-        # visor opens (rises) with intensity — higher qµs = open/revealed.
-        # Anchors at ~5800 (slightly below neutral) when silent, rises toward
-        # max (6976) at full intensity.  Uses a fixed speak base rather than
-        # emotion-derived visor_lo so silent speech never closes the visor.
-        _VISOR_SPEAK_BASE = 5800
+        # Make the visor read more obviously "alive" during speech with a
+        # strong pulse around a more-open baseline. This only runs while the
+        # speech worker is active.
+        _VISOR_SPEAK_BASE = max(visor_lo, 5950)
+        visor_wave = 0.5 + 0.5 * math.sin(time.monotonic() * 8.0)
+        visor_swing = int((visor_hi - _VISOR_SPEAK_BASE) * (0.45 + 0.35 * intensity))
         visor_pos = _clamp(
-            int(_VISOR_SPEAK_BASE + intensity * (visor_hi - _VISOR_SPEAK_BASE)),
+            int(_VISOR_SPEAK_BASE + visor_wave * visor_swing) + random.randint(-70, 70),
             visor_lo, visor_hi,
         )
 
@@ -432,6 +458,27 @@ class ServoController:
             if hand_target is not None:
                 self._send_target(config.SERVO_HAND_LEFT, hand_target)
             self._send_target(config.SERVO_HAND_RIGHT, hero_pos)
+
+    def set_face_tracking_baseline(self, *, neck: int, lift: int, tilt: int) -> None:
+        """Store the last tracked face pose so speech stays aimed at the person."""
+        with self._lock:
+            self._face_tracking_baseline = {
+                config.SERVO_HEAD_PAN: _clamp(
+                    neck,
+                    config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["min"],
+                    config.SERVO_CHANNELS[config.SERVO_HEAD_PAN]["max"],
+                ),
+                config.SERVO_HEAD_LIFT: _clamp(
+                    lift,
+                    config.SERVO_CHANNELS[config.SERVO_HEAD_LIFT]["min"],
+                    config.SERVO_CHANNELS[config.SERVO_HEAD_LIFT]["max"],
+                ),
+                config.SERVO_HEAD_TILT: _clamp(
+                    tilt,
+                    config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["min"],
+                    config.SERVO_CHANNELS[config.SERVO_HEAD_TILT]["max"],
+                ),
+            }
 
     # ------------------------------------------------------------------
     # Startup initialisation
@@ -644,6 +691,18 @@ class ServoController:
                 "set_position: ch 5 (hand) → %d qµs  (config limits %d–%d)",
                 position, lo, hi,
             )
+        with self._lock:
+            self._send_target(channel, position)
+
+    def set_tracking_position(self, channel: int, position: int) -> None:
+        """Move a tracking-owned head channel using raw physical limits.
+
+        Head tracking and face search should not be clamped by the temporary
+        speech emotion ranges, because those ranges can pull the head away
+        from the last detected face.
+        """
+        ch_cfg = config.SERVO_CHANNELS[channel]
+        position = _clamp(position, ch_cfg["min"], ch_cfg["max"])
         with self._lock:
             self._send_target(channel, position)
 

@@ -121,14 +121,15 @@ class HeadTracker:
         self._lift_neutral: int = _lift["neutral"]   # 6000 — head level
         self._lift_max:     int = _lift["max"]       # 7744 — head fully up
 
-        # Headtilt limits (clamped to ±15 % of full span from neutral)
+        # Headtilt limits. Tracking keeps the narrower upward range but can use
+        # the full downward range so a face low in frame keeps the same
+        # downward-looking posture the search sweep used.
         _tilt = cfg.SERVO_CHANNELS[_CH_TILT]
         self._tilt_neutral: int = _tilt["neutral"]
         _tilt_half = 400                                            # ±400 qµs from neutral
         self._tilt_lo: int = max(_tilt["min"],
                                  self._tilt_neutral - _tilt_half)  # 3920 qµs (tilts up)
-        self._tilt_hi: int = min(_tilt["max"],
-                                 self._tilt_neutral + _tilt_half)  # 4720 qµs (tilts down)
+        self._tilt_max: int = _tilt["max"]                         # 5504 qµs (tilts down)
 
         # Visor max — sent once at tracker start to keep camera unobstructed
         self._visor_max: int = cfg.SERVO_CHANNELS[3]["max"]
@@ -356,13 +357,13 @@ class HeadTracker:
             return
         if send_neck:
             self._servos.set_channel_speed(_CH_NECK, speed)
-            self._servos.set_position(_CH_NECK, neck)
+            self._servos.set_tracking_position(_CH_NECK, neck)
         if send_lift:
             self._servos.set_channel_speed(_CH_LIFT, speed)
-            self._servos.set_position(_CH_LIFT, lift)
+            self._servos.set_tracking_position(_CH_LIFT, lift)
         if send_tilt:
             self._servos.set_channel_speed(_CH_TILT, speed)
-            self._servos.set_position(_CH_TILT, tilt)
+            self._servos.set_tracking_position(_CH_TILT, tilt)
 
     def _estimate_move_duration(
         self,
@@ -568,15 +569,24 @@ class HeadTracker:
                 t_lift = max(self._lift_min, min(self._lift_max, t_lift))
 
                 # Y → headtilt (inverted: low qµs = up, high = down).
-                # Same continuous linear formula as before — no saturation zones.
-                # tilt_y_bias shifts the neutral crossover above 0.5 so faces
-                # in the upper-middle of the frame produce a downward tilt.
-                tilt_span = self._tilt_hi - self._tilt_lo
-                t_tilt = int(
-                    self._tilt_neutral
-                    + (y_scaled - self._tilt_y_bias) * tilt_span
-                )
-                t_tilt = max(self._tilt_lo, min(self._tilt_hi, t_tilt))
+                # Keep the original narrower upward range, but use the full
+                # physical downward range so low faces do not snap back up
+                # toward neutral after search hands off to tracking.
+                if y_scaled >= self._tilt_y_bias:
+                    denom = max(1e-6, 1.0 - self._tilt_y_bias)
+                    down_ratio = (y_scaled - self._tilt_y_bias) / denom
+                    t_tilt = int(
+                        self._tilt_neutral
+                        + down_ratio * (self._tilt_max - self._tilt_neutral)
+                    )
+                else:
+                    denom = max(1e-6, self._tilt_y_bias)
+                    up_ratio = (self._tilt_y_bias - y_scaled) / denom
+                    t_tilt = int(
+                        self._tilt_neutral
+                        - up_ratio * (self._tilt_neutral - self._tilt_lo)
+                    )
+                t_tilt = max(self._tilt_lo, min(self._tilt_max, t_tilt))
 
                 log.debug(
                     "HeadTracker targets: neck=%d  lift=%d  tilt=%d  (face cx=%d cy=%d)",
@@ -587,6 +597,12 @@ class HeadTracker:
                     self._target_neck = t_neck
                     self._target_lift = t_lift
                     self._target_tilt = t_tilt
+                if self._servos is not None:
+                    self._servos.set_face_tracking_baseline(
+                        neck=t_neck,
+                        lift=t_lift,
+                        tilt=t_tilt,
+                    )
             else:
                 # No face — either hold the last known target briefly or, when
                 # enabled, run the deterministic face-search sweep.
@@ -638,13 +654,13 @@ class HeadTracker:
                 if send_neck:
                     # Restore tracking speed in case set_emotion() changed it.
                     self._servos.set_channel_speed(_CH_NECK, _TRACKING_SPEED)
-                    self._servos.set_position(_CH_NECK, new_neck)
+                    self._servos.set_tracking_position(_CH_NECK, new_neck)
                 if send_lift:
                     self._servos.set_channel_speed(_CH_LIFT, _TRACKING_SPEED)
-                    self._servos.set_position(_CH_LIFT, new_lift)
+                    self._servos.set_tracking_position(_CH_LIFT, new_lift)
                 if send_tilt:
                     self._servos.set_channel_speed(_CH_TILT, _TRACKING_SPEED)
-                    self._servos.set_position(_CH_TILT, new_tilt)
+                    self._servos.set_tracking_position(_CH_TILT, new_tilt)
 
             # ── FPS health check ──────────────────────────────────────────
             elapsed = time.monotonic() - t0
