@@ -1082,6 +1082,7 @@ class StateMachine:
                 name=_face_name,
                 bother_count=self._get_known_person_bother_count(_face_person_id),
                 frame=frame,
+                chance_override=config.OPINION_SHORT_WAKE_CHANCE,
             )
 
         # Listen for an initial response.
@@ -1860,14 +1861,7 @@ class StateMachine:
                 self._play_known_person_greeting(name, bother_count)
                 self._last_wake_greeting_used_vision = False
 
-            opinion_spoken = self._maybe_speak_known_person_wake_opinion(
-                person_id=person_id,
-                name=name,
-                bother_count=bother_count,
-                frame=frame,
-            )
-            if not opinion_spoken:
-                self._maybe_speak_followup(person_id)
+            self._maybe_speak_followup(person_id)
             return
 
         # ---- Unknown face ------------------------------------------------
@@ -2046,6 +2040,7 @@ class StateMachine:
                 name=name,
                 bother_count=self._get_known_person_bother_count(person_id),
                 frame=frame,
+                chance_override=config.OPINION_SHORT_WAKE_CHANCE,
             )
             if not opinion_spoken:
                 self._maybe_speak_followup(person_id)
@@ -2077,15 +2072,8 @@ class StateMachine:
                 self._play_known_person_greeting(name, 1)
 
             self._last_greeted_person_id = person_id
-            bother_count = self._face_db.update_last_seen(person_id)
-            opinion_spoken = self._maybe_speak_known_person_wake_opinion(
-                person_id=person_id,
-                name=name,
-                bother_count=bother_count,
-                frame=frame,
-            )
-            if not opinion_spoken:
-                self._maybe_speak_followup(person_id)
+            self._face_db.update_last_seen(person_id)
+            self._maybe_speak_followup(person_id)
 
     def _should_use_vision_wake_greeting(self) -> bool:
         """Use GPT vision on about half of wake greetings, never consecutively."""
@@ -5309,6 +5297,7 @@ class StateMachine:
         name: str,
         bother_count: int,
         frame: str | None,
+        chance_override: float | None = None,
     ) -> bool:
         """Bias opinions heavily right after a recognized person wakes Rex."""
         if (
@@ -5319,13 +5308,16 @@ class StateMachine:
             return False
 
         days_since_last_seen = self._recent_person_gap_days.get(person_id)
-        chance = config.OPINION_KNOWN_WAKE_CHANCE
-        if bother_count >= 3:
-            chance += 0.08
-        if frame:
-            chance += 0.07
-        if days_since_last_seen is not None and days_since_last_seen >= 3:
-            chance += 0.06
+        if chance_override is not None:
+            chance = chance_override
+        else:
+            chance = config.OPINION_KNOWN_WAKE_CHANCE
+            if bother_count >= 3:
+                chance += 0.08
+            if frame:
+                chance += 0.07
+            if days_since_last_seen is not None and days_since_last_seen >= 3:
+                chance += 0.06
 
         chance = self._clamp_probability(chance)
         roll = random.random()

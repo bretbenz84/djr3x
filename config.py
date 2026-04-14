@@ -97,6 +97,7 @@ OPINION_INTERACTION_BONUS = float(_optional("OPINION_INTERACTION_BONUS", "0.03")
 OPINION_COOLDOWN_SECONDS = float(_optional("OPINION_COOLDOWN_SECONDS", "90"))
 OPINION_MAX_PER_SESSION = int(_optional("OPINION_MAX_PER_SESSION", "3"))
 OPINION_KNOWN_WAKE_CHANCE = float(_optional("OPINION_KNOWN_WAKE_CHANCE", "0.78"))
+OPINION_SHORT_WAKE_CHANCE = float(_optional("OPINION_SHORT_WAKE_CHANCE", "0.25"))
 
 # ---------------------------------------------------------------------------
 # Serial — Pololu Maestro Mini
