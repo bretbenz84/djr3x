@@ -377,6 +377,14 @@ WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",
 TRANSCRIBE_SPEECH_WAIT_SECONDS   = float(_optional("TRANSCRIBE_SPEECH_WAIT_SECONDS",   "5.0"))
 TRANSCRIBE_END_SILENCE_SECONDS   = float(_optional("TRANSCRIBE_END_SILENCE_SECONDS",   "2.5"))
 
+# Short mic cooldown after Rex finishes speaking. Prevents the next
+# transcription window from immediately re-capturing prompt/greeting tail
+# from the speakers or room echo, while staying short enough that a user's
+# natural reply is not noticeably delayed.
+POST_SPEECH_LISTEN_COOLDOWN_SECONDS = float(
+    _optional("POST_SPEECH_LISTEN_COOLDOWN_SECONDS", "0.35")
+)
+
 # Substrings (lowercase) that identify known Whisper hallucination phrases.
 # Any result whose lowercased text contains one of these is silently dropped.
 WHISPER_HALLUCINATION_FILTER: list[str] = [

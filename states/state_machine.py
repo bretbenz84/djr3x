@@ -696,6 +696,7 @@ class StateMachine:
         self._shutdown_event = threading.Event()
         self._os_shutdown_requested: bool = False  # True only for voice/button shutdown
         self._pipeline_t0: float = 0.0          # monotonic time of last wake word detection
+        self._last_speech_end_at: float = 0.0   # used to avoid self-transcribing prompt tail
 
         # Face-triggered wake — text captured during the face-greeting listen so
         # _run_active() can process it without asking the user to repeat themselves.
@@ -1335,6 +1336,9 @@ class StateMachine:
         self._wake_word.pause()
         text: str | None = None
         try:
+            self._wait_for_post_speech_listen_cooldown(
+                "Face-triggered greeting listen"
+            )
             text = self._transcriber.transcribe(
                 wait_for_speech_seconds=config.FACE_WAKE_LISTEN_TIMEOUT
             )
@@ -1508,6 +1512,7 @@ class StateMachine:
                 # Pause wake word: both share the same mic device.
                 self._wake_word.pause()
                 try:
+                    self._wait_for_post_speech_listen_cooldown("ACTIVE listen")
                     text = self._transcriber.transcribe(
                         wait_for_speech_seconds=speech_timeout,
                         t0=self._pipeline_t0,
@@ -1600,6 +1605,9 @@ class StateMachine:
                     self._apply_listening_led_theme()
                     self._wake_word.pause()
                     try:
+                        self._wait_for_post_speech_listen_cooldown(
+                            "ACTIVE second-chance listen"
+                        )
                         text = self._transcriber.transcribe(
                             wait_for_speech_seconds=config.WAKE_GOODBYE_TIMEOUT
                         )
@@ -2876,6 +2884,7 @@ class StateMachine:
         self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
+            self._wait_for_post_speech_listen_cooldown("Prompt answer listen")
             return self._transcriber.transcribe(
                 wait_for_speech_seconds=timeout_seconds,
                 allow_short=False,
@@ -3302,6 +3311,9 @@ class StateMachine:
             self._apply_listening_led_theme()
             self._wake_word.pause()
             try:
+                self._wait_for_post_speech_listen_cooldown(
+                    "Enrollment interview answer listen"
+                )
                 answer = self._transcriber.transcribe(
                     wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
                     allow_short=False,
@@ -3413,6 +3425,7 @@ class StateMachine:
         self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
+            self._wait_for_post_speech_listen_cooldown("Unknown-face name capture")
             name_text = self._transcriber.transcribe(
                 wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
                 allow_short=True,   # single-word names like 'Brett' must not be filtered
@@ -3720,6 +3733,22 @@ class StateMachine:
         self._player.play_chime()
         self._player.wait_for_music(timeout=10.0)
 
+    def _wait_for_post_speech_listen_cooldown(self, context: str) -> None:
+        """Give the room a brief moment to settle before opening the mic.
+
+        Rex often listens immediately after a greeting or prompt. Without a
+        short cooldown, the microphone can catch the tail of his own speech
+        and transcribe it as if the user replied.
+        """
+        cooldown = max(0.0, config.POST_SPEECH_LISTEN_COOLDOWN_SECONDS)
+        if cooldown <= 0.0 or self._last_speech_end_at <= 0.0:
+            return
+        remaining = (self._last_speech_end_at + cooldown) - time.monotonic()
+        if remaining <= 0.0:
+            return
+        log.debug("%s: waiting %.2fs for post-speech mic cooldown", context, remaining)
+        time.sleep(remaining)
+
     def _begin_speech(self, emotion: str = "neutral") -> threading.Event:
         """Prepare hardware for a speech output burst.
 
@@ -3822,6 +3851,7 @@ class StateMachine:
 
     def _end_speech(self, servo_stop: threading.Event) -> None:
         """Tear down speech-reactive hardware after TTS finishes."""
+        self._last_speech_end_at = time.monotonic()
         servo_stop.set()
         self._leds.stop_mouth()
         self._wake_word.suppressed = False
@@ -4237,6 +4267,7 @@ class StateMachine:
         self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
+            self._wait_for_post_speech_listen_cooldown("I Spy guess listen")
             return self._transcriber.transcribe(
                 wait_for_speech_seconds=timeout_seconds,
                 allow_short=True,
@@ -4309,6 +4340,7 @@ class StateMachine:
             self._apply_listening_led_theme()
             self._wake_word.pause()
             try:
+                self._wait_for_post_speech_listen_cooldown("rename_me name capture")
                 name_text = self._transcriber.transcribe(
                     wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
                     allow_short=True,
@@ -4465,6 +4497,9 @@ class StateMachine:
         self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
+            self._wait_for_post_speech_listen_cooldown(
+                "forget_me spoken-name capture"
+            )
             name_text = self._transcriber.transcribe(
                 wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
                 allow_short=True,
@@ -4552,6 +4587,7 @@ class StateMachine:
         self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
+            self._wait_for_post_speech_listen_cooldown("forget_me confirmation")
             response = self._transcriber.transcribe(
                 wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
                 allow_short=True,   # 'yes' / 'yeah' must not be filtered
@@ -4626,6 +4662,7 @@ class StateMachine:
         self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
+            self._wait_for_post_speech_listen_cooldown("wipe_memory confirmation")
             response = self._transcriber.transcribe(
                 wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
                 allow_short=True,
@@ -5011,6 +5048,7 @@ class StateMachine:
         self._apply_listening_led_theme()
         self._wake_word.pause()
         try:
+            self._wait_for_post_speech_listen_cooldown("recall_name name capture")
             name_text = self._transcriber.transcribe(
                 wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
                 allow_short=True,
