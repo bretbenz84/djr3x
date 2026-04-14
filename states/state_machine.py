@@ -542,6 +542,7 @@ class StateMachine:
         self._post_greeting_prompt_used: bool = False
         self._curious_questions_asked_this_session: set[str] = set()
         self._post_response_prompt_count: int = 0
+        self._post_response_plan_prompt_asked: bool = False
         self._angry_mode: bool = False
         self._last_wake_greeting_used_vision: bool = False
         self._last_opinion_at: float = 0.0
@@ -1391,6 +1392,7 @@ class StateMachine:
 
             log.info("Transcribed: %r", text)
             self._post_response_prompt_count = 0
+            self._post_response_plan_prompt_asked = False
 
             # --- Speaking indicator ---
             self._apply_active_led_theme()
@@ -1613,6 +1615,7 @@ class StateMachine:
             self._post_greeting_prompt_used = False
             self._curious_questions_asked_this_session.clear()
             self._post_response_prompt_count = 0
+            self._post_response_plan_prompt_asked = False
             self._recent_normalized_turns.clear()
             self._recent_person_gap_days.clear()
             self._last_opinion_at = 0.0
@@ -2213,6 +2216,55 @@ class StateMachine:
         self._curious_questions_asked_this_session.add(picked["text"])
         return picked
 
+    def _pick_linger_known_person_prompt(self, person_id: int) -> dict[str, str] | None:
+        """Choose the next known-person linger prompt, interleaving plan prompts."""
+        person = self._face_db.get_person(person_id)
+        name = str(person.get("name") or "").strip() if person else ""
+
+        if name and not self._post_response_plan_prompt_asked:
+            self._post_response_plan_prompt_asked = True
+            plan_memory = self._get_relevant_plan_memory(person_id)
+            if plan_memory is not None:
+                source_text = (
+                    str(plan_memory.get("raw_quote") or "").strip()
+                    or str(plan_memory.get("value") or "").strip()
+                )
+                prompt = self._llm.generate_activity_followup(
+                    source_text,
+                    str(plan_memory.get("created_at") or ""),
+                    same_day=True,
+                )
+                if not prompt:
+                    summary = self._short_memory_summary(str(plan_memory.get("value") or ""))
+                    prompt = _pick_no_repeat(
+                        _PLAN_SAME_DAY_FOLLOWUP_LINES,
+                        "linger_plan_same_day_followup",
+                    ).format(name=name, summary=summary)
+                return {
+                    "kind": "plan",
+                    "text": prompt,
+                    "key": str(plan_memory.get("key") or "today_plan"),
+                    "tags": str(plan_memory.get("tags") or "plan,activity,linger"),
+                }
+
+            weekday = date.today().weekday()
+            return {
+                "kind": "plan",
+                "text": self._build_plan_question(name),
+                "key": "weekend_plan" if weekday >= 4 else "today_plan",
+                "tags": "plan,activity,linger",
+            }
+
+        curiosity_question = self._pick_curious_followup_question(person_id)
+        if curiosity_question is None:
+            return None
+        return {
+            "kind": "curiosity",
+            "text": curiosity_question["text"],
+            "key": curiosity_question["key"],
+            "tags": curiosity_question["tags"],
+        }
+
     def _store_curious_followup_exchange(
         self,
         person_id: int,
@@ -2501,15 +2553,16 @@ class StateMachine:
                 silence_budget,
             )
 
-            curious_question: dict[str, str] | None = None
+            known_person_prompt: dict[str, str] | None = None
             if person_id is not None and deep_attempts_remaining > 0:
-                curious_question = self._pick_curious_followup_question(person_id)
-                if curious_question is not None:
+                known_person_prompt = self._pick_linger_known_person_prompt(person_id)
+                if known_person_prompt is not None:
                     deep_attempts_remaining -= 1
                     self._post_response_prompt_count += 1
-                    line = curious_question["text"]
+                    line = known_person_prompt["text"]
                     log.info(
-                        "Linger phase: asking curious follow-up for person_id=%d: %r (prompt %d/%d)",
+                        "Linger phase: asking %s follow-up for person_id=%d: %r (prompt %d/%d)",
+                        known_person_prompt.get("kind", "known-person"),
                         person_id,
                         line,
                         self._post_response_prompt_count,
@@ -2519,7 +2572,7 @@ class StateMachine:
                     self._player.wait_for_speech()
 
             used_curiosity = False
-            if curious_question is None and (
+            if known_person_prompt is None and (
                 attempt > 1
                 and self._camera.is_available()
                 and random.random() < config.POST_RESPONSE_LINGER_CURIOSITY_CHANCE
@@ -2529,7 +2582,7 @@ class StateMachine:
                     restore_idle_theme=False,
                 )
 
-            if curious_question is None and not used_curiosity:
+            if known_person_prompt is None and not used_curiosity:
                 self._post_response_prompt_count += 1
                 line = _pick_no_repeat(_LINGER_PROMPT_LINES, "linger_prompt")
                 log.info(
@@ -2557,19 +2610,25 @@ class StateMachine:
             silence_budget = max(0.0, silence_budget - (time.monotonic() - listen_started))
             if answer:
                 log.info("Linger phase: heard response %r", answer)
-                if curious_question is not None:
+                if known_person_prompt is not None:
                     cmd = parse(answer, allow_fuzzy=False)
                     if cmd is None and person_id is not None:
+                        kind = known_person_prompt.get("kind", "")
                         self._speak_prompt_acknowledgement(
-                            category="curiosity",
-                            key=curious_question.get("key", ""),
-                            tags=curious_question.get("tags", ""),
+                            category="plan" if kind == "plan" else "curiosity",
+                            key=known_person_prompt.get("key", ""),
+                            tags=known_person_prompt.get("tags", ""),
                         )
-                        self._store_curious_followup_exchange(
-                            person_id,
-                            curious_question,
-                            answer,
-                        )
+                        if kind == "plan":
+                            person = self._face_db.get_person(person_id)
+                            name = str(person.get("name") or "").strip() if person else "lifeform"
+                            self._store_plan_memory(person_id, name or "lifeform", answer)
+                        else:
+                            self._store_curious_followup_exchange(
+                                person_id,
+                                known_person_prompt,
+                                answer,
+                            )
                         return _HANDLED_PROMPT_RESPONSE
                 return answer
 
