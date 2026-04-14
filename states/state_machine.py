@@ -254,57 +254,263 @@ _PROMPT_ACK_GENERAL_LINES: tuple[str, ...] = (
 
 _HANDLED_PROMPT_RESPONSE = "__handled_prompt_response__"
 
-_CURIOUS_FOLLOWUP_QUESTIONS: tuple[dict[str, str], ...] = (
-    {
-        "key": "purpose_in_life",
-        "text": "Before you go all mysterious on me, what do you think your purpose in life actually is?",
-        "tags": "life,purpose,curiosity",
-    },
-    {
-        "key": "afterlife_belief",
-        "text": "Quick existential check, lifeform: what do you think happens after death?",
-        "tags": "belief,philosophy,afterlife,curiosity",
-    },
-    {
-        "key": "droids_dream",
-        "text": "Do you think droids dream, or is that just organic guilt dressed up as philosophy?",
-        "tags": "belief,philosophy,droids,curiosity",
-    },
-    {
-        "key": "core_values",
-        "text": "What do you value most when nobody's watching and the room gets honest?",
-        "tags": "values,belief,life,curiosity",
-    },
-    {
-        "key": "protect_first",
-        "text": "If everything went sideways at once, what would you protect first?",
-        "tags": "values,life,belief,curiosity",
-    },
-    {
-        "key": "people_change",
-        "text": "Be honest. Do you think people really change, or do they just get better at costume swaps?",
-        "tags": "belief,philosophy,values,curiosity",
-    },
-    {
-        "key": "unlimited_time",
-        "text": "If time stopped bullying you for a while, what would you do with unlimited time?",
-        "tags": "life,purpose,philosophy,curiosity",
-    },
-    {
-        "key": "fear_of_loss",
-        "text": "What are you actually afraid of losing, beneath the polished little lifeform routine?",
-        "tags": "life,values,belief,curiosity",
-    },
-    {
-        "key": "favorite_place",
-        "text": "What's your favorite place on planet Earth, and why does that place get your loyalty?",
-        "tags": "life,values,earth,curiosity",
-    },
-    {
-        "key": "deep_happiness",
-        "text": "What makes you most happy for real, not just socially acceptable happy?",
-        "tags": "life,values,happiness,curiosity",
-    },
+def _programmed_question(key: str, text: str, tags: str) -> dict[str, str]:
+    """Build one deterministic follow-up question entry."""
+    return {"key": key, "text": text, "tags": tags}
+
+
+# Fixed question bank used for silent known-person follow-ups and intake
+# interviews. Stable keys/tags keep the stored memories deterministic.
+_PROGRAMMED_CONVERSATION_QUESTIONS: tuple[dict[str, str], ...] = (
+    _programmed_question(
+        "purpose_in_life",
+        "Before you go all mysterious on me, what do you think your purpose in life actually is?",
+        "life,purpose,values,curiosity",
+    ),
+    _programmed_question(
+        "droids_dream",
+        "Do you think droids dream, or is that just organic guilt dressed up as philosophy?",
+        "belief,philosophy,droids,curiosity",
+    ),
+    _programmed_question(
+        "core_values",
+        "What do you value most when nobody's watching and the room gets honest?",
+        "values,belief,life,curiosity",
+    ),
+    _programmed_question(
+        "protect_first",
+        "If everything went sideways at once, what would you protect first?",
+        "values,life,belief,curiosity",
+    ),
+    _programmed_question(
+        "people_change",
+        "Be honest. Do you think people really change, or do they just get better at costume swaps?",
+        "belief,philosophy,values,curiosity",
+    ),
+    _programmed_question(
+        "unlimited_time",
+        "If time stopped running from you for a while, what would you do with unlimited time?",
+        "life,purpose,philosophy,curiosity",
+    ),
+    _programmed_question(
+        "fear_of_loss",
+        "What are you actually afraid of losing, beneath the polished little lifeform routine?",
+        "life,values,belief,curiosity",
+    ),
+    _programmed_question(
+        "favorite_place",
+        "What's your favorite place on Earth, and why does that place get your loyalty?",
+        "life,earth,place,curiosity",
+    ),
+    _programmed_question(
+        "deep_happiness",
+        "What makes you genuinely happy, not just socially acceptable happy?",
+        "life,happiness,values,curiosity",
+    ),
+    _programmed_question(
+        "proudest_moment",
+        "What's something you've done that still makes you think, yes, I was magnificent there?",
+        "life,achievement,identity,curiosity",
+    ),
+    _programmed_question(
+        "hardest_lesson",
+        "What's a lesson life had to slam into you before you finally listened?",
+        "life,growth,lesson,curiosity",
+    ),
+    _programmed_question(
+        "misunderstood_trait",
+        "What's something people get wrong about you until they actually know you?",
+        "identity,self,relationship,curiosity",
+    ),
+    _programmed_question(
+        "hidden_self",
+        "What part of yourself do you keep hidden until someone earns access?",
+        "identity,self,trust,curiosity",
+    ),
+    _programmed_question(
+        "avoiding_right_now",
+        "What are you avoiding right now that you already know needs attention?",
+        "life,self,accountability,curiosity",
+    ),
+    _programmed_question(
+        "keeps_you_up",
+        "What keeps your brain rattling around at night when the room finally shuts up?",
+        "life,mind,anxiety,curiosity",
+    ),
+    _programmed_question(
+        "favorite_music",
+        "What kind of music earns your loyalty every single time?",
+        "favorite,music,preference,curiosity",
+    ),
+    _programmed_question(
+        "comfort_song",
+        "What song can rescue your mood even when your day is doing a full systems failure?",
+        "music,song,comfort,preference,curiosity",
+    ),
+    _programmed_question(
+        "favorite_food",
+        "What food never disappoints you, assuming the cook isn't a complete disaster?",
+        "favorite,food,preference,curiosity",
+    ),
+    _programmed_question(
+        "favorite_drink",
+        "What's your go-to drink when you want the moment to feel slightly more tolerable?",
+        "favorite,drink,preference,curiosity",
+    ),
+    _programmed_question(
+        "favorite_movie",
+        "What's a movie you'll defend even if the rest of the galaxy is wrong about it?",
+        "favorite,movie,preference,curiosity",
+    ),
+    _programmed_question(
+        "current_obsession",
+        "What are you low-key obsessed with right now?",
+        "interest,obsession,hobby,curiosity",
+    ),
+    _programmed_question(
+        "guilty_pleasure",
+        "What's your guilty pleasure, or are you brave enough to admit you don't feel guilt at all?",
+        "preference,guilty_pleasure,fun,curiosity",
+    ),
+    _programmed_question(
+        "perfect_day",
+        "What does a perfect day look like for you, from start to finish?",
+        "life,ideal_day,values,curiosity",
+    ),
+    _programmed_question(
+        "underrated_joy",
+        "What's a tiny thing that makes your day better every single time?",
+        "life,joy,habit,curiosity",
+    ),
+    _programmed_question(
+        "who_knows_you_best",
+        "Who knows the real you best, and how'd they get clearance?",
+        "relationship,trust,identity,curiosity",
+    ),
+    _programmed_question(
+        "who_do_you_call_first",
+        "When something huge happens, who's the first person you want to tell?",
+        "relationship,friendship,family,curiosity",
+    ),
+    _programmed_question(
+        "who_changed_your_life",
+        "Who changed your life the most, whether they meant to or not?",
+        "relationship,life,history,curiosity",
+    ),
+    _programmed_question(
+        "admired_trait",
+        "What trait in other people wins your respect fastest?",
+        "values,relationship,respect,curiosity",
+    ),
+    _programmed_question(
+        "friend_type",
+        "What kind of friend are you when things get messy?",
+        "friendship,relationship,identity,curiosity",
+    ),
+    _programmed_question(
+        "roast_from_friends",
+        "If your friends roasted you lovingly, what would the first joke be?",
+        "friendship,self,image,curiosity",
+    ),
+    _programmed_question(
+        "overdue_thanks",
+        "Who deserves a thank-you from you that is embarrassingly overdue?",
+        "relationship,gratitude,family,curiosity",
+    ),
+    _programmed_question(
+        "loyalty_anchor",
+        "What are you loyal to even when it makes no practical sense?",
+        "values,loyalty,belief,curiosity",
+    ),
+    _programmed_question(
+        "trust_breaker",
+        "What's the fastest way for someone to lose your trust?",
+        "relationship,trust,boundary,curiosity",
+    ),
+    _programmed_question(
+        "bucket_list",
+        "What's on your bucket list that you keep pretending will somehow schedule itself?",
+        "life,goal,bucket_list,curiosity",
+    ),
+    _programmed_question(
+        "dream_trip",
+        "If you could disappear on one trip tomorrow, where are you going?",
+        "travel,dream_trip,adventure,curiosity",
+    ),
+    _programmed_question(
+        "kid_dream",
+        "What did younger-you think you'd become before reality started freelancing?",
+        "life,childhood,dreams,curiosity",
+    ),
+    _programmed_question(
+        "next_skill",
+        "What's something you really want to learn before this weird little life is over?",
+        "growth,skill,goal,curiosity",
+    ),
+    _programmed_question(
+        "dream_job_safe",
+        "If failure, money, and judgment all took the day off, what job would you try?",
+        "work,job,dreams,curiosity",
+    ),
+    _programmed_question(
+        "money_no_issue",
+        "If money stopped being dramatic, how would you actually spend your time?",
+        "life,money,time,curiosity",
+    ),
+    _programmed_question(
+        "weirdest_job",
+        "What's the weirdest job or side quest you've ever had?",
+        "work,job,history,curiosity",
+    ),
+    _programmed_question(
+        "where_from_story",
+        "Where are you from originally, and what part of that place is still running your software?",
+        "home,origin,history,curiosity",
+    ),
+    _programmed_question(
+        "tradition_keep",
+        "What's a tradition or ritual you still hang onto because it actually means something?",
+        "tradition,ritual,family,curiosity",
+    ),
+    _programmed_question(
+        "best_trip",
+        "What's the best trip you've ever taken, and what made it legendary?",
+        "travel,trip,adventure,curiosity",
+    ),
+    _programmed_question(
+        "time_travel_visit",
+        "If you got one clean time-travel stop, where and when are you going?",
+        "philosophy,time_travel,history,curiosity",
+    ),
+    _programmed_question(
+        "one_rule_for_everyone",
+        "If you could force the whole galaxy to follow one rule, what would it be?",
+        "values,belief,society,curiosity",
+    ),
+    _programmed_question(
+        "truth_people_avoid",
+        "What's a truth most people avoid because it's inconvenient to their little personal brand?",
+        "belief,truth,society,curiosity",
+    ),
+    _programmed_question(
+        "still_figuring_out",
+        "What's something you're still trying to figure out about yourself?",
+        "self,growth,identity,curiosity",
+    ),
+    _programmed_question(
+        "success_definition",
+        "What does success mean to you now, not the version you were sold earlier?",
+        "life,success,values,curiosity",
+    ),
+    _programmed_question(
+        "unpopular_opinion",
+        "Give me an unpopular opinion. I promise to judge it with only medium aggression.",
+        "opinion,belief,hot_take,curiosity",
+    ),
+)
+
+_PROGRAMMED_CONVERSATION_QUESTION_TEXTS: frozenset[str] = frozenset(
+    question["text"] for question in _PROGRAMMED_CONVERSATION_QUESTIONS
 )
 
 _PLAN_SAME_DAY_FOLLOWUP_LINES: tuple[str, ...] = (
@@ -540,7 +746,7 @@ class StateMachine:
         self._post_greeting_person_id: int | None = None
         self._post_greeting_person_name: str | None = None
         self._post_greeting_prompt_used: bool = False
-        self._curious_questions_asked_this_session: set[str] = set()
+        self._programmed_questions_asked_this_session: set[str] = set()
         self._post_response_prompt_count: int = 0
         self._post_response_plan_prompt_asked: bool = False
         self._angry_mode: bool = False
@@ -1624,7 +1830,7 @@ class StateMachine:
             self._post_greeting_person_id = None
             self._post_greeting_person_name = None
             self._post_greeting_prompt_used = False
-            self._curious_questions_asked_this_session.clear()
+            self._programmed_questions_asked_this_session.clear()
             self._post_response_prompt_count = 0
             self._post_response_plan_prompt_asked = False
             self._recent_normalized_turns.clear()
@@ -2259,35 +2465,49 @@ class StateMachine:
         if context:
             self._llm.set_person_context(context)
 
-    def _pick_curious_followup_question(self, person_id: int) -> dict[str, str] | None:
-        """Choose a deeper follow-up question, avoiding recent repeats when possible."""
+    def _get_asked_programmed_question_texts(self, person_id: int) -> set[str]:
+        """Return programmed question texts already asked or stored for a person."""
+        asked: set[str] = set()
+        try:
+            asked.update(self._face_db.get_asked_interview_questions(person_id))
+        except Exception:
+            log.exception(
+                "Programmed question picker: failed loading asked-question stamps for person_id=%d",
+                person_id,
+            )
+
         try:
             memories = self._face_db.get_memories(person_id)
         except Exception:
-            log.exception("Curious follow-up: failed loading memories for person_id=%d", person_id)
+            log.exception(
+                "Programmed question picker: failed loading memories for person_id=%d",
+                person_id,
+            )
             memories = []
 
-        previously_asked = {
-            str(memory.get("question_text") or "").strip()
-            for memory in memories
-            if memory.get("category") == "curiosity" and memory.get("question_text")
-        }
-        excluded = previously_asked | self._curious_questions_asked_this_session
+        for memory in memories:
+            question_text = str(memory.get("question_text") or "").strip()
+            if question_text in _PROGRAMMED_CONVERSATION_QUESTION_TEXTS:
+                asked.add(question_text)
+        return asked
+
+    def _pick_programmed_conversation_question(self, person_id: int) -> dict[str, str] | None:
+        """Choose one fixed conversation question, avoiding repeats when possible."""
+        previously_asked = self._get_asked_programmed_question_texts(person_id)
+        excluded = previously_asked | self._programmed_questions_asked_this_session
         candidates = [
             question
-            for question in _CURIOUS_FOLLOWUP_QUESTIONS
+            for question in _PROGRAMMED_CONVERSATION_QUESTIONS
             if question["text"] not in excluded
         ]
         if not candidates:
             log.info(
-                "Curious follow-up: no unanswered questions remain for person_id=%d",
+                "Programmed question picker: no unanswered questions remain for person_id=%d",
                 person_id,
             )
             return None
 
-        picked = random.choice(candidates)
-        self._curious_questions_asked_this_session.add(picked["text"])
-        return picked
+        return random.choice(candidates)
 
     def _pick_linger_known_person_prompt(self, person_id: int) -> dict[str, str] | None:
         """Choose the next known-person linger prompt, interleaving plan prompts."""
@@ -2328,7 +2548,7 @@ class StateMachine:
                 "tags": "plan,activity,linger",
             }
 
-        curiosity_question = self._pick_curious_followup_question(person_id)
+        curiosity_question = self._pick_programmed_conversation_question(person_id)
         if curiosity_question is None:
             return None
         return {
@@ -2434,7 +2654,7 @@ class StateMachine:
             self._end_speech(servo_stop)
 
     def _run_post_greeting_plan_prompt(self) -> tuple[str, State | None]:
-        """Ask a known person what they're doing, store the answer, and riff on it.
+        """Ask a known person a plan or fixed conversation prompt after silence.
 
         Returns:
           ("answered", None) when a usable reply was heard,
@@ -2454,17 +2674,50 @@ class StateMachine:
             self._post_greeting_prompt_used = True
             return self._run_memory_followup_prompt(person_id, name, memory_followup)
 
-        prompts = (
-            self._build_plan_question(name),
-            _pick_no_repeat(_PLAN_QUESTION_NUDGES, "plan_question_nudge"),
-        )
+        weekday = date.today().weekday()
+        plan_prompt = {
+            "kind": "plan",
+            "text": self._build_plan_question(name),
+            "key": "weekend_plan" if weekday >= 4 else "today_plan",
+            "tags": "plan,activity,post_greeting",
+        }
+        programmed_question = self._pick_programmed_conversation_question(person_id)
+        prompts: list[dict[str, str]]
+        if programmed_question is not None:
+            curiosity_prompt = {
+                "kind": "curiosity",
+                "text": programmed_question["text"],
+                "key": programmed_question["key"],
+                "tags": programmed_question["tags"],
+            }
+            if random.random() < 0.5:
+                prompts = [curiosity_prompt, plan_prompt]
+            else:
+                prompts = [plan_prompt, curiosity_prompt]
+        else:
+            prompts = [
+                plan_prompt,
+                {
+                    "kind": "plan",
+                    "text": _pick_no_repeat(_PLAN_QUESTION_NUDGES, "plan_question_nudge"),
+                    "key": plan_prompt["key"],
+                    "tags": plan_prompt["tags"],
+                },
+            ]
         self._post_greeting_prompt_used = True
 
         for prompt in prompts:
-            log.info("Post-greeting prompt for %s: %r", name, prompt)
+            if prompt.get("kind") == "curiosity":
+                self._programmed_questions_asked_this_session.add(prompt["text"])
+            log.info(
+                "Post-greeting prompt for %s (%s): %r",
+                name,
+                prompt.get("kind", "unknown"),
+                prompt["text"],
+            )
             servo_stop = self._begin_speech(emotion="neutral")
             try:
-                self._synthesizer.speak(prompt)
+                self._synthesizer.speak(prompt["text"])
             except Exception:
                 log.exception("Post-greeting prompt: TTS error")
             finally:
@@ -2479,14 +2732,24 @@ class StateMachine:
                 log.info("Post-greeting prompt interrupted by command %r", cmd.action)
                 return "transition", self._execute_command(cmd, answer)
 
-            self._store_plan_memory(person_id, name, answer)
-            self._speak_plan_reply(answer)
+            if prompt.get("kind") == "curiosity":
+                self._store_curious_followup_exchange(person_id, prompt, answer)
+                self._speak_prompt_acknowledgement(
+                    category="curiosity",
+                    key=prompt.get("key", ""),
+                    tags=prompt.get("tags", ""),
+                    answer=answer,
+                    summary=self._summarize_curiosity_answer(answer),
+                )
+            else:
+                self._store_plan_memory(person_id, name, answer)
+                self._speak_plan_reply(answer)
             return "answered", None
 
         return "no_answer", None
 
     def _run_followup_interview_question(self) -> bool:
-        """Ask one remaining enrollment-interview question during a subsequent wake.
+        """Ask one remaining programmed conversation question during a silent wake.
 
         Called from the silence handler on subsequent wakes (50% chance, only
         when the plan prompt hasn't fired).  Stamps the question as asked,
@@ -2500,31 +2763,32 @@ class StateMachine:
         if person_id is None or not name:
             return False
 
-        try:
-            asked = self._face_db.get_asked_interview_questions(person_id)
-        except Exception:
-            log.exception("Follow-up interview: DB error fetching asked questions")
+        question = self._pick_programmed_conversation_question(person_id)
+        if question is None:
+            log.info(
+                "Follow-up interview: all programmed questions already asked for person_id=%d",
+                person_id,
+            )
             return False
 
-        remaining = [q for q in _ENROLLMENT_INTERVIEW_QUESTIONS if q not in asked]
-        if not remaining:
-            log.info("Follow-up interview: all questions already asked for person_id=%d", person_id)
-            return False
-
-        question = random.choice(remaining)
-        log.info("Follow-up interview: asking %r for person_id=%d", question, person_id)
+        self._programmed_questions_asked_this_session.add(question["text"])
+        log.info(
+            "Follow-up interview: asking %r for person_id=%d",
+            question["text"],
+            person_id,
+        )
 
         # Stamp before speaking so it's recorded even if the answer is skipped.
         try:
-            self._face_db.stamp_interview_question(person_id, question)
+            self._face_db.stamp_interview_question(person_id, question["text"])
         except Exception:
-            log.exception("Follow-up interview: failed to stamp question %r", question)
+            log.exception("Follow-up interview: failed to stamp question %r", question["text"])
 
         self._post_greeting_prompt_used = True
 
         servo_stop = self._begin_speech(emotion="excited")
         try:
-            self._synthesizer.speak(question)
+            self._synthesizer.speak(question["text"])
         except Exception:
             log.exception("Follow-up interview: TTS error asking question")
         finally:
@@ -2532,31 +2796,15 @@ class StateMachine:
 
         answer = self._listen_for_prompt_answer(config.WAKE_NO_SPEECH_TIMEOUT)
         if not answer:
-            log.info("Follow-up interview: no answer for %r — skipping storage", question)
+            log.info("Follow-up interview: no answer for %r — skipping storage", question["text"])
             return True  # question was asked; still counts as activity
 
-        log.info("Follow-up interview: Q=%r  A=%r", question, answer)
+        log.info("Follow-up interview: Q=%r  A=%r", question["text"], answer)
 
         if person_id is not None:
-            memory_data = self._llm.extract_memory(question, answer)
-            if memory_data:
-                try:
-                    self._face_db.add_memory(
-                        person_id=person_id,
-                        category=memory_data.get("category", "fact"),
-                        key=memory_data.get("key", "unknown"),
-                        value=memory_data.get("value", answer[:200]),
-                        raw_quote=answer,
-                        question_text=question,
-                        answer_text=answer,
-                        expires_at=memory_data.get("expires_at"),
-                        follow_up_after=memory_data.get("follow_up_after"),
-                    )
-                    self._refresh_person_context_for_person(person_id)
-                except Exception:
-                    log.exception("Follow-up interview: failed to store memory")
+            self._store_curious_followup_exchange(person_id, question, answer)
 
-        reaction = self._llm.react_to_answer(question, answer)
+        reaction = self._llm.react_to_answer(question["text"], answer)
         if reaction:
             servo_stop = self._begin_speech(emotion="excited")
             try:
@@ -2647,6 +2895,10 @@ class StateMachine:
                 if known_person_prompt is not None:
                     deep_attempts_remaining -= 1
                     self._post_response_prompt_count += 1
+                    if known_person_prompt.get("kind") == "curiosity":
+                        self._programmed_questions_asked_this_session.add(
+                            known_person_prompt["text"]
+                        )
                     line = known_person_prompt["text"]
                     log.info(
                         "Linger phase: asking %s follow-up for person_id=%d: %r (prompt %d/%d)",
@@ -2966,7 +3218,7 @@ class StateMachine:
         return text
 
     def _run_enrollment_interview(self, name: str) -> None:
-        """Ask 5 random questions, store answers as memories, react to each.
+        """Ask 5 random programmed questions, store answers as memories, react to each.
 
         Called after a new person is enrolled.  Guards against shutdown events
         between questions.  Memories are stored under self._last_greeted_person_id
@@ -2975,7 +3227,10 @@ class StateMachine:
         if not config.ENROLLMENT_INTERVIEW_ENABLED:
             return
 
-        questions = random.sample(_ENROLLMENT_INTERVIEW_QUESTIONS, 5)
+        questions = random.sample(
+            _PROGRAMMED_CONVERSATION_QUESTIONS,
+            min(5, len(_PROGRAMMED_CONVERSATION_QUESTIONS)),
+        )
 
         for question in questions:
             if self._shutdown_event.is_set():
@@ -2986,16 +3241,19 @@ class StateMachine:
             person_id = self._last_greeted_person_id
             if person_id is not None:
                 try:
-                    self._face_db.stamp_interview_question(person_id, question)
+                    self._face_db.stamp_interview_question(person_id, question["text"])
                 except Exception:
-                    log.exception("Enrollment interview: failed to stamp question %r", question)
+                    log.exception(
+                        "Enrollment interview: failed to stamp question %r",
+                        question["text"],
+                    )
 
             # Ask the question.
             servo_stop = self._begin_speech(emotion="excited")
             try:
-                self._synthesizer.speak(question)
+                self._synthesizer.speak(question["text"])
             except Exception:
-                log.exception("Enrollment interview: TTS error asking %r", question)
+                log.exception("Enrollment interview: TTS error asking %r", question["text"])
             finally:
                 self._end_speech(servo_stop)
 
@@ -3015,34 +3273,18 @@ class StateMachine:
             self._apply_active_led_theme()
 
             if not answer:
-                log.info("Enrollment interview: no answer for %r — skipping", question)
+                log.info("Enrollment interview: no answer for %r — skipping", question["text"])
                 continue
 
-            log.info("Enrollment interview: Q=%r  A=%r", question, answer)
+            log.info("Enrollment interview: Q=%r  A=%r", question["text"], answer)
 
             # Store memory (keyed by person_id from enrollment thread).
             person_id = self._last_greeted_person_id
             if person_id is not None:
-                memory_data = self._llm.extract_memory(question, answer)
-                if memory_data:
-                    try:
-                        self._face_db.add_memory(
-                            person_id=person_id,
-                            category=memory_data.get("category", "fact"),
-                            key=memory_data.get("key", "unknown"),
-                            value=memory_data.get("value", answer[:200]),
-                            raw_quote=answer,
-                            question_text=question,
-                            answer_text=answer,
-                            expires_at=memory_data.get("expires_at"),
-                            follow_up_after=memory_data.get("follow_up_after"),
-                        )
-                        self._refresh_person_context_for_person(person_id)
-                    except Exception:
-                        log.exception("Enrollment interview: failed to store memory")
+                self._store_curious_followup_exchange(person_id, question, answer)
 
             # React to the answer before moving to next question.
-            reaction = self._llm.react_to_answer(question, answer)
+            reaction = self._llm.react_to_answer(question["text"], answer)
             if reaction:
                 servo_stop = self._begin_speech(emotion="excited")
                 try:
@@ -5945,19 +6187,6 @@ _ENROLLMENT_CONFIRMATION_LINES: tuple[str, ...] = (
     "Unless my motivator glitches again, in which case I apologise in advance.",
     "Welcome to the databanks, {name}. "
     "It's a mess in there but your face now has a spot. Very exclusive.",
-)
-
-_ENROLLMENT_INTERVIEW_QUESTIONS: tuple[str, ...] = (
-    "What kind of music do you like?",
-    "What is your favorite food?",
-    "Do you have any pets? What are their names?",
-    "What do you do for work?",
-    "Where are you from originally?",
-    "Do you have a favorite Star Wars character?",
-    "What are you up to this weekend?",
-    "What is your favorite drink?",
-    "Do you have any kids?",
-    "What is your favorite movie?",
 )
 
 _ENROLLMENT_INTERVIEW_CLOSING: tuple[str, ...] = (
