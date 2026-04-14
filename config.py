@@ -139,9 +139,7 @@ SERVO_CHANNELS: dict[int, dict] = {
 
 # Channel groups used by the servo controller
 HEAD_CHANNELS      = [0, 1, 2, 3]   # neck, headlift, headtilt, visor — full head group
-IDLE_HEAD_CHANNELS = [0, 1]         # channels eligible for idle head motion
-                                    # ch 2 (headtilt) and ch 3 (visor) are excluded:
-                                    # headtilt is speech-only; visor has its own idle timer
+IDLE_HEAD_CHANNELS = [0, 1]         # retained for compatibility; head search/tracking own these axes now
 ARM_CHANNELS  = [4, 5, 6, 7]   # elbow, hand, pokerarm, heroarm
 
 # Channel number aliases — used by sequences/animations.py for readability
@@ -571,6 +569,25 @@ HEAD_TRACKING_Y_MARGIN: float = float(_optional("HEAD_TRACKING_Y_MARGIN", "0.10"
 # Values below 0.5 shift the neutral point toward the top of the frame so
 # faces at normal viewing height (upper-middle) produce a downward tilt.
 HEAD_TRACKING_TILT_Y_BIAS: float = float(_optional("HEAD_TRACKING_TILT_Y_BIAS", "0.35"))
+# Deterministic no-face scan used while Rex is awake/idle without a face lock.
+HEAD_SEARCH_ENABLED: bool = _optional("HEAD_SEARCH_ENABLED", "true").lower() not in (
+    "0", "false", "no"
+)
+HEAD_SEARCH_LOST_FACE_SECONDS: float = float(
+    _optional("HEAD_SEARCH_LOST_FACE_SECONDS", "0.8")
+)
+HEAD_SEARCH_STEP_HOLD_SECONDS: float = float(
+    _optional("HEAD_SEARCH_STEP_HOLD_SECONDS", "0.8")
+)
+HEAD_SEARCH_BURST_SECONDS: float = float(
+    _optional("HEAD_SEARCH_BURST_SECONDS", "6.0")
+)
+HEAD_SEARCH_COOLDOWN_SECONDS: float = float(
+    _optional("HEAD_SEARCH_COOLDOWN_SECONDS", "1.5")
+)
+HEAD_SEARCH_SPEED: int = int(
+    _optional("HEAD_SEARCH_SPEED", str(SERVO_NECK_STARTUP_SPEED))
+)
 
 # When True, Rex runs a 5-question interview after enrolling a new person and
 # stores the answers as persistent memories in the face DB.

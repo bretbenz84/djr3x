@@ -36,7 +36,8 @@ Thread model
     Only sends a servo command when the smoothed position has moved more
     than HEAD_TRACKING_DEAD_ZONE qµs — suppresses micro-jitter.
     When paused: loop stays alive, servo commands are suppressed.
-    When no face detected: target is held at the last known position.
+    When no face detected: after a short timeout, optionally runs a
+    deterministic face-search sweep until a face is found or the burst ends.
 
 Speed note
 ----------
@@ -166,6 +167,15 @@ class HeadTracker:
         self._appear_frame_count:   int  = 0       # consecutive face-detected frames in event
         self._face_appear_fired:    bool = False   # prevents double-fire per appearance
 
+        # Face-search state — active only while face search is enabled and no
+        # face has been detected for HEAD_SEARCH_LOST_FACE_SECONDS.
+        self._face_search_enabled: bool = bool(getattr(cfg, "HEAD_SEARCH_ENABLED", True))
+        self._search_active: bool = False
+        self._search_step_index: int = 0
+        self._search_step_started_at: float = 0.0
+        self._search_burst_started_at: float = 0.0
+        self._search_cooldown_until: float = 0.0
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -257,6 +267,156 @@ class HeadTracker:
         """
         return (time.monotonic() - self._last_face_seen_time) <= within_seconds
 
+    def set_face_search_enabled(self, enabled: bool, reason: str = "") -> None:
+        """Enable or disable active face-search sweeps while no face is locked."""
+        new_value = bool(enabled) and bool(getattr(self._cfg, "HEAD_SEARCH_ENABLED", True))
+        if self._face_search_enabled == new_value:
+            return
+        self._face_search_enabled = new_value
+        if not new_value:
+            self._stop_face_search(reason="disabled")
+        log.info(
+            "HeadTracker: face search %s%s",
+            "enabled" if new_value else "disabled",
+            f" ({reason})" if reason else "",
+        )
+
+    def _search_targets_for_step(self, step_index: int) -> tuple[str, int, int, int]:
+        """Return the deterministic servo targets for one face-search step."""
+        steps = (
+            ("center", self._neck_neutral, self._lift_neutral, self._tilt_neutral),
+            ("neck_left", self._neck_min, self._lift_neutral, self._tilt_neutral),
+            ("neck_right", self._neck_max, self._lift_neutral, self._tilt_neutral),
+            (
+                "tilt_down",
+                self._neck_neutral,
+                self._lift_neutral,
+                self._cfg.SERVO_CHANNELS[_CH_TILT]["max"],
+            ),
+            (
+                "head_down",
+                self._neck_neutral,
+                self._lift_min,
+                self._cfg.SERVO_CHANNELS[_CH_TILT]["max"],
+            ),
+        )
+        return steps[step_index % len(steps)]
+
+    def _stop_face_search(
+        self,
+        *,
+        reason: str = "",
+        cooldown_until: float = 0.0,
+    ) -> None:
+        """Reset any in-progress face-search sweep."""
+        was_active = self._search_active
+        self._search_active = False
+        self._search_step_index = 0
+        self._search_step_started_at = 0.0
+        self._search_burst_started_at = 0.0
+        self._search_cooldown_until = cooldown_until
+        if was_active:
+            log.info(
+                "HeadTracker: face search stopped%s",
+                f" ({reason})" if reason else "",
+            )
+
+    def _apply_direct_targets(
+        self,
+        neck: int,
+        lift: int,
+        tilt: int,
+        *,
+        speed: int,
+        force: bool = False,
+    ) -> None:
+        """Apply non-smoothed tracking/search targets immediately."""
+        dead_zone = self._cfg.HEAD_TRACKING_DEAD_ZONE
+        with self._state_lock:
+            self._target_neck = neck
+            self._target_lift = lift
+            self._target_tilt = tilt
+            self._smooth_neck = float(neck)
+            self._smooth_lift = float(lift)
+            self._smooth_tilt = float(tilt)
+
+            send_neck = force or abs(neck - self._sent_neck) >= dead_zone
+            send_lift = force or abs(lift - self._sent_lift) >= dead_zone
+            send_tilt = force or abs(tilt - self._sent_tilt) >= dead_zone
+            if send_neck:
+                self._sent_neck = neck
+            if send_lift:
+                self._sent_lift = lift
+            if send_tilt:
+                self._sent_tilt = tilt
+
+        if self._pause_event.is_set() or self._servos is None:
+            return
+        if send_neck:
+            self._servos.set_channel_speed(_CH_NECK, speed)
+            self._servos.set_position(_CH_NECK, neck)
+        if send_lift:
+            self._servos.set_channel_speed(_CH_LIFT, speed)
+            self._servos.set_position(_CH_LIFT, lift)
+        if send_tilt:
+            self._servos.set_channel_speed(_CH_TILT, speed)
+            self._servos.set_position(_CH_TILT, tilt)
+
+    def _advance_face_search(self, now: float) -> None:
+        """Run one step of the deterministic face-search sweep."""
+        if now < self._search_cooldown_until:
+            return
+
+        search_speed = int(getattr(self._cfg, "HEAD_SEARCH_SPEED", _TRACKING_SPEED))
+        step_hold = float(getattr(self._cfg, "HEAD_SEARCH_STEP_HOLD_SECONDS", "0.8"))
+        burst_seconds = float(getattr(self._cfg, "HEAD_SEARCH_BURST_SECONDS", "6.0"))
+        cooldown_seconds = float(
+            getattr(self._cfg, "HEAD_SEARCH_COOLDOWN_SECONDS", "1.5")
+        )
+
+        if not self._search_active:
+            self._search_active = True
+            self._search_step_index = 0
+            self._search_step_started_at = 0.0
+            self._search_burst_started_at = now
+            log.info(
+                "HeadTracker: no face lock for %.1f s — starting face search",
+                now - self._last_face_seen_time,
+            )
+
+        if (now - self._search_burst_started_at) >= burst_seconds:
+            log.info(
+                "HeadTracker: face search burst expired after %.1f s — recentering",
+                burst_seconds,
+            )
+            self._apply_direct_targets(
+                self._neck_neutral,
+                self._lift_neutral,
+                self._tilt_neutral,
+                speed=search_speed,
+            )
+            self._stop_face_search(
+                reason="burst timeout",
+                cooldown_until=now + cooldown_seconds,
+            )
+            return
+
+        if self._search_step_started_at and (now - self._search_step_started_at) < step_hold:
+            return
+
+        if self._search_step_started_at:
+            self._search_step_index += 1
+        self._search_step_started_at = now
+        step_name, neck, lift, tilt = self._search_targets_for_step(self._search_step_index)
+        log.debug("HeadTracker: face search step=%s", step_name)
+        self._apply_direct_targets(
+            neck,
+            lift,
+            tilt,
+            speed=search_speed,
+            force=True,
+        )
+
     # ------------------------------------------------------------------
     # Background detection loop
     # ------------------------------------------------------------------
@@ -302,6 +462,10 @@ class HeadTracker:
             )
 
             if len(faces) > 0:
+                if self._search_active:
+                    log.info("HeadTracker: face detected during search — resuming tracking")
+                    self._stop_face_search(reason="face detected")
+
                 # Pick the largest face when multiple are visible.
                 x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
                 face_cx = x + w // 2
@@ -390,12 +554,23 @@ class HeadTracker:
                     self._target_lift = t_lift
                     self._target_tilt = t_tilt
             else:
-                # No face — hold last known target, do NOT reset to neutral.
-                # Reset appear-event state so the next appearance starts a fresh
-                # confirmation count and the callback can fire again.
+                # No face — either hold the last known target briefly or, when
+                # enabled, run the deterministic face-search sweep.
+                now = time.monotonic()
                 self._in_face_appear_event = False
                 self._appear_frame_count   = 0
                 self._face_appear_fired    = False
+                lost_face_seconds = float(
+                    getattr(self._cfg, "HEAD_SEARCH_LOST_FACE_SECONDS", "0.8")
+                )
+                if (
+                    self._face_search_enabled
+                    and not self._pause_event.is_set()
+                    and (now - self._last_face_seen_time) >= lost_face_seconds
+                ):
+                    self._advance_face_search(now)
+                elif self._search_active:
+                    self._stop_face_search(reason="paused or face-loss window reset")
 
             # ── EMA smoothing ─────────────────────────────────────────────
             with self._state_lock:

@@ -644,6 +644,10 @@ class StateMachine:
         # Start head tracker after camera warmup so is_available() is reliable.
         if self._head_tracker is not None:
             self._head_tracker.start()
+            self._head_tracker.set_face_search_enabled(
+                self._state in (State.IDLE, State.ACTIVE),
+                reason="startup",
+            )
             log.info("StateMachine: Head tracking  — CONNECTED (shared camera)")
         elif not config.HEAD_TRACKING_ENABLED:
             log.info("StateMachine: Head tracking  — DISABLED")
@@ -1637,6 +1641,11 @@ class StateMachine:
             self._leds.stop_mouth()
             self._leds._send_head(config.LED_CMD_SPEAK_STOP)
         self._state = new_state
+        if self._head_tracker is not None:
+            self._head_tracker.set_face_search_enabled(
+                new_state in (State.IDLE, State.ACTIVE),
+                reason=f"state={new_state.value}",
+            )
         self._refresh_autonomy_context()
 
     # ------------------------------------------------------------------
