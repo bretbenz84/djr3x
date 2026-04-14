@@ -63,7 +63,7 @@ def get_current_date() -> dict:
         day       — int, e.g. 11
         year      — int, e.g. 2026
         ordinal   — e.g. '11th'
-        formatted — e.g. 'Saturday, April 11th 2026'
+        formatted — e.g. 'Saturday April 11, 2026'
     """
     now = datetime.now()
     weekday  = now.strftime("%A")
@@ -71,7 +71,7 @@ def get_current_date() -> dict:
     day      = now.day
     year     = now.year
     ord_day  = _ordinal(day)
-    formatted = f"{weekday}, {month} {ord_day} {year}"
+    formatted = f"{weekday} {month} {day}, {year}"
     return {
         "weekday":   weekday,
         "month":     month,

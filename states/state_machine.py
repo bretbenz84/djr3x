@@ -5516,27 +5516,15 @@ class StateMachine:
         self._speak_simple(line)
 
     def _handle_tell_date(self, original_text: str | None = None) -> None:
-        """Announce today's date in Rex style."""
+        """Announce today's date directly without using the LLM."""
         date_info = realworld.get_current_date()
         holiday   = realworld.get_holiday()
         formatted = date_info["formatted"]
-
-        if holiday:
-            prompt = (
-                f"Announce that today is {formatted} and that it is {holiday}. "
-                f"Ask what the person is doing to celebrate. Rex style, 1-2 sentences."
-            )
-        else:
-            prompt = (
-                f"Announce that today is {formatted}. "
-                f"Make a Rex joke about the passage of time, the day of the week, or the month. "
-                f"Something like 'Time is meaningless in hyperspace but here we are.' 1-2 sentences."
-            )
-
         log.info("tell_date: formatted=%r holiday=%r", formatted, holiday)
-        line = self._llm_simple(self._REX_SYSTEM, prompt)
-        if not line:
-            line = f"It is {formatted}. Time marches on whether you are ready or not."
+        if holiday:
+            line = f"{formatted}. It is {holiday}."
+        else:
+            line = formatted + "."
         self._speak_simple(line)
 
     def _handle_tell_location(self, original_text: str | None = None) -> None:
