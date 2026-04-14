@@ -5176,33 +5176,33 @@ class StateMachine:
         if frame_available:
             if self._angry_mode:
                 return random.choice((
-                    f"{name}, I have reviewed the outfit. It lost immediately.",
-                    f"{name}, that look is giving desperate cantina side quest.",
-                    f"{name}, I saw the shirt. It made the reunion worse.",
-                    f"{name}, visual scan complete. Those fashion choices are hostile.",
+                    "I have reviewed the outfit. It lost immediately.",
+                    "That look is giving desperate cantina side quest.",
+                    "I saw the shirt. It made the reunion worse.",
+                    "Visual scan complete. Those fashion choices are hostile.",
                 ))
             return random.choice((
-                f"{name}, I have decided I do not like that shirt.",
-                f"{name}, that outfit is making claims it cannot support.",
-                f"{name}, visual scan complete. The look is losing.",
-                f"{name}, your style remains a very human judgment error.",
+                "I have decided I do not like that shirt.",
+                "That outfit is making claims it cannot support.",
+                "Visual scan complete. The look is losing.",
+                "That style remains a very human judgment error.",
             ))
 
         if bother_count >= 4:
             return random.choice((
-                f"{name}, {bother_count} wakeups today. This is becoming a pattern.",
-                f"{name}, you keep summoning me like this is a hobby.",
+                f"{bother_count} wakeups today. This is becoming a pattern.",
+                "You keep summoning me like this is a hobby.",
             ))
 
         if days_since_last_seen is not None and days_since_last_seen >= 3:
             return random.choice((
-                f"{name}, gone for {days_since_last_seen} days and this is the comeback look.",
-                f"{name}, {days_since_last_seen} days away did not improve your dramatic timing.",
+                f"Gone for {days_since_last_seen} days and this is the comeback look.",
+                f"{days_since_last_seen} days away did not improve your dramatic timing.",
             ))
 
         return random.choice((
-            f"{name}, you again. Persistent.",
-            f"{name}, I was enjoying the silence, and then you returned.",
+            "You again. Persistent.",
+            "I was enjoying the silence, and then you returned.",
         ))
 
     def _maybe_speak_known_person_wake_opinion(
