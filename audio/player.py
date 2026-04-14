@@ -454,15 +454,20 @@ class AudioPlayer:
         return self._audio_started.wait(timeout=timeout)
 
     def clear_audio_started(self) -> None:
-        """Reset the audio-started event for a new speech segment.
+        """Reset per-segment speech timing state before a new utterance.
 
         Must be called at the start of each _begin_speech() so that
         wait_for_audio_start() always waits for THIS segment's first chunk,
         not a stale value left set by the previous speech.  Without this,
         the mouth-trigger thread returns immediately on every utterance
         after the first, causing pre-glow before audio actually plays.
+
+        Also clears any stale RMS left over from the previous segment so
+        speech-reactive motion cannot inherit a non-zero level before the
+        new audio stream has actually started.
         """
         self._audio_started.clear()
+        self._rms = 0.0
 
     # ------------------------------------------------------------------
     # Lifecycle

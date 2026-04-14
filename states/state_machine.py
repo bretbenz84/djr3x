@@ -74,6 +74,7 @@ log = logging.getLogger(__name__)
 
 # How often the servo-speak worker calls speak_move() during TTS (~20 Hz).
 _SERVO_SPEAK_INTERVAL: float = 0.05
+_SERVO_SPEAK_INTENSITY_FLOOR: float = 0.02
 
 _ARE_YOU_THERE_PHRASES: list[str] = [
     "Hello?! I know you're out there — I can hear you breathing, lifeform.",
@@ -3833,11 +3834,29 @@ class StateMachine:
             self._servos.set_position(config.SERVO_ARM_LEFT, config.IDLE_ELBOW_REST)
 
     def _servo_speak_worker(self, stop: threading.Event) -> None:
-        """Poll player.rms → speak_move(intensity) at ~20 Hz."""
+        """Poll live speech RMS and animate only while real audio is playing."""
+        deadline = time.monotonic() + 5.0
+        while not stop.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if self._player.wait_for_audio_start(timeout=min(0.1, remaining)):
+                break
+        else:
+            return
+
+        if not self._player.wait_for_audio_start(timeout=0.0):
+            log.warning(
+                "_servo_speak_worker: audio never started within 5 s — "
+                "speech servo motion suppressed"
+            )
+            return
+
         while not stop.is_set():
             if self._servos is not None:
                 intensity = self._player.rms / 255.0
-                self._servos.speak_move(intensity)
+                if intensity >= _SERVO_SPEAK_INTENSITY_FLOOR:
+                    self._servos.speak_move(intensity)
             time.sleep(_SERVO_SPEAK_INTERVAL)
 
     # ------------------------------------------------------------------
@@ -6227,8 +6246,8 @@ _FACE_LOCK_LINES: tuple[str, ...] = (
     "There you are.",
     "Oh hi!",
     "Oh hiyeeee.",
-    "Wassup.",
-    "Wassuuuup.",
+    "Waz-up.",
+    "Ooh its you.",
     "Oh hiyeee.",
     "Well hello.",
     "Ayyy, there you are.",
