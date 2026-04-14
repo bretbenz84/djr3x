@@ -464,6 +464,9 @@ POST_RESPONSE_LINGER_LISTEN_TIMEOUT: float = float(_optional("POST_RESPONSE_LING
 POST_RESPONSE_LINGER_CURIOSITY_CHANCE: float = float(
     _optional("POST_RESPONSE_LINGER_CURIOSITY_CHANCE", "0.35")
 )
+MEMORY_CALLBACK_COOLDOWN_SECONDS: float = float(
+    _optional("MEMORY_CALLBACK_COOLDOWN_SECONDS", "1800.0")
+)
 
 # Face-presence wake — triggers a greeting when a face appears after a long absence
 FACE_APPEAR_ABSENT_SECONDS: float = 8.0   # no-face gap required before appearance triggers greeting

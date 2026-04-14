@@ -468,7 +468,7 @@ class StateMachine:
 
         # Vision
         self._camera = Camera()
-        self._face_db = FaceDB()
+        self._face_db = FaceDB(config.FACE_DB_PATH)
         self._face_recognizer = FaceRecognizer(self._face_db)
 
         # Head tracking — created here; started in start() after camera warmup.
@@ -2108,31 +2108,12 @@ class StateMachine:
         self._face_db.mark_followed_up(memory["id"])
 
     def _build_memory_followup_line(self, person_id: int, memory: dict) -> str:
-        """Return a deterministic follow-up line for recent plan memories."""
+        """Return a callback question grounded in a stored memory."""
         person = self._face_db.get_person(person_id)
         name = person["name"] if person else "lifeform"
         value = str(memory.get("value") or "").strip()
         key = str(memory.get("key") or "")
         raw_quote = str(memory.get("raw_quote") or "").strip()
-        answer_text = str(memory.get("answer_text") or "").strip()
-
-        if memory.get("category") == "curiosity":
-            summary = self._summarize_curiosity_answer(answer_text or raw_quote or value, limit=110)
-            question_text = str(memory.get("question_text") or "").strip().rstrip("?!.")
-            if summary and question_text:
-                pool = (
-                    f"{name}, last time I asked {question_text.lower()}, and you said {summary}. Still standing by that?",
-                    f"I've still got this in my databanks, {name}: when I asked {question_text.lower()}, you said {summary}. You still believe that?",
-                    f"{name}, you once told me {summary} when I asked {question_text.lower()}. Was that wisdom, or were your organics improvising?",
-                )
-                return _pick_no_repeat(pool, "curiosity_memory_followup")
-            if summary:
-                pool = (
-                    f"{name}, you told me {summary} before the silence swallowed you. Still true?",
-                    f"Still thinking about this one, {name}: {summary}. You standing by it?",
-                    f"{name}, you gave me {summary} once already. Was that the real answer or just premium lifeform theater?",
-                )
-                return _pick_no_repeat(pool, "curiosity_memory_followup_summary")
 
         if memory.get("category") == "plan" or key in {"today_plan", "weekend_plan"}:
             followup = self._llm.generate_activity_followup(
@@ -2150,7 +2131,60 @@ class StateMachine:
             )
             return _pick_no_repeat(pool, "plan_memory_followup")
 
+        followup = self._llm.generate_memory_callback(memory)
+        if followup:
+            return followup
+
+        summary = self._summarize_curiosity_answer(
+            str(memory.get("answer_text") or raw_quote or value),
+            limit=110,
+        )
+        if summary:
+            pool = (
+                f"{name}, you once told me {summary}. Still true, or were your organics freelancing?",
+                f"I've still got {summary} in my databanks, {name}. You standing by that?",
+                f"{name}, that memory about {summary} still live, or did the plot twist on me?",
+            )
+            return _pick_no_repeat(pool, "generic_memory_callback")
         return self._llm.generate_followup(value, memory.get("created_at", ""))
+
+    @staticmethod
+    def _is_callback_memory_candidate(memory: dict) -> bool:
+        """Return True when a memory is suitable for a personalized callback."""
+        category = str(memory.get("category") or "").strip().lower()
+        key = str(memory.get("key") or "").strip().lower()
+        value = str(memory.get("value") or "").strip().lower()
+        raw_answer = str(memory.get("answer_text") or memory.get("raw_quote") or "").strip().lower()
+        question_text = str(memory.get("question_text") or "").strip().lower()
+
+        if category == "interview_question":
+            return False
+        if not any((value, raw_answer, question_text)):
+            return False
+        if category in {"preference", "fact", "relationship", "plan", "event", "curiosity"}:
+            return True
+
+        haystack = " ".join(part for part in (key, value, raw_answer, question_text) if part)
+        return any(
+            token in haystack
+            for token in (
+                "pet",
+                "dog",
+                "cat",
+                "kid",
+                "child",
+                "daughter",
+                "son",
+                "food",
+                "music",
+                "movie",
+                "profession",
+                "job",
+                "work",
+                "activity",
+                "favorite",
+            )
+        )
 
     @staticmethod
     def _summarize_curiosity_answer(answer: str, limit: int = 180) -> str:
@@ -2450,9 +2484,12 @@ class StateMachine:
                         key=memory_data.get("key", "unknown"),
                         value=memory_data.get("value", answer[:200]),
                         raw_quote=answer,
+                        question_text=question,
+                        answer_text=answer,
                         expires_at=memory_data.get("expires_at"),
                         follow_up_after=memory_data.get("follow_up_after"),
                     )
+                    self._refresh_person_context_for_person(person_id)
                 except Exception:
                     log.exception("Follow-up interview: failed to store memory")
 
@@ -2641,8 +2678,10 @@ class StateMachine:
                 key=key,
                 value=value,
                 raw_quote=answer,
+                answer_text=answer,
                 follow_up_after=follow_up_after,
             )
+            self._refresh_person_context_for_person(person_id)
             log.info(
                 "Post-greeting memory stored for %s (person_id=%d): %r -> %r follow_up=%s",
                 name, person_id, answer, value, follow_up_after,
@@ -2717,11 +2756,13 @@ class StateMachine:
         finally:
             self._end_speech(servo_stop)
 
-        if memory.get("follow_up_after") and not memory.get("followed_up"):
-            try:
+        try:
+            if memory.get("follow_up_after") and not memory.get("followed_up"):
                 self._face_db.mark_followed_up(memory["id"])
-            except Exception:
-                log.exception("Post-greeting prompt: failed marking memory follow-up as asked")
+            else:
+                self._face_db.mark_callback_asked(memory["id"])
+        except Exception:
+            log.exception("Post-greeting prompt: failed marking memory follow-up as asked")
 
         answer = self._listen_for_prompt_answer(config.WAKE_GOODBYE_TIMEOUT)
         if not answer:
@@ -2732,7 +2773,7 @@ class StateMachine:
             log.info("Post-greeting memory follow-up interrupted by command %r", cmd.action)
             return "transition", self._execute_command(cmd, answer)
 
-        self._store_prompt_memory_response(person_id, prompt, answer)
+        self._store_prompt_memory_response(person_id, memory, prompt, answer)
         self._speak_prompt_acknowledgement(
             category=str(memory.get("category") or ""),
             key=str(memory.get("key") or ""),
@@ -2769,38 +2810,50 @@ class StateMachine:
             if pending:
                 return pending[0]
 
-            memories = self._face_db.get_memories(person_id)
-            for memory in memories:
-                if memory.get("category") == "curiosity" and memory.get("answer_text"):
-                    return memory
-
-            for memory in memories:
-                if memory.get("category") in {"event", "plan"}:
-                    return memory
+            candidates = [
+                memory
+                for memory in self._face_db.get_callback_candidates(
+                    person_id,
+                    cooldown_seconds=config.MEMORY_CALLBACK_COOLDOWN_SECONDS,
+                )
+                if self._is_callback_memory_candidate(memory)
+            ]
+            if candidates:
+                pool = candidates[: min(len(candidates), 6)]
+                return random.choice(pool)
         except Exception:
             log.exception("Post-greeting prompt: failed loading memory follow-up candidate")
         return None
 
     def _store_prompt_memory_response(
-        self, person_id: int, question: str, answer: str
+        self, person_id: int, memory: dict, question: str, answer: str
     ) -> None:
-        """Store an answer to a prompted memory follow-up using the LLM extractor."""
+        """Refresh an existing prompted memory using the callback answer."""
         try:
-            memory_data = self._llm.extract_memory(question, answer)
+            memory_data = self._llm.refresh_memory_from_callback(memory, question, answer)
             if not memory_data:
-                return
-            self._face_db.add_memory(
-                person_id=person_id,
-                category=memory_data.get("category", "fact"),
-                key=memory_data.get("key", "followup_response"),
-                value=memory_data.get("value", answer[:200]),
-                raw_quote=answer,
+                memory_data = self._llm.extract_memory(question, answer) or {}
+
+            existing_question = str(memory.get("question_text") or "").strip()
+            existing_raw = str(memory.get("raw_quote") or "").strip()
+            updated_value = str(memory_data.get("value") or memory.get("value") or answer[:200]).strip()
+
+            self._face_db.update_memory(
+                int(memory["id"]),
+                category=str(memory_data.get("category") or memory.get("category") or "fact"),
+                key=str(memory_data.get("key") or memory.get("key") or "memory"),
+                value=updated_value,
+                raw_quote=(answer if not existing_raw else None),
+                question_text=(question if not existing_question else None),
+                answer_text=str(memory_data.get("answer_text") or answer).strip(),
+                tags=str(memory_data.get("tags") or memory.get("tags") or "").strip() or None,
                 expires_at=memory_data.get("expires_at"),
                 follow_up_after=memory_data.get("follow_up_after"),
             )
+            self._refresh_person_context_for_person(person_id)
             log.info(
-                "Post-greeting prompt stored follow-up response for person_id=%d: %r",
-                person_id, memory_data.get("value", answer[:200]),
+                "Post-greeting prompt refreshed memory id=%s for person_id=%d: %r",
+                memory.get("id"), person_id, updated_value,
             )
         except Exception:
             log.exception("Post-greeting prompt: failed storing follow-up response")
@@ -2911,9 +2964,12 @@ class StateMachine:
                             key=memory_data.get("key", "unknown"),
                             value=memory_data.get("value", answer[:200]),
                             raw_quote=answer,
+                            question_text=question,
+                            answer_text=answer,
                             expires_at=memory_data.get("expires_at"),
                             follow_up_after=memory_data.get("follow_up_after"),
                         )
+                        self._refresh_person_context_for_person(person_id)
                     except Exception:
                         log.exception("Enrollment interview: failed to store memory")
 
@@ -3520,9 +3576,11 @@ class StateMachine:
                             key=data.get("key", "unknown"),
                             value=data.get("value", _text_snapshot[:200]),
                             raw_quote=_text_snapshot,
+                            answer_text=_text_snapshot,
                             expires_at=data.get("expires_at"),
                             follow_up_after=data.get("follow_up_after"),
                         )
+                        self._refresh_person_context_for_person(person_id)
                         log.info(
                             "Passive memory: stored for person_id=%d — %s",
                             person_id, data.get("value"),

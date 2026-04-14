@@ -20,7 +20,7 @@ import logging
 import os
 import re
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -72,6 +72,9 @@ CREATE TABLE IF NOT EXISTS memories (
     answer_text      TEXT,
     tags             TEXT,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_asked_at    TIMESTAMP,
+    last_updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    callback_count   INTEGER DEFAULT 0,
     expires_at       TIMESTAMP,
     follow_up_after  TIMESTAMP,
     followed_up      BOOLEAN DEFAULT FALSE
@@ -151,6 +154,17 @@ class FaceDB:
                 self._conn.execute("ALTER TABLE memories ADD COLUMN answer_text TEXT")
             if "tags" not in cols:
                 self._conn.execute("ALTER TABLE memories ADD COLUMN tags TEXT")
+            if "last_asked_at" not in cols:
+                self._conn.execute("ALTER TABLE memories ADD COLUMN last_asked_at TIMESTAMP")
+            if "last_updated_at" not in cols:
+                self._conn.execute("ALTER TABLE memories ADD COLUMN last_updated_at TIMESTAMP")
+            if "callback_count" not in cols:
+                self._conn.execute("ALTER TABLE memories ADD COLUMN callback_count INTEGER DEFAULT 0")
+            self._conn.execute(
+                """UPDATE memories
+                   SET last_updated_at = COALESCE(last_updated_at, created_at),
+                       callback_count = COALESCE(callback_count, 0)"""
+            )
 
     def _log_startup_stats(self) -> None:
         """Log people/encoding counts so we can confirm the DB persisted correctly."""
@@ -462,9 +476,10 @@ class FaceDB:
                    (
                        person_id, category, key, value, raw_quote,
                        question_text, answer_text, tags,
+                       last_updated_at, callback_count,
                        expires_at, follow_up_after
                    )
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 0, ?, ?)""",
                 (
                     person_id, category, key, value, raw_quote,
                     question_text, answer_text, tags,
@@ -482,7 +497,8 @@ class FaceDB:
         """Return all non-expired memories for a person, newest first."""
         rows = self._conn.execute(
             """SELECT id, category, key, value, raw_quote, question_text,
-                      answer_text, tags, created_at,
+                      answer_text, tags, created_at, last_asked_at,
+                      last_updated_at, callback_count,
                       expires_at, follow_up_after, followed_up
                FROM memories
                WHERE person_id = ?
@@ -496,7 +512,8 @@ class FaceDB:
         """Return memories whose follow_up_after time has passed and haven't been asked."""
         rows = self._conn.execute(
             """SELECT id, category, key, value, raw_quote, question_text,
-                      answer_text, tags, created_at,
+                      answer_text, tags, created_at, last_asked_at,
+                      last_updated_at, callback_count,
                       expires_at, follow_up_after
                FROM memories
                WHERE person_id = ?
@@ -533,7 +550,8 @@ class FaceDB:
         """Return the newest memory for *person_id*/*key* on the given local day."""
         row = self._conn.execute(
             """SELECT id, category, key, value, raw_quote, question_text,
-                      answer_text, tags, created_at,
+                      answer_text, tags, created_at, last_asked_at,
+                      last_updated_at, callback_count,
                       expires_at, follow_up_after, followed_up
                FROM memories
                WHERE person_id = ?
@@ -551,7 +569,8 @@ class FaceDB:
         """Return the newest memory for *person_id*/*key* within a local date range."""
         row = self._conn.execute(
             """SELECT id, category, key, value, raw_quote, question_text,
-                      answer_text, tags, created_at,
+                      answer_text, tags, created_at, last_asked_at,
+                      last_updated_at, callback_count,
                       expires_at, follow_up_after, followed_up
                FROM memories
                WHERE person_id = ?
@@ -568,9 +587,105 @@ class FaceDB:
         """Mark a memory as having been followed up on."""
         with self._conn:
             self._conn.execute(
-                "UPDATE memories SET followed_up = TRUE WHERE id = ?", (memory_id,)
+                """UPDATE memories
+                   SET followed_up = TRUE,
+                       last_asked_at = CURRENT_TIMESTAMP,
+                       callback_count = COALESCE(callback_count, 0) + 1
+                   WHERE id = ?""",
+                (memory_id,),
             )
         log.debug("FaceDB: marked memory id=%d as followed up", memory_id)
+
+    def mark_callback_asked(self, memory_id: int) -> None:
+        """Stamp callback metadata when a stored memory is asked about."""
+        with self._conn:
+            self._conn.execute(
+                """UPDATE memories
+                   SET last_asked_at = CURRENT_TIMESTAMP,
+                       callback_count = COALESCE(callback_count, 0) + 1
+                   WHERE id = ?""",
+                (memory_id,),
+            )
+        log.debug("FaceDB: marked callback asked for memory id=%d", memory_id)
+
+    def update_memory(
+        self,
+        memory_id: int,
+        *,
+        category: str | None = None,
+        key: str | None = None,
+        value: str | None = None,
+        raw_quote: str | None = None,
+        question_text: str | None = None,
+        answer_text: str | None = None,
+        tags: str | None = None,
+        expires_at: str | None = None,
+        follow_up_after: str | None = None,
+    ) -> None:
+        """Update an existing memory row in place and bump its updated timestamp."""
+        updates: list[str] = ["last_updated_at = CURRENT_TIMESTAMP"]
+        params: list[object] = []
+
+        assignments = (
+            ("category", category),
+            ("key", key),
+            ("value", value),
+            ("raw_quote", raw_quote),
+            ("question_text", question_text),
+            ("answer_text", answer_text),
+            ("tags", tags),
+            ("expires_at", expires_at),
+            ("follow_up_after", follow_up_after),
+        )
+        for column, field_value in assignments:
+            if field_value is None:
+                continue
+            updates.append(f"{column} = ?")
+            params.append(field_value)
+
+        params.append(memory_id)
+        with self._conn:
+            self._conn.execute(
+                f"UPDATE memories SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+        log.debug("FaceDB: updated memory id=%d with %d field(s)", memory_id, len(params) - 1)
+
+    def get_callback_candidates(
+        self,
+        person_id: int,
+        *,
+        cooldown_seconds: float,
+    ) -> list[dict]:
+        """Return stored memories eligible for a personalized callback prompt."""
+        cutoff = datetime.utcnow() - timedelta(seconds=max(0.0, cooldown_seconds))
+        rows = self._conn.execute(
+            """SELECT id, category, key, value, raw_quote, question_text,
+                      answer_text, tags, created_at, last_asked_at,
+                      last_updated_at, callback_count,
+                      expires_at, follow_up_after, followed_up
+               FROM memories
+               WHERE person_id = ?
+                 AND category != 'interview_question'
+                 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                 AND (
+                       last_asked_at IS NULL
+                       OR last_asked_at <= ?
+                 )
+               ORDER BY COALESCE(callback_count, 0) ASC,
+                        COALESCE(last_asked_at, created_at) ASC,
+                        created_at DESC""",
+            (person_id, cutoff.strftime("%Y-%m-%d %H:%M:%S")),
+        ).fetchall()
+        candidates: list[dict] = []
+        for row in rows:
+            memory = dict(row)
+            summary = str(memory.get("value") or "").strip()
+            raw_answer = str(memory.get("answer_text") or memory.get("raw_quote") or "").strip()
+            if not summary and not raw_answer:
+                continue
+            candidates.append(memory)
+        return candidates
 
     def get_asked_interview_questions(self, person_id: int) -> set[str]:
         """Return the set of interview question texts already asked to a person.

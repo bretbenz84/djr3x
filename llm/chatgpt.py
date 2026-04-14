@@ -228,6 +228,11 @@ _SHORT_FALLBACKS: dict[str, tuple[str, ...]] = {
         "Busy agenda, lifeform, so try not to embarrass yourself.",
         "Ambitious plan for your species, I'll give you that.",
     ),
+    "generate_memory_callback": (
+        "Still standing by that, lifeform?",
+        "How's that little saga treating you now?",
+        "Did your story get any less suspicious lately?",
+    ),
 }
 
 _MAX_STOP_SEQUENCES = 4
@@ -735,8 +740,8 @@ class ChatGPTClient:
                             f"Today's date is {today}. "
                             "Extract a memory from this answer. Return JSON with keys: "
                             "category (one of: preference/event/plan/fact/relationship), "
-                            "key (snake_case label, e.g. favorite_food), "
-                            "value (clean one-sentence summary), "
+                            "key (snake_case label, e.g. favorite_food, favorite_music, favorite_movie, pets, profession, has_kids, current_activity), "
+                            "value (clean normalized one-sentence summary in third person, grounded only in the answer), "
                             "expires_at (ISO-8601 date if time-sensitive, else null), "
                             "follow_up_after (ISO-8601 date one day after a planned event, else null)."
                         ),
@@ -791,7 +796,7 @@ class ChatGPTClient:
                             '"value": ..., "expires_at": ..., "follow_up_after": ...}. '
                             'If no return {"memorable": false}. '
                             "category: preference/event/plan/fact/relationship. "
-                            "key: snake_case. value: clean one-sentence summary. "
+                            "key: snake_case. value: clean normalized one-sentence summary in third person. "
                             "expires_at: ISO date if time-sensitive else null. "
                             "follow_up_after: ISO date one day after a planned event else null."
                         ),
@@ -820,6 +825,161 @@ class ChatGPTClient:
                 f"Recorded on: {created_at or 'unknown'}"
             ),
         )
+
+    @staticmethod
+    def _memory_callback_fallback(memory: dict) -> str:
+        """Return a grounded one-line callback question when model generation fails."""
+        key = str(memory.get("key") or "").strip().lower()
+        category = str(memory.get("category") or "").strip().lower()
+        summary = str(memory.get("value") or "").strip()
+        raw_answer = str(memory.get("answer_text") or memory.get("raw_quote") or "").strip()
+        question_text = str(memory.get("question_text") or "").strip()
+        source = " ".join(part for part in (summary, raw_answer, question_text) if part).strip()
+        lower = source.lower()
+
+        negative_patterns = (
+            " no ",
+            " no.",
+            " no,",
+            "none",
+            "don't have",
+            "do not have",
+            "does not have",
+            "without",
+            "never",
+        )
+        is_negative = any(pattern in f" {lower} " for pattern in negative_patterns)
+
+        names_match = re.search(
+            r"\bnamed ([A-Z][a-z]+(?:\s*(?:,|and)\s*[A-Z][a-z]+)*)",
+            source,
+        )
+        named_items = names_match.group(1) if names_match else ""
+
+        if "pet" in key or "dog" in lower or "cat" in lower:
+            if named_items:
+                return f"You mentioned {named_items} before. How are those little chaos beasts doing?"
+            if is_negative:
+                return "You said no pets before. Ever wanted one, or do you prefer the peaceful option?"
+            return "How are your pets doing these days, lifeform?"
+
+        if "profession" in key or "job" in key or "work" in key or "occupation" in key:
+            if is_negative:
+                return "You made work sound delightfully bleak. Is that still the situation, lifeform?"
+            if summary:
+                cleaned = summary.rstrip(".")
+                return f"You said {cleaned}. Still true, or did your career do a weird little plot twist?"
+            return "What are you doing for work these days, lifeform?"
+
+        if "kid" in key or "child" in key or category == "relationship":
+            if is_negative:
+                return "You said no kids before. Always the plan, or just how the galaxy shook out?"
+            if named_items:
+                return f"You mentioned {named_items} before. How are they doing lately?"
+            return "How are the kid-related adventures going, lifeform?"
+
+        if any(token in key for token in ("favorite_food", "favorite_music", "favorite_movie")) or category == "preference":
+            if summary:
+                cleaned = summary.rstrip(".")
+                return f"You once went with {cleaned}. Still your favorite, or has your taste improved?"
+            return "Still standing by that preference, lifeform, or was that a temporary malfunction?"
+
+        if "activity" in key or "plan" in key or category in {"plan", "event"}:
+            if summary:
+                cleaned = summary.rstrip(".")
+                return f"You mentioned {cleaned}. How's that little adventure going now?"
+            return "How's that grand little plan going, lifeform?"
+
+        if summary:
+            cleaned = summary.rstrip(".")
+            return f"You told me {cleaned}. Still accurate, or has the saga changed since then?"
+        return "Still standing by that story, lifeform?"
+
+    def generate_memory_callback(self, memory: dict) -> str:
+        """Generate a category-aware callback question grounded in stored memory data."""
+        category = str(memory.get("category") or "").strip() or "fact"
+        key = str(memory.get("key") or "").strip() or "memory"
+        normalized_summary = str(memory.get("value") or "").strip()
+        raw_answer = str(memory.get("answer_text") or memory.get("raw_quote") or "").strip()
+        original_question = str(memory.get("question_text") or "").strip()
+        created_at = str(memory.get("created_at") or "").strip() or "unknown"
+        callback_count = int(memory.get("callback_count") or 0)
+
+        line = self._generate_short_line(
+            branch="generate_memory_callback",
+            user_prompt=(
+                "Ask one callback question for a known returning person using ONLY the stored memory below.\n"
+                "Rules:\n"
+                "- one spoken sentence only\n"
+                "- warm, roasty, curious Rex voice\n"
+                "- grounded in the stored memory, no invented facts\n"
+                "- if the stored answer is negative, ask a curious expansion question\n"
+                "- if it mentions specific items or names, ask about those details\n"
+                "- if it is a preference, ask whether it is still true or ask for elaboration\n"
+                "- avoid parroting the original question verbatim\n"
+                f"Category: {category}\n"
+                f"Key: {key}\n"
+                f"Normalized summary: {normalized_summary or 'unknown'}\n"
+                f"Original question: {original_question or 'none'}\n"
+                f"Stored answer: {raw_answer or 'none'}\n"
+                f"Recorded at: {created_at}\n"
+                f"Previous callback count: {callback_count}"
+            ),
+        )
+        if line and line not in _SHORT_FALLBACKS.get("generate_memory_callback", ()):
+            return line
+        return self._memory_callback_fallback(memory)
+
+    def refresh_memory_from_callback(
+        self,
+        memory: dict,
+        question: str,
+        answer: str,
+    ) -> dict | None:
+        """Merge a callback answer back into an existing memory row."""
+        from datetime import date
+
+        today = date.today().isoformat()
+        try:
+            response = self._vision_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            f"Today's date is {today}. "
+                            "Update an existing memory after a callback answer. Return JSON with keys: "
+                            "category, key, value, answer_text, expires_at, follow_up_after. "
+                            "Requirements: "
+                            "value must be a compact normalized third-person summary grounded only in the stored memory and new answer. "
+                            "Preserve the original topic unless the new answer clearly changes it. "
+                            "If the new answer adds useful detail, fold it into the summary. "
+                            "If the new answer contradicts the old memory, update the summary to the newer truth. "
+                            "answer_text must contain the new raw callback answer."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Existing category: {memory.get('category') or ''}\n"
+                            f"Existing key: {memory.get('key') or ''}\n"
+                            f"Existing normalized summary: {memory.get('value') or ''}\n"
+                            f"Existing original answer: {memory.get('raw_quote') or ''}\n"
+                            f"Existing latest answer: {memory.get('answer_text') or ''}\n"
+                            f"Original question: {memory.get('question_text') or ''}\n"
+                            f"Callback question: {question}\n"
+                            f"Callback answer: {answer}"
+                        ),
+                    },
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=220,
+                temperature=0.2,
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception:
+            log.exception("refresh_memory_from_callback: failed")
+            return None
 
     def generate_activity_followup(
         self, activity_text: str, created_at: str = "", *, same_day: bool = False
