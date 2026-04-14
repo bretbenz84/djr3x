@@ -697,6 +697,7 @@ class StateMachine:
         self._os_shutdown_requested: bool = False  # True only for voice/button shutdown
         self._pipeline_t0: float = 0.0          # monotonic time of last wake word detection
         self._last_speech_end_at: float = 0.0   # used to avoid self-transcribing prompt tail
+        self._last_face_triggered_greeting_at: float = 0.0
 
         # Face-triggered wake — text captured during the face-greeting listen so
         # _run_active() can process it without asking the user to repeat themselves.
@@ -1254,6 +1255,9 @@ class StateMachine:
                           chime + IDLE.
           No face / no recognition → idle chime + IDLE.
         """
+        if self._face_triggered_greeting_on_cooldown("Face-triggered greeting"):
+            return
+        self._last_face_triggered_greeting_at = time.monotonic()
         log.info("Face-triggered greeting: starting")
         self._apply_active_led_theme()
 
@@ -1889,6 +1893,8 @@ class StateMachine:
             # to IDLE or SLEEP, regardless of what the LED state machine thinks.
             self._leds.stop_mouth()
             self._leds._send_head(config.LED_CMD_SPEAK_STOP)
+        if new_state == State.SLEEP:
+            self._last_face_triggered_greeting_at = 0.0
         self._state = new_state
         if self._head_tracker is not None:
             self._head_tracker.set_face_search_enabled(
@@ -1933,12 +1939,31 @@ class StateMachine:
         a face appearing while Rex is already talking doesn't re-trigger a greeting.
         """
         if self._state == State.IDLE:
+            if self._face_triggered_greeting_on_cooldown(
+                "Face appeared after absence"
+            ):
+                return
             log.info("Face appeared after absence — signalling face wake")
             self._face_wake_event.set()
         else:
             log.debug(
                 "Face-appear signal ignored (state=%s)", self._state.value
             )
+
+    def _face_triggered_greeting_on_cooldown(self, context: str) -> bool:
+        """Return True when the face-triggered greeting should be suppressed."""
+        cooldown = max(0.0, config.FACE_TRIGGERED_GREETING_COOLDOWN_SECONDS)
+        if cooldown <= 0.0 or self._last_face_triggered_greeting_at <= 0.0:
+            return False
+        elapsed = time.monotonic() - self._last_face_triggered_greeting_at
+        if elapsed >= cooldown:
+            return False
+        log.info(
+            "%s: suppressing face-triggered greeting (cooldown %.1f s remaining)",
+            context,
+            cooldown - elapsed,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Speech helpers

@@ -481,6 +481,9 @@ MEMORY_CALLBACK_COOLDOWN_SECONDS: float = float(
 FACE_APPEAR_ABSENT_SECONDS: float = 8.0   # no-face gap required before appearance triggers greeting
 FACE_APPEAR_FRAME_COUNT:    int   = 2     # consecutive detections required to confirm appearance
 FACE_WAKE_LISTEN_TIMEOUT:   float = 10.0  # seconds to wait for speech after face-triggered "Hi There"
+FACE_TRIGGERED_GREETING_COOLDOWN_SECONDS: float = float(
+    _optional("FACE_TRIGGERED_GREETING_COOLDOWN_SECONDS", "30.0")
+)
 
 # Lightweight autonomy layer — self-initiated prompts, timing variance, and
 # slight imperfection layered on top of the core reactive pipeline.
