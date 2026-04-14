@@ -230,6 +230,20 @@ _SHORT_FALLBACKS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+_MAX_STOP_SEQUENCES = 4
+_CHAT_STOP_SEQUENCES: tuple[str, ...] = (
+    "\n\n",
+    "\nREX",
+    "\nRex:",
+    "\nDJ R-3X",
+)
+_SHORT_STOP_SEQUENCES: tuple[str, ...] = (
+    "\n",
+    "\n\n",
+    "REX continues",
+    "Rex:",
+)
+
 
 # ---------------------------------------------------------------------------
 # ChatGPTClient
@@ -384,7 +398,7 @@ class ChatGPTClient:
                 "messages": [effective_system] + self._history[:-1] + [user_message],
                 "stream": True,
                 "temperature": 0.9,
-                "stop": ["\n\n", "\nREX", "\nRex:", "\nDJ R-3X", "REX continues"],
+                "stop": self._build_stop_sequences(*_CHAT_STOP_SEQUENCES),
             }
             if image:
                 create_kwargs["max_tokens"] = 80
@@ -449,6 +463,25 @@ class ChatGPTClient:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_stop_sequences(*candidates: str) -> list[str]:
+        """Deduplicate and cap stop sequences to the OpenAI API limit."""
+        stops: list[str] = []
+        truncated = False
+        for candidate in candidates:
+            if not candidate or candidate in stops:
+                continue
+            if len(stops) >= _MAX_STOP_SEQUENCES:
+                truncated = True
+                continue
+            stops.append(candidate)
+        if truncated:
+            log.warning(
+                "LLM request stop sequences exceeded API limit (%d); truncating extras",
+                _MAX_STOP_SEQUENCES,
+            )
+        return stops
 
     def set_person_context(self, memories_string: str) -> None:
         """Inject a memory summary for the current person into every system prompt."""
@@ -639,7 +672,7 @@ class ChatGPTClient:
                     "stream": False,
                     "temperature": attempt["temperature"],
                     "max_tokens": 60,
-                    "stop": ["\n", "\n\n", "REX continues", "Rex:"],
+                    "stop": self._build_stop_sequences(*_SHORT_STOP_SEQUENCES),
                 }
                 if attempt["response_format"] is not None:
                     kwargs["response_format"] = attempt["response_format"]
