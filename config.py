@@ -574,10 +574,10 @@ HEAD_SEARCH_ENABLED: bool = _optional("HEAD_SEARCH_ENABLED", "true").lower() not
     "0", "false", "no"
 )
 HEAD_SEARCH_LOST_FACE_SECONDS: float = float(
-    _optional("HEAD_SEARCH_LOST_FACE_SECONDS", "0.8")
+    _optional("HEAD_SEARCH_LOST_FACE_SECONDS", "2")
 )
 HEAD_SEARCH_STEP_HOLD_SECONDS: float = float(
-    _optional("HEAD_SEARCH_STEP_HOLD_SECONDS", "0.75")
+    _optional("HEAD_SEARCH_STEP_HOLD_SECONDS", "1.25")
 )
 HEAD_SEARCH_BURST_SECONDS: float = float(
     _optional("HEAD_SEARCH_BURST_SECONDS", "12.0")
@@ -586,7 +586,7 @@ HEAD_SEARCH_COOLDOWN_SECONDS: float = float(
     _optional("HEAD_SEARCH_COOLDOWN_SECONDS", "1.5")
 )
 HEAD_SEARCH_SPEED: int = int(
-    _optional("HEAD_SEARCH_SPEED", "40")
+    _optional("HEAD_SEARCH_SPEED", "20")
 )
 
 # When True, Rex runs a 5-question interview after enrolling a new person and
