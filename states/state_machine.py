@@ -1300,6 +1300,9 @@ class StateMachine:
             face_thread.join(timeout=5.0)
         status, result = face_result[0]
 
+        if result is not None or status in ("no_match", "db_empty"):
+            self._play_face_lock_line("Face-triggered greeting")
+
         # If we recognised someone, speak a casual name-based greeting before
         # opening the mic — no LLM, just a canned phrase chosen at random.
         if result is not None:
@@ -2079,6 +2082,9 @@ class StateMachine:
         self._wait_for_initial_wake_clip(initial_clip_done)
         status, result = face_result[0]
 
+        if result is not None or status in ("no_match", "db_empty"):
+            self._play_face_lock_line("Wake greeting: first wake")
+
         # ---- Known person ------------------------------------------------
         if result is not None:
             person_id, name, _dist = result
@@ -2258,6 +2264,9 @@ class StateMachine:
         status, result = self._face_recognizer.identify_with_status(
             frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
         )
+
+        if result is not None or status in ("no_match", "db_empty"):
+            self._play_face_lock_line("Wake greeting: subsequent wake")
 
         if result is None:
             if status in ("no_match", "db_empty"):
@@ -3368,6 +3377,18 @@ class StateMachine:
             self._synthesizer.speak(line)
         except Exception:
             log.exception("Wake greeting: known-person TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+    def _play_face_lock_line(self, context: str) -> None:
+        """Speak a short canned line after a face lock is acquired."""
+        line = _pick_no_repeat(_FACE_LOCK_LINES, "face_lock_line")
+        log.info("%s: face lock line %r", context, line)
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(line)
+        except Exception:
+            log.exception("%s: face lock line TTS error", context)
         finally:
             self._end_speech(servo_stop)
 
@@ -6200,6 +6221,18 @@ _UNKNOWN_FACE_LINES: tuple[str, ...] = (
     "You have the kind of face that takes a while to process. Name?",
     "I have met thousands of lifeforms and remembered most of them. "
     "You are not most of them. Yet. What is your name?",
+)
+
+_FACE_LOCK_LINES: tuple[str, ...] = (
+    "There you are.",
+    "Oh hi!",
+    "Oh hiyeeee.",
+    "Wassup.",
+    "Wassuuuup.",
+    "Oh hiyeee.",
+    "Well hello.",
+    "Ayyy, there you are.",
+    "Hey there.",
 )
 
 # Enrollment confirmation — played after a new person gives their name.
