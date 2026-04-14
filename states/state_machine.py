@@ -738,6 +738,7 @@ class StateMachine:
         self._session_greeted_person_id: int | None = None
         self._session_wake_count: int = 0
         self._last_greeted_person_id: int | None = None
+        self._startup_idle_face_probe_done: bool = False
 
         # Per-day count of how many times each recognized person has woken Rex.
         # Used only for roast wording; resets automatically when the date changes.
@@ -1072,9 +1073,39 @@ class StateMachine:
             log.info("ACTIVE entry: angry mode cleared")
             self._refresh_autonomy_context()
 
+        # On the first IDLE entry after boot, give the tracker a brief moment to
+        # report a real face before we fall back to the normal 8-second
+        # appearance timer. This prevents the "tracks but never greets" gap
+        # when someone is already standing there as the program comes online.
+        if (
+            not self._startup_idle_face_probe_done
+            and self._head_tracker is not None
+        ):
+            self._startup_idle_face_probe_done = True
+            probe_deadline = time.monotonic() + 1.25
+            while (
+                self._state == State.IDLE
+                and not self._shutdown_event.is_set()
+                and time.monotonic() < probe_deadline
+            ):
+                if self._face_wake_event.is_set():
+                    self._face_wake_event.clear()
+                    log.info("IDLE startup face probe: face-wake event detected")
+                    self._run_face_triggered_greeting()
+                    if self._state != State.IDLE:
+                        return
+                    break
+                if self._head_tracker.face_recently_seen(within_seconds=0.75):
+                    log.info("IDLE startup face probe: face already visible — triggering face greeting")
+                    self._run_face_triggered_greeting()
+                    if self._state != State.IDLE:
+                        return
+                    break
+                time.sleep(0.05)
+
         # On entry (startup or return from ACTIVE/SLEEP), immediately check whether
-        # a face is already in view — bypasses the 8-second absence timer so Rex
-        # greets someone standing at the camera when the program first starts.
+        # a face is already in view — bypasses the normal appearance timer when
+        # the tracker already has a fresh face detection.
         if (
             self._head_tracker is not None
             and self._head_tracker.face_recently_seen(within_seconds=3.0)

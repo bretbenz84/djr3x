@@ -164,6 +164,7 @@ class HeadTracker:
         self._on_face_appear: Callable[[], None] | None = on_face_appear
         # Initialise to now so the absence clock starts from tracker start.
         self._last_face_seen_time: float = time.monotonic()
+        self._has_seen_face_since_start: bool = False
         self._in_face_appear_event: bool = False   # True while counting consecutive frames
         self._appear_frame_count:   int  = 0       # consecutive face-detected frames in event
         self._face_appear_fired:    bool = False   # prevents double-fire per appearance
@@ -267,7 +268,9 @@ class HeadTracker:
         state machine to decide whether to attempt a face-triggered greeting
         without waiting for the full absence-timer cycle.
         """
-        return (time.monotonic() - self._last_face_seen_time) <= within_seconds
+        return self._has_seen_face_since_start and (
+            (time.monotonic() - self._last_face_seen_time) <= within_seconds
+        )
 
     def set_face_search_enabled(self, enabled: bool, reason: str = "") -> None:
         """Enable or disable active face-search sweeps while no face is locked."""
@@ -588,6 +591,7 @@ class HeadTracker:
                         except Exception:
                             log.exception("HeadTracker: on_face_appear callback raised")
                 self._last_face_seen_time = now
+                self._has_seen_face_since_start = True
 
                 # Normalise face position to [0,1] then remap to account for the
                 # wide-angle lens.  Faces detected within the edge margin already
