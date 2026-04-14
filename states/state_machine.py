@@ -1187,12 +1187,18 @@ class StateMachine:
             if self._servos is not None:
                 self._servos.start()
         else:
+            initial_clip_done: threading.Event | None = None
+            if self._session_wake_count == 0:
+                # Kick off the canned wake clip first so the wave can begin
+                # immediately while the audio is already on its way out.
+                initial_clip_done = self._start_initial_wake_clip()
+
             # Normal wake-word path: arm wave + full greeting.
             # Start arm wave in background (non-blocking — idle thread stopped inside).
             self._animations.play_wake_greeting_arms()
 
             # Greet the user concurrently with the arm wave.
-            self._play_wake_greeting()
+            self._play_wake_greeting(initial_clip_done=initial_clip_done)
 
             # The greeting path can request shutdown (for example if the user says
             # "shutdown" when asked for their name).  Honor that before restoring
@@ -1680,34 +1686,58 @@ class StateMachine:
     # Speech helpers
     # ------------------------------------------------------------------
 
-    def _play_initial_wake_clip(self) -> bool:
-        """Play the canned wake clip, alternating between the two clips on
-        successive wake activations so only ONE ever plays per wake.
+    def _start_initial_wake_clip(self) -> threading.Event | None:
+        """Start the canned wake clip in the background.
+
+        The clip alternates between the two wake files on successive wake
+        activations so only ONE ever plays per wake. Returns an Event that is
+        set when playback and cleanup finish, or None if the clip could not be
+        started.
 
         Toggle False → "Hi There.mp3"  (then flips to True)
         Toggle True  → "This is your cap.mp3"  (then flips to False)
-
-        Returns True if the clip was played, False if it was unavailable or
-        playback failed before audio could be queued.
         """
         clip_name = "This is your cap.mp3" if self._no_face_clip_toggle else "Hi There.mp3"
         self._no_face_clip_toggle = not self._no_face_clip_toggle
         clip_path = config.ASSETS_DIR / "audio" / clip_name
         if not clip_path.exists():
-            return False
+            return None
 
-        servo_stop = self._begin_speech(emotion="excited")
-        try:
-            self._player.play_file(clip_path)
-            self._player.wait_for_speech(timeout=10.0)
-            return True
-        except Exception:
-            log.exception("Wake greeting: initial wake clip error")
-            return False
-        finally:
-            self._end_speech(servo_stop)
+        clip_done = threading.Event()
 
-    def _play_wake_greeting(self) -> None:
+        def _play_clip() -> None:
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._player.play_file(clip_path)
+                self._player.wait_for_speech(timeout=10.0)
+            except Exception:
+                log.exception("Wake greeting: initial wake clip error")
+            finally:
+                self._end_speech(servo_stop)
+                clip_done.set()
+
+        threading.Thread(
+            target=_play_clip,
+            daemon=True,
+            name="djr3x-initial-wake-clip",
+        ).start()
+        return clip_done
+
+    def _wait_for_initial_wake_clip(
+        self,
+        clip_done: threading.Event | None,
+        timeout: float = 10.0,
+    ) -> None:
+        """Wait for the background wake clip to finish if one is playing."""
+        if clip_done is None:
+            return
+        if not clip_done.wait(timeout=timeout):
+            log.warning("Wake greeting: initial wake clip did not finish within %.1f s", timeout)
+
+    def _play_wake_greeting(
+        self,
+        initial_clip_done: threading.Event | None = None,
+    ) -> None:
         """Greet the user on wake word activation.
 
         Routes to one of five cases based on session state and face recognition:
@@ -1720,6 +1750,12 @@ class StateMachine:
 
         Always completes before returning so the caller can open the mic immediately.
         """
+        is_first_wake = (self._session_wake_count == 0)
+        if is_first_wake:
+            # Start the canned greeting clip immediately so it overlaps with the
+            # wake animation and any camera / face-recognition work.
+            initial_clip_done = initial_clip_done or self._start_initial_wake_clip()
+
         # Capture frame first — used for both first and subsequent wakes.
         frame: str | None = None
         if self._camera.is_available():
@@ -1729,19 +1765,22 @@ class StateMachine:
             if frame:
                 self._last_wake_frame = frame
 
-        is_first_wake = (self._session_wake_count == 0)
-
         if is_first_wake:
-            # Case 1: play initial clip then do full personalized greeting
-            self._play_initial_wake_clip()
-            self._play_first_wake_greeting(frame)
+            # Case 1: let the clip play while recognition runs, then continue
+            # with personalized greeting once the speech channel is free.
+            self._play_first_wake_greeting(frame, initial_clip_done)
+            self._wait_for_initial_wake_clip(initial_clip_done)
         else:
             # Cases 2–5: silent face scan, minimal speech
             self._play_subsequent_wake_greeting(frame)
 
         self._session_wake_count += 1
 
-    def _play_first_wake_greeting(self, frame: str | None) -> None:
+    def _play_first_wake_greeting(
+        self,
+        frame: str | None,
+        initial_clip_done: threading.Event | None = None,
+    ) -> None:
         """Case 1: first wake since boot — full face recognition + personalized greeting.
 
         Known person  → GPT-4o roast by name + appearance + visit count.
@@ -1778,17 +1817,20 @@ class StateMachine:
         face_thread.join(timeout=0.25)
 
         if face_thread.is_alive():
+            self._wait_for_initial_wake_clip(initial_clip_done)
             filler = random.choice(_RECOGNITION_FILLER_LINES)
-            log.info("Wake greeting: first wake — face recognition filler %r", filler)
-            servo_stop = self._begin_speech(emotion="excited")
-            try:
-                self._synthesizer.speak(filler)
-            except Exception:
-                log.exception("Wake greeting: first wake filler TTS error")
-            finally:
-                self._end_speech(servo_stop)
+            if face_thread.is_alive():
+                log.info("Wake greeting: first wake — face recognition filler %r", filler)
+                servo_stop = self._begin_speech(emotion="excited")
+                try:
+                    self._synthesizer.speak(filler)
+                except Exception:
+                    log.exception("Wake greeting: first wake filler TTS error")
+                finally:
+                    self._end_speech(servo_stop)
 
         face_thread.join()
+        self._wait_for_initial_wake_clip(initial_clip_done)
         status, result = face_result[0]
 
         # ---- Known person ------------------------------------------------
