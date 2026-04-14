@@ -233,6 +233,11 @@ _SHORT_FALLBACKS: dict[str, tuple[str, ...]] = {
         "How's that little saga treating you now?",
         "Did your story get any less suspicious lately?",
     ),
+    "generate_memory_acknowledgement": (
+        "Noted, lifeform.",
+        "Filed away, organic.",
+        "All right, I'm logging that.",
+    ),
 }
 
 _MAX_STOP_SEQUENCES = 4
@@ -649,6 +654,45 @@ class ChatGPTClient:
         log.warning("LLM short branch=%s using template fallback: %r", branch, line)
         return line
 
+    @staticmethod
+    def _acknowledgement_fallback(answer: str, *, summary: str = "", category: str = "") -> str:
+        """Return a grounded acknowledgement when the short LLM helper falls back."""
+        source = (summary or answer).strip().strip("\"'").rstrip(".!?")
+        if not source:
+            return "Noted, lifeform."
+
+        fragment = re.sub(r"^(?:well[, ]+)?(?:uh[, ]+)?(?:um[, ]+)?", "", source, flags=re.IGNORECASE).strip()
+        replacements = (
+            (r"^i am\b", "you're"),
+            (r"^i'm\b", "you're"),
+            (r"^i’m\b", "you're"),
+            (r"^im\b", "you're"),
+            (r"^i have\b", "you've got"),
+            (r"^i've got\b", "you've got"),
+            (r"^i’ve got\b", "you've got"),
+            (r"^i will\b", "you're going to"),
+            (r"^i'll\b", "you're going to"),
+            (r"^i’ll\b", "you're going to"),
+            (r"^i\b", "you"),
+            (r"^my\b", "your"),
+        )
+        lowered = fragment.lower()
+        for pattern, replacement in replacements:
+            updated = re.sub(pattern, replacement, lowered, count=1)
+            if updated != lowered:
+                fragment = updated
+                break
+        else:
+            fragment = lowered
+
+        fragment = re.sub(r"\s+", " ", fragment).strip(" ,;:")
+        if not fragment:
+            return "Noted, lifeform."
+
+        if "plan" in category or "event" in category:
+            return f"Oh, so {fragment}. Bold little itinerary, lifeform."
+        return f"Oh, so {fragment}. I'll allow it, lifeform."
+
     def _generate_short_line(self, *, branch: str, user_prompt: str) -> str:
         """Generate a short voice-friendly line with cleanup, retry, and fallback."""
         attempts = (
@@ -929,6 +973,40 @@ class ChatGPTClient:
         if line and line not in _SHORT_FALLBACKS.get("generate_memory_callback", ()):
             return line
         return self._memory_callback_fallback(memory)
+
+    def generate_memory_acknowledgement(
+        self,
+        answer: str,
+        *,
+        category: str = "",
+        key: str = "",
+        tags: str = "",
+        summary: str = "",
+    ) -> str:
+        """React briefly to a stored-memory answer using the actual spoken content."""
+        line = self._generate_short_line(
+            branch="generate_memory_acknowledgement",
+            user_prompt=(
+                "React to the user's answer in one short spoken Rex sentence.\n"
+                "Rules:\n"
+                "- directly reference what they just said\n"
+                "- no follow-up question\n"
+                "- warm, roasty, conversational\n"
+                "- avoid generic acknowledgements unless absolutely necessary\n"
+                f"Category: {category or 'unknown'}\n"
+                f"Key: {key or 'unknown'}\n"
+                f"Tags: {tags or 'none'}\n"
+                f"Normalized summary: {summary or 'none'}\n"
+                f"User answer: {answer}"
+            ),
+        )
+        if line and line not in _SHORT_FALLBACKS.get("generate_memory_acknowledgement", ()):
+            return line
+        return self._acknowledgement_fallback(
+            answer,
+            summary=summary,
+            category=category,
+        )
 
     def refresh_memory_from_callback(
         self,

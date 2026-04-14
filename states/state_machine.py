@@ -2359,9 +2359,21 @@ class StateMachine:
         category: str = "",
         key: str = "",
         tags: str = "",
+        answer: str = "",
+        summary: str = "",
     ) -> None:
         """Speak a short canned acknowledgement for a prompted answer."""
-        line = self._pick_prompt_acknowledgement(category=category, key=key, tags=tags)
+        line = ""
+        if answer.strip():
+            line = self._llm.generate_memory_acknowledgement(
+                answer,
+                category=category,
+                key=key,
+                tags=tags,
+                summary=summary,
+            )
+        if not line:
+            line = self._pick_prompt_acknowledgement(category=category, key=key, tags=tags)
         servo_stop = self._begin_speech(emotion="neutral")
         try:
             self._synthesizer.speak(line)
@@ -2643,6 +2655,7 @@ class StateMachine:
                             category="plan" if kind == "plan" else "curiosity",
                             key=known_person_prompt.get("key", ""),
                             tags=known_person_prompt.get("tags", ""),
+                            answer=answer,
                         )
                         if kind == "plan":
                             person = self._face_db.get_person(person_id)
@@ -2732,6 +2745,8 @@ class StateMachine:
             category=str(memory.get("category") or "plan"),
             key=str(memory.get("key") or "today_plan"),
             tags=str(memory.get("tags") or ""),
+            answer=answer,
+            summary=self._summarize_plan_answer(answer),
         )
         return "answered", None
 
@@ -2778,6 +2793,8 @@ class StateMachine:
             category=str(memory.get("category") or ""),
             key=str(memory.get("key") or ""),
             tags=str(memory.get("tags") or ""),
+            answer=answer,
+            summary=str(memory.get("value") or ""),
         )
         return "answered", None
 
