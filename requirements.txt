@@ -4,11 +4,11 @@
 # snapshot makes fresh installs brittle across macOS and Raspberry Pi because
 # many transitive packages publish different wheels per platform.
 #
-# Raspberry Pi note: prefer `pip install -r requirements-raspberry-pi.txt`
-# so pip can use piwheels for packages like dlib.
+# Use a platform wrapper for full installs:
+# - `requirements-raspberry-pi.txt` installs dlib via piwheels
+# - `requirements-macos-apple-silicon.txt` installs dlib with a macOS build workaround
 
 # Shared runtime dependencies
-dlib==20.0.1
 elevenlabs==2.41.0
 holidays==0.94
 numpy==2.4.4

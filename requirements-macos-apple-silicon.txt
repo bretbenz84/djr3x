@@ -1,6 +1,8 @@
 # Apple Silicon install wrapper.
 #
-# This currently delegates to the shared requirements file, which already uses
-# environment markers to install the MLX stack only on Apple Silicon.
+# Work around newer macOS SDK / bundled libpng build failures in dlib by
+# disabling PNG support for the wheel build. DJ-R3X does not rely on dlib's
+# PNG helpers for face recognition.
 
+dlib==20.0.1 --config-settings=cmake.args=-DDLIB_PNG_SUPPORT=0
 -r requirements.txt

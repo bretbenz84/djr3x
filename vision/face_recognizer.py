@@ -80,7 +80,14 @@ class FaceRecognizer:
         files produce a clear warning rather than a cryptic dlib exception.
         Safe to call once at startup.
         """
-        import dlib  # local import keeps startup fast when vision is disabled
+        try:
+            import dlib  # local import keeps startup fast when vision is disabled
+        except ImportError as exc:
+            log.warning(
+                "FaceRecognizer: dlib is not installed — recognition disabled (%s)",
+                exc,
+            )
+            return
 
         sp_path = config.DLIB_SHAPE_PREDICTOR_PATH
         fm_path = config.DLIB_FACE_MODEL_PATH

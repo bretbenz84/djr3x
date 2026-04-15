@@ -4,4 +4,5 @@
 # binary installs of packages like dlib.
 
 --extra-index-url https://www.piwheels.org/simple
+dlib==20.0.1
 -r requirements.txt
