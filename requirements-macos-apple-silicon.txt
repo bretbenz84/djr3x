@@ -1,8 +1,9 @@
 # Apple Silicon install wrapper.
 #
-# Work around newer macOS SDK / bundled libpng build failures in dlib by
-# disabling PNG support for the wheel build. DJ-R3X does not rely on dlib's
-# PNG helpers for face recognition.
+# Build dlib in a clean Apple Silicon environment after upgrading pip,
+# setuptools, and wheel. If dlib has trouble finding libpng, install
+# Homebrew's `libpng` first and export:
+#   PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig
 
-dlib==20.0.1 --config-settings=cmake.args=-DDLIB_PNG_SUPPORT=0
+dlib==20.0.1
 -r requirements.txt

@@ -219,13 +219,14 @@ pip install -r requirements-raspberry-pi.txt
 
 ### macOS (Apple Silicon) — additional dependencies
 ```bash
-brew install portaudio ffmpeg cmake
+brew install portaudio ffmpeg cmake libpng
+export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
 ```
 
 Local transcription dependencies are installed automatically by the Apple
 Silicon environment markers in `requirements.txt`. The macOS requirements
-wrapper also installs `dlib` with a PNG-disabled build workaround so facial
-recognition still works.
+wrapper also installs `dlib`; make sure you upgrade `pip`, `setuptools`, and
+`wheel` first in a fresh venv before installing.
 
 For local LLM on macOS:
 ```bash
@@ -364,5 +365,5 @@ journalctl -u djr3x -f
 - Serial ports left blank — Rex runs in software-only mode without hardware
 - Ollama must be running before starting Rex: `ollama serve`
 - `requirements.txt` installs the MLX stack automatically on Apple Silicon
-- `requirements-macos-apple-silicon.txt` installs `dlib` with a macOS build workaround for face recognition
+- On macOS, install `libpng` and export `PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig` before building `dlib`
 - Camera index 0 = built-in FaceTime camera (or USB webcam if FaceTime is unavailable)
