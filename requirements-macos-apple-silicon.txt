@@ -1,0 +1,6 @@
+# Apple Silicon install wrapper.
+#
+# This currently delegates to the shared requirements file, which already uses
+# environment markers to install the MLX stack only on Apple Silicon.
+
+-r requirements.txt

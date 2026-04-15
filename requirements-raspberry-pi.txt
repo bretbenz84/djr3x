@@ -1,0 +1,7 @@
+# Raspberry Pi install wrapper.
+#
+# The base requirements are shared, but Pi benefits from piwheels for faster
+# binary installs of packages like dlib.
+
+--extra-index-url https://www.piwheels.org/simple
+-r requirements.txt

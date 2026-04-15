@@ -195,7 +195,17 @@ pip install -r requirements.txt
 python3 setup_assets.py
 ```
 
-`setup_assets.py` downloads required model files (~120MB) and fixes known Python 3.11+ compatibility issues automatically.
+For explicit platform installs:
+```bash
+# Raspberry Pi
+pip install -r requirements-raspberry-pi.txt
+
+# macOS Apple Silicon
+pip install -r requirements-macos-apple-silicon.txt
+```
+
+`setup_assets.py` downloads required model files (~120MB) and patches `face_recognition_models` automatically if that optional package is installed.
+On Raspberry Pi, prefer the Pi-specific requirements file so pip can use `piwheels` for `dlib`.
 
 ### Raspberry Pi — additional dependencies
 ```bash
@@ -203,8 +213,8 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install -y python3-dev portaudio19-dev libportaudio2 libasound2-dev \
   ffmpeg sox libsox-fmt-all git curl cmake
 
-# dlib compiles from source on Pi — use piwheels to save ~30 minutes
-pip install dlib --extra-index-url https://www.piwheels.org/simple
+# Recommended Python install on Pi (uses piwheels for faster dlib installs)
+pip install -r requirements-raspberry-pi.txt
 ```
 
 ### macOS (Apple Silicon) — additional dependencies
@@ -212,10 +222,8 @@ pip install dlib --extra-index-url https://www.piwheels.org/simple
 brew install portaudio ffmpeg cmake
 ```
 
-For local transcription on macOS:
-```bash
-pip install mlx-whisper
-```
+Local transcription dependencies are installed automatically by the Apple
+Silicon environment markers in `requirements.txt`.
 
 For local LLM on macOS:
 ```bash
@@ -349,9 +357,9 @@ journalctl -u djr3x -f
 - Serial ports: Maestro=`/dev/ttyACM0`, Head Nano=`/dev/ttyACM2`, Chest Nano=`/dev/ttyUSB0`
 
 ### macOS (Apple Silicon)
-- Run `python3 setup_assets.py` after pip install — patches `face_recognition_models` for Python 3.11+ automatically
+- Run `python3 setup_assets.py` after pip install — it also patches `face_recognition_models` if you installed that optional package
 - Set `AUDIO_INPUT_DEVICE=1` (MacBook Air Microphone) and leave `AUDIO_OUTPUT_DEVICE=` blank
 - Serial ports left blank — Rex runs in software-only mode without hardware
 - Ollama must be running before starting Rex: `ollama serve`
-- mlx-whisper must be installed separately: `pip install mlx-whisper`
+- `requirements.txt` installs the MLX stack automatically on Apple Silicon
 - Camera index 0 = built-in FaceTime camera (or USB webcam if FaceTime is unavailable)

@@ -77,7 +77,7 @@ def setup_models():
     return all_ok
 
 def fix_face_recognition_models():
-    """Fix pkg_resources issue on Python 3.11+ / macOS"""
+    """Fix pkg_resources issue if face_recognition_models is installed."""
     import site
     path = Path(site.getsitepackages()[0]) / "face_recognition_models" / "__init__.py"
     if not path.exists():

@@ -237,7 +237,7 @@ AUDIO_INPUT_CHANNELS  = 1     # microphone input channels (legacy — prefer MIC
 MIC_CHANNELS          = int(_optional("MIC_CHANNELS", "2"))  # physical mic channels; ReSpeaker Lite requires 2
 AUDIO_OUTPUT_CHANNELS = 2     # speaker output channels (stereo — ReSpeaker Lite requires 2)
 AUDIO_CHUNK_SIZE   = 1024    # frames per buffer read
-AUDIO_FORMAT       = 8       # pyaudio.paInt16 == 8 (avoids importing pyaudio here)
+AUDIO_FORMAT       = 8       # legacy 16-bit PCM format constant
 AUDIO_OUTPUT_BLOCKSIZE = int(
     _optional(
         "AUDIO_OUTPUT_BLOCKSIZE",
