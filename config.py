@@ -428,6 +428,7 @@ WHISPER_HALLUCINATION_EXACT: set[str] = {
     "okay okay okay",
     "thank you",
     "thank you thank you",
+    "yeah yeah yeah yeah yeah",
     "you",
 }
 
