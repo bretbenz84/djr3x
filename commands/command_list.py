@@ -1145,12 +1145,13 @@ COMMANDS: list[Command] = [
                 "The record will reflect that I had more to say. SO much more to say."
             ),
         ],
-        action="idle",
+        action="quiet",
     ),
 
     Command(
         phrases=["stop talking", "shut up", "be quiet", "quiet down",
-                 "stop the clips", "stop the sounds"],
+                 "stop the clips", "stop the sounds", "silence",
+                 "silent mode", "quiet mode", "go silent", "go quiet"],
         response=[
             (
                 "You want me to stop. Sure. I'll stop yacking. "
@@ -1175,7 +1176,7 @@ COMMANDS: list[Command] = [
                 "You won't hear it. You'll just know it's happening."
             ),
         ],
-        action="stop_idle_clips",
+        action="quiet",
     ),
 
     Command(

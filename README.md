@@ -100,8 +100,10 @@ Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Sili
 
 | State | Behavior |
 |-------|----------|
-| IDLE | Idle servo movements, random audio clips with mouth sync, wake word listening |
+| IDLE | Idle servo movements, optional idle audio clips, wake word listening |
+| QUIET | Wake word listening + face tracking stay active, but Rex will not speak or face-greet until resumed |
 | ACTIVE | Full pipeline — face scan, greet, transcribe, parse, respond, animate |
+| SLEEP | Sleep animation + sleep-only wake word |
 | SHUTDOWN | Shutdown speech, hyperdrive audio + slumped animation concurrent, clean exit |
 
 ### Startup Sequence
@@ -139,6 +141,7 @@ Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Sili
 | Rename | "call me [name]", "my name is [name]", "rename me to [name]" | Updates face database |
 | Forget me | "forget me", "delete me", "forget my face" | Removes from database (with confirmation) |
 | Cancel | "cancel", "nevermind", "forget it" | Returns to IDLE |
+| Quiet mode | "shut up", "be quiet", "stop talking", "silence" | Enters QUIET until a wake word or resume command |
 | Shutdown | "shut down", "exit program", "shut down rex" | Stops Python program |
 | Power down | "power down", "turn off", "goodbye forever" | OS shutdown (if enabled) |
 | Vision | "what do you see", "what am I wearing", "take a picture" | Captures image → GPT-4o |
@@ -169,7 +172,7 @@ djr3x/
 │   ├── servos.py           # Maestro serial control
 │   └── leds.py             # Arduino serial LED commands
 ├── states/
-│   └── state_machine.py    # IDLE/ACTIVE/SHUTDOWN state machine
+│   └── state_machine.py    # IDLE/QUIET/ACTIVE/SLEEP/SHUTDOWN state machine
 ├── sequences/
 │   └── animations.py       # Startup, shutdown, emotion sequences
 ├── vision/

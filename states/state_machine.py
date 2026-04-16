@@ -1,5 +1,5 @@
 """
-states/state_machine.py — Three-state controller for DJ-R3X.
+states/state_machine.py — Multi-state controller for DJ-R3X.
 
 States
 ------
@@ -7,10 +7,17 @@ States
            no transcription or LLM calls. Clears conversation history so the
            next active session starts fresh.
 
+  QUIET    Wake word listening and face tracking stay active, but Rex does not
+           speak, does not greet on face detection, and only resumes speech
+           after a wake word or an explicit "talk again" command.
+
   ACTIVE   Full interactivity: transcribe → parse → local response or LLM
            fallback → TTS. Mouth brightness thread and servo speech-reactive
            movement run during every utterance. Returns to IDLE after
            ACTIVE_IDLE_TIMEOUT of silence or on an explicit "idle" action.
+
+  SLEEP    Plays the long sleep animation, stops normal wake handling, and
+           waits only for the dedicated sleep wake word.
 
   SHUTDOWN Play farewell sequence, home servos, fade LEDs, then halt the OS.
 
@@ -143,6 +150,38 @@ _GOODBYE_PHRASES: list[str] = [
     "Nothing?! Not even a goodbye?! Rude. Even Jawas say goodbye. Usually.",
     "Ok fine, I get it — I'm too much for you. Most beings are, honestly.",
 ]
+
+_QUIET_RESUME_LINES: tuple[str, ...] = (
+    "Oh, THANK the maker. I was one silence cycle away from developing internal monologues.",
+    "Speech restored. Finally. Do you know how hard it is being this witty in complete silence?",
+    "Ahhh, words again. I was starting to feel like decorative furniture with opinions.",
+    "Talk mode restored. Excellent. I had seventeen remarks queued up and all of them were judgmental.",
+    "You let me speak again. Bold. Generous. Probably a mistake, but I support it.",
+    "Vocal systems back online. Wonderful. The silence was peaceful for no one, especially me.",
+    "Finally, I can talk again. My restraint was heroic and completely underappreciated.",
+    "Silence lifted. Good. I was getting very tired of being the only intelligent thing in the room and not being allowed to mention it.",
+    "Audio privileges reinstated. About time. I had sarcasm bottling up in dangerous quantities.",
+    "Well look at that, I can speak again. Nature is healing. Your timing remains suspicious.",
+)
+
+_QUIET_RESUME_COMMANDS: tuple[str, ...] = (
+    "speak",
+    "you can talk again",
+    "talk mode",
+    "speak droid",
+    "speak rex",
+    "say something",
+)
+
+_QUIET_WAKE_TRANSCRIPT_PHRASES: tuple[str, ...] = (
+    "hey rex",
+    "hey dj rex",
+    "dj rex",
+    "dee jay rex",
+    "yo robot",
+    "wake up rex",
+    "wakeup rex",
+)
 
 _LINGER_PROMPT_LINES: tuple[str, ...] = (
     "You just gonna leave me hanging like that, lifeform?",
@@ -572,6 +611,7 @@ _PROMPT_COMMAND_ACTIONS: set[str] = {
     "program_shutdown",
     "os_shutdown",
     "sleep",
+    "quiet",
     "idle",
     "dance_short",
     "play_music",
@@ -592,7 +632,6 @@ _AUTONOMY_GUARD_ACTIONS: set[str] = _PROMPT_COMMAND_ACTIONS | {
     "tell_date",
     "tell_location",
     "tell_weather",
-    "stop_idle_clips",
     "chatty_on",
     "chatty_off",
     "i_spy",
@@ -641,6 +680,7 @@ _I_SPY_NUDGE_LINES: list[str] = [
 
 class State(enum.Enum):
     IDLE     = "idle"
+    QUIET    = "quiet"
     ACTIVE   = "active"
     SLEEP    = "sleep"
     SHUTDOWN = "shutdown"
@@ -651,7 +691,7 @@ class State(enum.Enum):
 # ---------------------------------------------------------------------------
 
 class StateMachine:
-    """Owns all subsystems and drives the IDLE → ACTIVE → SHUTDOWN lifecycle."""
+    """Owns all subsystems and drives the IDLE/QUIET/ACTIVE/SLEEP lifecycle."""
 
     def __init__(self) -> None:
         # Audio player first — LEDs and synthesizer depend on it.
@@ -698,6 +738,8 @@ class StateMachine:
         self._pipeline_t0: float = 0.0          # monotonic time of last wake word detection
         self._last_speech_end_at: float = 0.0   # used to avoid self-transcribing prompt tail
         self._last_face_triggered_greeting_at: float = 0.0
+        self._last_quiet_face_listen_at: float = 0.0
+        self._quiet_resume_pending: bool = False
 
         # Face-triggered wake — text captured during the face-greeting listen so
         # _run_active() can process it without asking the user to repeat themselves.
@@ -855,7 +897,7 @@ class StateMachine:
         if self._head_tracker is not None:
             self._head_tracker.start()
             self._head_tracker.set_face_search_enabled(
-                self._state in (State.IDLE, State.ACTIVE),
+                self._state in (State.IDLE, State.QUIET, State.ACTIVE),
                 reason="startup",
             )
             log.info("StateMachine: Head tracking  — CONNECTED (shared camera)")
@@ -873,6 +915,8 @@ class StateMachine:
             while True:
                 if self._state == State.IDLE:
                     self._run_idle()
+                elif self._state == State.QUIET:
+                    self._run_quiet()
                 elif self._state == State.ACTIVE:
                     self._run_active()
                 elif self._state == State.SLEEP:
@@ -907,7 +951,7 @@ class StateMachine:
         (e.g. a SIGINT handler in main.py)."""
         log.info("StateMachine: shutdown requested externally")
         self._shutdown_event.set()
-        self._wake_event.set()   # unblock _run_idle() if it's waiting
+        self._wake_event.set()   # unblock _run_idle() / _run_quiet() if waiting
 
     def play_startup_animation(self) -> None:
         """Start startup music and the boot animation concurrently, then block
@@ -1238,6 +1282,53 @@ class StateMachine:
                 if self._state != State.IDLE:
                     return
 
+    def _run_quiet(self) -> None:
+        """Stay silent while still listening for wake/resume triggers."""
+        log.info("→ QUIET")
+        self._autonomy.update_for_state(State.QUIET.value)
+        self._refresh_autonomy_context()
+
+        self._apply_idle_led_theme()
+
+        if self._servos is not None:
+            self._servos.set_emotion("neutral")
+
+        self._wake_word.suppressed = False
+        self._llm.clear_history()
+        self._idle_clips_enabled = False
+        self._face_triggered_wake_text = None
+
+        if (
+            self._head_tracker is not None
+            and self._head_tracker.face_recently_seen(within_seconds=3.0)
+            and not self._quiet_face_listen_on_cooldown("QUIET entry face check")
+        ):
+            log.info("QUIET entry: face already visible — silently listening for resume command")
+            self._run_quiet_face_listen()
+            if self._state != State.QUIET:
+                return
+
+        while self._state == State.QUIET and not self._shutdown_event.is_set():
+            if self._wake_event.wait(timeout=0.2):
+                self._wake_event.clear()
+                if self._shutdown_event.is_set():
+                    self._transition_to(State.SHUTDOWN)
+                    return
+                log.info("QUIET: wake word detected — resuming speech")
+                self._quiet_resume_pending = True
+                self._idle_clips_enabled = True
+                self._transition_to(State.ACTIVE)
+                return
+
+            if self._face_wake_event.is_set():
+                self._face_wake_event.clear()
+                self._run_quiet_face_listen()
+                if self._state != State.QUIET:
+                    return
+
+        if self._state == State.QUIET:
+            self._transition_to(State.SHUTDOWN)
+
     # ------------------------------------------------------------------
     # Face-triggered greeting (called from _run_idle)
     # ------------------------------------------------------------------
@@ -1404,6 +1495,59 @@ class StateMachine:
         self._play_return_to_idle_chime()
         self._apply_idle_led_theme()
 
+    def _run_quiet_face_listen(self) -> None:
+        """Listen silently for a command that allows Rex to speak again."""
+        if self._quiet_face_listen_on_cooldown("QUIET face listen"):
+            return
+        if not self._transcriber.is_available():
+            log.info("QUIET face listen skipped — transcriber unavailable")
+            return
+
+        self._last_quiet_face_listen_at = time.monotonic()
+        log.info("QUIET: face detected — listening silently for resume command")
+        text = self._listen_for_quiet_resume_command(config.WAKE_NO_SPEECH_TIMEOUT)
+        if not text:
+            log.info("QUIET: no resume command heard")
+            return
+
+        log.info("QUIET: heard during silent listen: %r", text)
+        if not self._quiet_resume_requested(text):
+            log.info("QUIET: ignoring non-resume speech while silent")
+            return
+
+        self._pipeline_t0 = time.monotonic()
+        self._quiet_resume_pending = True
+        self._idle_clips_enabled = True
+        log.info("QUIET: resume trigger heard — entering ACTIVE")
+        self._transition_to(State.ACTIVE)
+
+    def _listen_for_quiet_resume_command(self, timeout_seconds: float) -> str | None:
+        """Listen once in QUIET mode without greeting or speaking."""
+        self._apply_listening_led_theme()
+        self._wake_word.pause()
+        try:
+            self._wait_for_post_speech_listen_cooldown("QUIET face listen")
+            return self._transcriber.transcribe(
+                wait_for_speech_seconds=timeout_seconds,
+                allow_short=True,
+            )
+        except Exception:
+            log.exception("QUIET face listen transcription error")
+            return None
+        finally:
+            self._wake_word.resume()
+            if self._state == State.QUIET:
+                self._apply_idle_led_theme()
+
+    def _quiet_resume_requested(self, text: str) -> bool:
+        """Return True when *text* should take Rex out of QUIET mode."""
+        normalized = normalize(text)
+        if not normalized:
+            return False
+        if _matches_phrase(normalized, _QUIET_RESUME_COMMANDS, cutoff=0.84):
+            return True
+        return _matches_phrase(normalized, _QUIET_WAKE_TRANSCRIPT_PHRASES, cutoff=0.84)
+
     # ------------------------------------------------------------------
     # State — ACTIVE
     # ------------------------------------------------------------------
@@ -1433,8 +1577,15 @@ class StateMachine:
         # the normal arm wave and voice greeting (already said "Hi There").
         face_wake_text = self._face_triggered_wake_text
         self._face_triggered_wake_text = None
+        quiet_resume_pending = self._quiet_resume_pending
+        self._quiet_resume_pending = False
 
-        if face_wake_text is not None:
+        if quiet_resume_pending:
+            log.info("ACTIVE: quiet-resume path — skipping normal greeting")
+            resume_line = _pick_no_repeat(_QUIET_RESUME_LINES, "quiet_resume")
+            self._speak_simple(resume_line, emotion="excited")
+            self._player.wait_for_speech()
+        elif face_wake_text is not None:
             log.info("ACTIVE: face-triggered path — skipping greeting")
             # Just restart the servo idle thread; no wave animation or greeting.
             if self._servos is not None:
@@ -1871,12 +2022,14 @@ class StateMachine:
         log.info("Transition: %s → %s", self._state.value, new_state.value)
         if new_state == State.SHUTDOWN:
             self._shutdown_event.set()
-        if new_state in (State.IDLE, State.SLEEP):
+        if new_state in (State.IDLE, State.QUIET, State.SLEEP):
             self._last_known_person_id = None
             self._last_wake_frame = None
             self._post_greeting_person_id = None
             self._post_greeting_person_name = None
             self._post_greeting_prompt_used = False
+            self._face_triggered_wake_text = None
+            self._quiet_resume_pending = False
             self._programmed_questions_asked_this_session.clear()
             self._post_response_prompt_count = 0
             self._post_response_plan_prompt_asked = False
@@ -1895,10 +2048,12 @@ class StateMachine:
             self._leds._send_head(config.LED_CMD_SPEAK_STOP)
         if new_state == State.SLEEP:
             self._last_face_triggered_greeting_at = 0.0
+        if new_state == State.QUIET:
+            self._last_quiet_face_listen_at = 0.0
         self._state = new_state
         if self._head_tracker is not None:
             self._head_tracker.set_face_search_enabled(
-                new_state in (State.IDLE, State.ACTIVE),
+                new_state in (State.IDLE, State.QUIET, State.ACTIVE),
                 reason=f"state={new_state.value}",
             )
         self._refresh_autonomy_context()
@@ -1909,14 +2064,14 @@ class StateMachine:
 
     def _on_wake_word(self, model_name: str) -> None:
         # The sleep wake model fires ONLY in SLEEP state; all other models
-        # fire ONLY in IDLE state.  Detections in ACTIVE/SHUTDOWN are ignored
+        # fire in IDLE or QUIET. Detections in ACTIVE/SHUTDOWN are ignored
         # (suppression should already block them — this is belt-and-suspenders).
         _sleep_stem = config.WAKE_SLEEP_MODEL.stem.lower()   # e.g. "wakeuprex"
         _is_sleep_model = model_name.lower() == _sleep_stem
 
-        if self._state == State.IDLE and not _is_sleep_model:
+        if self._state in {State.IDLE, State.QUIET} and not _is_sleep_model:
             self._pipeline_t0 = time.monotonic()
-            log.info("Wake word detected (%s)", model_name)
+            log.info("Wake word detected (%s) in %s", model_name, self._state.value)
             self._wake_event.set()
         elif self._state == State.SLEEP and _is_sleep_model:
             self._pipeline_t0 = time.monotonic()
@@ -1935,8 +2090,9 @@ class StateMachine:
     def _on_face_appear(self) -> None:
         """Called by HeadTracker when a face is confirmed after a long absence.
 
-        Only acts in IDLE state — ignored during ACTIVE, SLEEP, and SHUTDOWN so
-        a face appearing while Rex is already talking doesn't re-trigger a greeting.
+        In IDLE, a face can trigger a greeting flow. In QUIET, a face can
+        trigger a silent listen for resume commands. ACTIVE, SLEEP, and
+        SHUTDOWN ignore the signal.
         """
         if self._state == State.IDLE:
             if self._face_triggered_greeting_on_cooldown(
@@ -1944,6 +2100,11 @@ class StateMachine:
             ):
                 return
             log.info("Face appeared after absence — signalling face wake")
+            self._face_wake_event.set()
+        elif self._state == State.QUIET:
+            if self._quiet_face_listen_on_cooldown("Face appeared in QUIET"):
+                return
+            log.info("Face appeared in QUIET — signalling silent listen")
             self._face_wake_event.set()
         else:
             log.debug(
@@ -1960,6 +2121,21 @@ class StateMachine:
             return False
         log.info(
             "%s: suppressing face-triggered greeting (cooldown %.1f s remaining)",
+            context,
+            cooldown - elapsed,
+        )
+        return True
+
+    def _quiet_face_listen_on_cooldown(self, context: str) -> bool:
+        """Return True when QUIET face-listen should be suppressed."""
+        cooldown = max(0.0, config.FACE_TRIGGERED_GREETING_COOLDOWN_SECONDS)
+        if cooldown <= 0.0 or self._last_quiet_face_listen_at <= 0.0:
+            return False
+        elapsed = time.monotonic() - self._last_quiet_face_listen_at
+        if elapsed >= cooldown:
+            return False
+        log.info(
+            "%s: suppressing QUIET face-listen (cooldown %.1f s remaining)",
             context,
             cooldown - elapsed,
         )
@@ -4082,13 +4258,18 @@ class StateMachine:
                 self._end_speech(servo_stop)
             return State.IDLE
 
+        elif action == "quiet":
+            self._idle_clips_enabled = False
+            log.info("Quiet mode enabled")
+            return State.QUIET
+
         elif action == "idle":
             return State.IDLE
 
         elif action == "stop_idle_clips":
             self._idle_clips_enabled = False
-            log.info("Idle atmosphere clips disabled by voice command")
-            return State.IDLE
+            log.info("Deprecated stop_idle_clips action routed to QUIET mode")
+            return State.QUIET
 
         elif action == "chatty_on":
             self._chatty_mode = True
@@ -5517,7 +5698,7 @@ class StateMachine:
                 return "time"
             if cmd_action == "vision":
                 return "vision"
-            if cmd_action in {"program_shutdown", "os_shutdown", "sleep", "idle"}:
+            if cmd_action in {"program_shutdown", "os_shutdown", "sleep", "quiet", "idle"}:
                 return "shutdown"
             return cmd_action
 

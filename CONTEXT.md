@@ -80,7 +80,9 @@ Fallback: if local models unavailable on macOS, falls back to cloud APIs with a 
 
 ## State Machine
 - IDLE: slow breathing LED pulse, listening for wake word, idle audio clips
+- QUIET: wake word listening and face tracking stay active, but Rex never speaks until resumed
 - ACTIVE: full interactivity, LLM responses, reactive movement
+- SLEEP: sleep animation + sleep-only wake word
 - SHUTDOWN: triggered by voice command or signal
 
 ## Servo Behaviors
