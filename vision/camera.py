@@ -36,6 +36,16 @@ import config
 log = logging.getLogger(__name__)
 
 
+def _open_capture(source: int | str) -> cv2.VideoCapture:
+    """Open a camera by numeric index or stable /dev path."""
+    if isinstance(source, str) and source.startswith("/dev/"):
+        cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
+        if cap.isOpened():
+            return cap
+        cap.release()
+    return cv2.VideoCapture(source)
+
+
 class Camera:
     """Manages a single webcam device for still-frame capture."""
 
@@ -66,14 +76,16 @@ class Camera:
         Safe to call once at startup.  Sets is_available() based on whether
         the device opened successfully.
         """
+        source = config.CAMERA_DEVICE
+        source_label = config.CAMERA_DEVICE_LABEL
         for attempt in range(1, self._OPEN_RETRIES + 1):
-            cap = cv2.VideoCapture(config.CAMERA_DEVICE_INDEX)
+            cap = _open_capture(source)
 
             if not cap.isOpened():
                 cap.release()
                 log.warning(
-                    "Camera: device %d could not be opened (attempt %d/%d)%s",
-                    config.CAMERA_DEVICE_INDEX,
+                    "Camera: source %s could not be opened (attempt %d/%d)%s",
+                    source_label,
                     attempt,
                     self._OPEN_RETRIES,
                     " — retrying" if attempt < self._OPEN_RETRIES else " — vision disabled",
@@ -92,8 +104,8 @@ class Camera:
             if not ok:
                 cap.release()
                 log.warning(
-                    "Camera: device %d opened but returned no frame (attempt %d/%d)%s",
-                    config.CAMERA_DEVICE_INDEX,
+                    "Camera: source %s opened but returned no frame (attempt %d/%d)%s",
+                    source_label,
                     attempt,
                     self._OPEN_RETRIES,
                     " — retrying" if attempt < self._OPEN_RETRIES else " — vision disabled",
@@ -105,8 +117,8 @@ class Camera:
             self._cap = cap
             self._available = True
             log.info(
-                "Camera: device %d ready (%dx%d) after %d attempt(s)",
-                config.CAMERA_DEVICE_INDEX,
+                "Camera: source %s ready (%dx%d) after %d attempt(s)",
+                source_label,
                 int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
                 int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
                 attempt,

@@ -16,7 +16,7 @@ Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Sili
 | Arduino Nano | Chest light panel controller (/dev/ttyUSB0) |
 | ReSpeaker Lite | USB microphone array for wake word and transcription |
 | Speakers + Stereo Amp | Audio output via 3.5mm jack |
-| ELP-USBFHD01M-L21 | 1080p wide angle camera, mounted in head (/dev/video0) |
+| ELP-USBFHD01M-L21 | 1080p wide angle camera, mounted in head (use a stable udev path like `/dev/camera_main` on Pi when available) |
 | Custom Mouth PCB | 80x WS2812B NeoPixels — emotion-based center-out pulse animation |
 | Eye PCB | 2x WS2812B NeoPixels with natural random blink animation |
 
@@ -280,6 +280,10 @@ MAESTRO_PORT=/dev/ttyACM0
 NANO_HEAD_PORT=/dev/ttyACM2
 NANO_CHEST_PORT=/dev/ttyUSB0
 
+# Camera
+CAMERA_DEVICE=/dev/camera_main   # preferred on Pi; accepts /dev path or numeric string
+# CAMERA_DEVICE_INDEX=0          # legacy fallback if CAMERA_DEVICE is blank
+
 # Feature flags
 ENABLE_OS_SHUTDOWN=false
 SERVO_SAFE_MODE=true
@@ -322,6 +326,18 @@ already-connected audio sink, otherwise connect the requested paired sink, then
 scan the available PortAudio/PipeWire playback devices and choose the matching
 Bluetooth output dynamically. If Bluetooth is unavailable, playback falls back
 to `AUDIO_OUTPUT_DEVICE` when set, then to the system default output.
+
+### Camera Device On Raspberry Pi
+
+If your camera gets a stable udev symlink, point Rex at that path instead of a
+changing numeric index:
+
+```env
+CAMERA_DEVICE=/dev/camera_main
+```
+
+`CAMERA_DEVICE` accepts either a `/dev/...` path or a numeric string like `0`.
+If it is blank, Rex falls back to the legacy `CAMERA_DEVICE_INDEX` setting.
 
 ## Running
 
@@ -389,6 +405,7 @@ journalctl -u djr3x -f
 - Audio via PipeWire on Debian Trixie — set `AUDIO_INPUT_DEVICE=3` for ReSpeaker Lite
 - dlib installs from piwheels as a prebuilt wheel — no compilation needed
 - Serial ports: Maestro=`/dev/ttyACM0`, Head Nano=`/dev/ttyACM2`, Chest Nano=`/dev/ttyUSB0`
+- Prefer `CAMERA_DEVICE=/dev/camera_main` (or another udev symlink) over a changing camera index
 
 ### macOS (Apple Silicon)
 - Run `python3 setup_assets.py` after pip install — it also patches `face_recognition_models` if you installed that optional package

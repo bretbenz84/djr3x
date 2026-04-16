@@ -54,6 +54,16 @@ def _optional_int(key: str, default: int | None = None) -> int | None:
         return default
     return int(val)
 
+def _optional_device_source(key: str) -> int | str | None:
+    """Return an int device index or string device path from .env."""
+    val = os.getenv(key)
+    if val is None:
+        return None
+    stripped = val.strip()
+    if not stripped:
+        return None
+    return int(stripped) if stripped.isdigit() else stripped
+
 # ---------------------------------------------------------------------------
 # API Keys
 # ---------------------------------------------------------------------------
@@ -560,6 +570,11 @@ CHATTY_CURIOSITY_SETTLE_SECS: float = float(_optional("CHATTY_CURIOSITY_SETTLE_S
 # ---------------------------------------------------------------------------
 
 CAMERA_DEVICE_INDEX  = int(_optional("CAMERA_DEVICE_INDEX", "0"))
+_camera_device_override = _optional_device_source("CAMERA_DEVICE")
+CAMERA_DEVICE: int | str = (
+    _camera_device_override if _camera_device_override is not None else CAMERA_DEVICE_INDEX
+)
+CAMERA_DEVICE_LABEL = str(CAMERA_DEVICE)
 CAMERA_FRAME_WIDTH   = int(_optional("CAMERA_FRAME_WIDTH", "1920"))
 CAMERA_FRAME_HEIGHT  = int(_optional("CAMERA_FRAME_HEIGHT", "1080"))
 CAMERA_CAPTURE_FLUSH_FRAMES = int(_optional("CAMERA_CAPTURE_FLUSH_FRAMES", "4"))
