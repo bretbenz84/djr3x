@@ -361,16 +361,27 @@ class Transcriber:
                             voiced_chunks += 1
                             # In Phase 1, always bust silence (silence counter is
                             # unused in Phase 1, but keep it clean).
-                            # In Phase 2, only reset the silence counter when the
-                            # chunk is clearly voiced — well above the detection
-                            # floor.  Background noise and speaker/servo bleedthrough
-                            # typically sits at 300–600 RMS; real speech is 1000+.
-                            # Chunks between active_threshold and silence_reset_threshold
-                            # are recorded but do NOT reset the silence clock, so a
-                            # short utterance ("you suck") doesn't extend the recording
-                            # by 5+ seconds of ambient noise.
-                            if not speech_started or rms >= silence_reset_threshold:
+                            #
+                            # In Phase 2, only clearly voiced audio should reset the
+                            # silence countdown. A short fresh run of consecutive
+                            # above-threshold chunks also counts as resumed speech so
+                            # a quiet follow-up word after a brief pause is not lost.
+                            #
+                            # Once the silence clock has already started, weak/noisy
+                            # chunks must not freeze it in place. They are still
+                            # recorded, but the countdown keeps advancing until speech
+                            # clearly returns.
+                            if (
+                                not speech_started
+                                or rms >= silence_reset_threshold
+                                or (
+                                    speech_started
+                                    and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS
+                                )
+                            ):
                                 silence_chunks = 0
+                            elif speech_started and silence_chunks > 0:
+                                silence_chunks += 1
 
                             if (
                                 not speech_started

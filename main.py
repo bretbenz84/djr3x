@@ -38,6 +38,16 @@ from states.state_machine import StateMachine
 _LOG_FILE = config.PROJECT_ROOT / "djr3x.log"
 _LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
 _LOG_DATE   = "%Y-%m-%d %H:%M:%S"
+_THIRD_PARTY_LOGGERS = (
+    "openai",
+    "httpx",
+    "httpcore",
+    "websockets",
+)
+
+
+def _log_level_from_name(name: str) -> int:
+    return getattr(logging, name.upper(), logging.WARNING)
 
 
 def _setup_logging() -> None:
@@ -63,6 +73,10 @@ def _setup_logging() -> None:
         root.addHandler(file_handler)
     except OSError as exc:
         logging.warning("Could not open log file %s: %s — file logging disabled", _LOG_FILE, exc)
+
+    third_party_level = _log_level_from_name(config.THIRD_PARTY_LOG_LEVEL)
+    for logger_name in _THIRD_PARTY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(third_party_level)
 
 
 log = logging.getLogger(__name__)

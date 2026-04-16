@@ -70,6 +70,11 @@ ELEVENLABS_TIMEOUT_SECONDS = float(_optional("ELEVENLABS_TIMEOUT_SECONDS", "60")
 
 PLATFORM = get_platform()   # 'macos_silicon' or 'pi'
 
+
+def _platform_default(macos_silicon: str, pi: str) -> str:
+    """Return the per-platform default while still allowing .env overrides."""
+    return macos_silicon if PLATFORM == "macos_silicon" else pi
+
 # When True, use local mlx-whisper instead of the Whisper API.
 USE_LOCAL_TRANSCRIPTION: bool = _optional("USE_LOCAL_TRANSCRIPTION", "").lower() in ("1", "true", "yes") \
     if _optional("USE_LOCAL_TRANSCRIPTION") else (PLATFORM == "macos_silicon")
@@ -84,6 +89,12 @@ LOCAL_WHISPER_MODEL: str = _optional("LOCAL_WHISPER_MODEL", "mlx-community/whisp
 # Local LLM — Ollama OpenAI-compatible endpoint
 LOCAL_LLM_BASE_URL: str = _optional("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")
 LOCAL_LLM_MODEL:    str = _optional("LOCAL_LLM_MODEL",    "llama3.2:1b")
+
+# Logging
+THIRD_PARTY_LOG_LEVEL = _optional(
+    "THIRD_PARTY_LOG_LEVEL",
+    _platform_default("INFO", "WARNING"),
+).upper()
 
 # ---------------------------------------------------------------------------
 # LLM
@@ -298,10 +309,15 @@ TRANSCRIBE_MIN_VOICED_CHUNKS       = int(_optional("TRANSCRIBE_MIN_VOICED_CHUNKS
 # RMS exceeds speech_detect_threshold × this multiplier.  This prevents background noise
 # and servo/speaker bleedthrough from resetting the silence counter after the user has
 # finished speaking.  Servo actuation during the wake wave (≈2.9 s) can hit 600–1000 RMS;
-# real speech is typically 1500–5000 RMS.  A factor of 4.0 places the reset threshold
-# well above typical servo noise so the silence clock keeps advancing even while the wave
-# animation is still running.  Increase further if silence still takes too long.
-TRANSCRIBE_SILENCE_RESET_MULTIPLIER = float(_optional("TRANSCRIBE_SILENCE_RESET_MULTIPLIER", "4.0"))
+# real speech is typically much stronger than ambient noise, but Raspberry Pi runs with
+# live servos and louder room noise often need a lower value so actual speech can still
+# reset the countdown after a brief pause.
+TRANSCRIBE_SILENCE_RESET_MULTIPLIER = float(
+    _optional(
+        "TRANSCRIBE_SILENCE_RESET_MULTIPLIER",
+        _platform_default("4.0", "1.4"),
+    )
+)
 SILENCE_DURATION             = 0.5  # seconds of silence to end capture
 MAX_RECORD_SECONDS           = 12.0 # hard cap on a single utterance
 
@@ -375,7 +391,12 @@ WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",
 #     sustained silence before stopping.  Any audio above the RMS threshold
 #     resets the counter so brief inter-word pauses never cut off an utterance.
 TRANSCRIBE_SPEECH_WAIT_SECONDS   = float(_optional("TRANSCRIBE_SPEECH_WAIT_SECONDS",   "5.0"))
-TRANSCRIBE_END_SILENCE_SECONDS   = float(_optional("TRANSCRIBE_END_SILENCE_SECONDS",   "2.5"))
+TRANSCRIBE_END_SILENCE_SECONDS   = float(
+    _optional(
+        "TRANSCRIBE_END_SILENCE_SECONDS",
+        _platform_default("2.5", "1.0"),
+    )
+)
 
 # Short mic cooldown after Rex finishes speaking. Prevents the next
 # transcription window from immediately re-capturing prompt/greeting tail
