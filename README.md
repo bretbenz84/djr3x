@@ -265,6 +265,8 @@ ELEVENLABS_VOICE_ID=your_voice_id_here
 # Audio devices
 AUDIO_INPUT_DEVICE=3        # Pi: ReSpeaker=3 | Mac: MacBook mic=1
 AUDIO_OUTPUT_DEVICE=0       # Pi: 3.5mm jack=0 | Mac: leave blank
+AUDIO_OUTPUT_MODE=device    # default | device | bluetooth
+AUDIO_BLUETOOTH_DEVICE=auto # auto | BT MAC | alias substring
 
 # Wake word models
 WAKE_WORD_MODEL_1=assets/models/Dee-Jay_Rex.onnx
@@ -294,6 +296,32 @@ NOISE_FLOOR_MULTIPLIER=2.0
 # LOCAL_LLM_MODEL=llama3.2
 # LOCAL_LLM_BASE_URL=http://localhost:11434/v1
 ```
+
+### Bluetooth Audio On Raspberry Pi
+
+To use a paired Bluetooth playback device without hard-coding a changing
+PipeWire/PortAudio index:
+
+```env
+AUDIO_OUTPUT_DEVICE=
+AUDIO_OUTPUT_MODE=bluetooth
+AUDIO_BLUETOOTH_DEVICE=auto
+```
+
+You can also target a specific paired device by MAC address or alias substring:
+
+```env
+AUDIO_OUTPUT_MODE=bluetooth
+AUDIO_BLUETOOTH_DEVICE=5C:2C:FF:05:70:B1
+# or
+# AUDIO_BLUETOOTH_DEVICE=BT-WUZHI
+```
+
+In Bluetooth mode, Rex will ask `bluetoothctl` for paired devices, prefer an
+already-connected audio sink, otherwise connect the requested paired sink, then
+scan the available PortAudio/PipeWire playback devices and choose the matching
+Bluetooth output dynamically. If Bluetooth is unavailable, playback falls back
+to `AUDIO_OUTPUT_DEVICE` when set, then to the system default output.
 
 ## Running
 

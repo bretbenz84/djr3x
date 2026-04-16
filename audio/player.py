@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -62,6 +63,7 @@ SPEECH_SAMPLE_RATE: int = config.SPEECH_SAMPLE_RATE
 # Chunk size (frames) fed from a cached file into the speech queue at once.
 # Larger = fewer queue operations; smaller = more responsive stop().
 _FILE_CHUNK_FRAMES: int = config.AUDIO_CHUNK_SIZE * 8
+_MAC_RE = re.compile(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}")
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +83,21 @@ class _SpeechChunk:
     """Mono float32 speech samples plus whether the droid effect should run."""
     samples: np.ndarray
     apply_droid_effect: bool = False
+
+
+@dataclass
+class _BluetoothDevice:
+    mac: str
+    name: str = ""
+    alias: str = ""
+    paired: bool = False
+    trusted: bool = False
+    connected: bool = False
+    has_audio_sink: bool = False
+
+    @property
+    def display_name(self) -> str:
+        return self.alias or self.name or self.mac
 
 
 class _DroidVoiceEffect:
@@ -222,6 +239,206 @@ class _DroidVoiceEffect:
         return out
 
 
+class _BluetoothAudioManager:
+    """Resolve a paired Bluetooth audio sink into a live PortAudio device."""
+
+    def __init__(self) -> None:
+        self._enabled = config.AUDIO_OUTPUT_MODE == "bluetooth"
+        self._lock = threading.Lock()
+        self._cached_output_index: int | None = None
+        self._cached_output_name: str = ""
+        self._cached_target_mac: str = ""
+        self._cached_at: float = 0.0
+
+        if self._enabled:
+            log.info(
+                "AudioPlayer: Bluetooth output mode enabled (target=%s)",
+                config.AUDIO_BLUETOOTH_DEVICE or "auto",
+            )
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def preferred_output_devices(self) -> list[int | None]:
+        if not self._enabled:
+            device = config.AUDIO_OUTPUT_DEVICE
+            return [device, None] if device is not None else [None]
+
+        candidates: list[int | None] = []
+        with self._lock:
+            bt_device = self._resolve_output_device()
+        if bt_device is not None:
+            candidates.append(bt_device)
+        if config.AUDIO_OUTPUT_DEVICE is not None and config.AUDIO_OUTPUT_DEVICE not in candidates:
+            candidates.append(config.AUDIO_OUTPUT_DEVICE)
+        if None not in candidates:
+            candidates.append(None)
+        return candidates
+
+    def _resolve_output_device(self) -> int | None:
+        cached = self._cached_output_index
+        if cached is not None and (time.monotonic() - self._cached_at) <= 5.0:
+            if self._device_index_exists(cached):
+                return cached
+            self._clear_cache()
+
+        target = self._select_target_device()
+        if target is None:
+            log.warning("AudioPlayer: no paired Bluetooth audio sink matched %r", config.AUDIO_BLUETOOTH_DEVICE)
+            return None
+
+        ready = target.connected
+        if not ready and config.AUDIO_BLUETOOTH_AUTO_CONNECT:
+            ready = self._connect_device(target.mac)
+            if ready:
+                target = self._device_info(target.mac) or target
+
+        if not ready:
+            log.warning(
+                "AudioPlayer: Bluetooth device %s is not connected",
+                target.display_name,
+            )
+            return None
+
+        match = self._find_portaudio_output(target)
+        if match is None:
+            log.warning(
+                "AudioPlayer: Bluetooth device %s connected but no PortAudio output appeared",
+                target.display_name,
+            )
+            return None
+
+        index, name = match
+        self._cached_output_index = index
+        self._cached_output_name = name
+        self._cached_target_mac = target.mac
+        self._cached_at = time.monotonic()
+        log.info(
+            "AudioPlayer: using Bluetooth output device %d (%s) for %s",
+            index,
+            name,
+            target.display_name,
+        )
+        return index
+
+    def _clear_cache(self) -> None:
+        self._cached_output_index = None
+        self._cached_output_name = ""
+        self._cached_target_mac = ""
+        self._cached_at = 0.0
+
+    def _device_index_exists(self, index: int) -> bool:
+        try:
+            sd.query_devices(index, kind="output")
+            return True
+        except Exception:
+            return False
+
+    def _select_target_device(self) -> _BluetoothDevice | None:
+        paired = self._paired_audio_devices()
+        if not paired:
+            return None
+
+        target = config.AUDIO_BLUETOOTH_DEVICE.strip()
+        if not target or target.lower() == "auto":
+            return paired[0]
+
+        target_norm = _normalize_token(target)
+        if _MAC_RE.fullmatch(target):
+            exact = next((d for d in paired if d.mac.lower() == target.lower()), None)
+            if exact is not None:
+                return exact
+
+        for device in paired:
+            haystacks = {
+                _normalize_token(device.mac),
+                _normalize_token(device.alias),
+                _normalize_token(device.name),
+            }
+            if target_norm and any(target_norm and target_norm in h for h in haystacks if h):
+                return device
+        return None
+
+    def _paired_audio_devices(self) -> list[_BluetoothDevice]:
+        devices = self._list_paired_devices()
+        audio_devices: list[_BluetoothDevice] = []
+        for mac in devices:
+            info = self._device_info(mac)
+            if info is None or not info.paired or not info.has_audio_sink:
+                continue
+            audio_devices.append(info)
+
+        def _sort_key(device: _BluetoothDevice) -> tuple[int, int, str]:
+            connected_rank = 0 if (config.AUDIO_BLUETOOTH_PREFER_CONNECTED and device.connected) else 1
+            trusted_rank = 0 if device.trusted else 1
+            return (connected_rank, trusted_rank, device.display_name.lower())
+
+        audio_devices.sort(key=_sort_key)
+        return audio_devices
+
+    def _list_paired_devices(self) -> list[str]:
+        outputs: list[str] = []
+        for args in (["devices", "Paired"], ["paired-devices"]):
+            stdout = self._run_command(["bluetoothctl", *args], timeout=5.0)
+            if not stdout:
+                continue
+            outputs = _parse_bluetoothctl_devices(stdout)
+            if outputs:
+                break
+        return outputs
+
+    def _device_info(self, mac: str) -> _BluetoothDevice | None:
+        stdout = self._run_command(["bluetoothctl", "info", mac], timeout=5.0)
+        if not stdout:
+            return None
+        return _parse_bluetoothctl_info(stdout, mac)
+
+    def _connect_device(self, mac: str) -> bool:
+        self._clear_cache()
+        log.info("AudioPlayer: connecting Bluetooth audio device %s …", mac)
+        self._run_command(["bluetoothctl", "connect", mac], timeout=config.AUDIO_BLUETOOTH_CONNECT_TIMEOUT)
+        deadline = time.monotonic() + max(1.0, config.AUDIO_BLUETOOTH_CONNECT_TIMEOUT)
+        while time.monotonic() < deadline:
+            info = self._device_info(mac)
+            if info is not None and info.connected:
+                return True
+            time.sleep(0.5)
+        return False
+
+    def _find_portaudio_output(self, device: _BluetoothDevice) -> tuple[int, str] | None:
+        deadline = time.monotonic() + max(1.0, config.AUDIO_BLUETOOTH_DISCOVERY_TIMEOUT)
+        tokens = _bluetooth_match_tokens(device)
+        while time.monotonic() < deadline:
+            match = _find_best_output_device(tokens)
+            if match is not None:
+                return match
+            time.sleep(0.5)
+        return None
+
+    @staticmethod
+    def _run_command(args: list[str], timeout: float) -> str:
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            log.warning("AudioPlayer: command failed (%s): %s", " ".join(args), exc)
+            return ""
+        if result.returncode != 0 and result.stderr.strip():
+            log.debug(
+                "AudioPlayer: command %s returned %d: %s",
+                " ".join(args),
+                result.returncode,
+                result.stderr.strip(),
+            )
+        return result.stdout
+
+
 # ---------------------------------------------------------------------------
 # AudioPlayer
 # ---------------------------------------------------------------------------
@@ -236,6 +453,7 @@ class AudioPlayer:
 
     def __init__(self) -> None:
         self._rms: float = 0.0           # smoothed 0.0–255.0; read by leds.py
+        self._bluetooth_audio = _BluetoothAudioManager()
 
         # Fired when the first audio samples of a new speech segment actually
         # reach the output device.  Used by LEDController.start_mouth() so the
@@ -512,6 +730,7 @@ class AudioPlayer:
 
             finished = threading.Event()
             with _open_output_stream(
+                _player=self,
                 samplerate=SPEECH_SAMPLE_RATE,
                 channels=config.AUDIO_OUTPUT_CHANNELS,
                 dtype="int16",
@@ -661,6 +880,7 @@ class AudioPlayer:
                     raise sd.CallbackStop()
 
             with _open_output_stream(
+                _player=self,
                 samplerate=sr,
                 channels=channels,
                 dtype="float32",
@@ -749,13 +969,20 @@ def _should_apply_droid_effect_to_file(path: Path) -> bool:
 
 
 def _output_devices_to_try() -> list[int | None]:
+    # Backwards-compatible helper retained for non-class callers; the
+    # AudioPlayer instance uses its Bluetooth manager instead.
     device = config.AUDIO_OUTPUT_DEVICE
     return [device, None] if device is not None else [None]
 
 
 def _open_output_stream(**kwargs):
+    player: AudioPlayer | None = kwargs.pop("_player", None)
     last_exc: sd.PortAudioError | None = None
-    for device in _output_devices_to_try():
+    if player is not None:
+        devices_to_try = player._bluetooth_audio.preferred_output_devices()
+    else:
+        devices_to_try = _output_devices_to_try()
+    for device in devices_to_try:
         try:
             if device is None and config.AUDIO_OUTPUT_DEVICE is not None:
                 log.warning("AudioPlayer: falling back to default output device")
@@ -765,3 +992,100 @@ def _open_output_stream(**kwargs):
             log.warning("AudioPlayer: output device %s failed — %s", device, exc)
     assert last_exc is not None
     raise last_exc
+
+
+def _parse_bluetoothctl_devices(output: str) -> list[str]:
+    devices: list[str] = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("Device "):
+            continue
+        parts = line.split(maxsplit=2)
+        if len(parts) >= 2 and _MAC_RE.fullmatch(parts[1]):
+            devices.append(parts[1])
+    return devices
+
+
+def _parse_bluetoothctl_info(output: str, mac: str) -> _BluetoothDevice:
+    device = _BluetoothDevice(mac=mac)
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("Name: "):
+            device.name = line.split(": ", 1)[1].strip()
+        elif line.startswith("Alias: "):
+            device.alias = line.split(": ", 1)[1].strip()
+        elif line.startswith("Paired: "):
+            device.paired = line.split(": ", 1)[1].strip().lower() == "yes"
+        elif line.startswith("Trusted: "):
+            device.trusted = line.split(": ", 1)[1].strip().lower() == "yes"
+        elif line.startswith("Connected: "):
+            device.connected = line.split(": ", 1)[1].strip().lower() == "yes"
+        elif "Audio Sink" in line:
+            device.has_audio_sink = True
+    return device
+
+
+def _normalize_token(value: str) -> str:
+    return "".join(ch for ch in value.lower() if ch.isalnum())
+
+
+def _mac_variants(mac: str) -> list[str]:
+    compact = _normalize_token(mac)
+    raw_lower = mac.lower()
+    underscored = raw_lower.replace(":", "_")
+    dashed = raw_lower.replace(":", "-")
+    dotted = raw_lower.replace(":", ".")
+    return [raw_lower, compact, underscored, dashed, dotted]
+
+
+def _bluetooth_match_tokens(device: _BluetoothDevice) -> list[str]:
+    tokens: list[str] = []
+    for value in (device.alias, device.name):
+        if value:
+            tokens.append(value.lower())
+            tokens.append(_normalize_token(value))
+    for variant in _mac_variants(device.mac):
+        tokens.append(variant)
+        tokens.append(f"bluez_output.{variant}")
+    seen: set[str] = set()
+    unique_tokens: list[str] = []
+    for token in tokens:
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        unique_tokens.append(token)
+    return unique_tokens
+
+
+def _find_best_output_device(tokens: list[str]) -> tuple[int, str] | None:
+    try:
+        devices = sd.query_devices()
+    except Exception as exc:
+        log.warning("AudioPlayer: could not query output devices: %s", exc)
+        return None
+
+    best: tuple[int, str, int] | None = None
+    for index, info in enumerate(devices):
+        if int(info.get("max_output_channels", 0)) <= 0:
+            continue
+        name = str(info.get("name", ""))
+        name_lower = name.lower()
+        name_norm = _normalize_token(name)
+        score = 0
+        for token in tokens:
+            if token in name_lower:
+                score = max(score, 6 if ":" in token or "_" in token or "bluez_output" in token else 4)
+            elif token in name_norm:
+                score = max(score, 5)
+        if "bluez" in name_lower or "bluetooth" in name_lower:
+            score += 1
+        if score <= 0:
+            continue
+        if best is None or score > best[2]:
+            best = (index, name, score)
+
+    if best is None:
+        return None
+    return (best[0], best[1])

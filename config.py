@@ -266,6 +266,23 @@ SPEECH_OUTPUT_LATENCY = _optional("SPEECH_OUTPUT_LATENCY", "low")
 
 AUDIO_INPUT_DEVICE  = _optional_int("AUDIO_INPUT_DEVICE")   # None → system default
 AUDIO_OUTPUT_DEVICE = _optional_int("AUDIO_OUTPUT_DEVICE")  # None → system default
+AUDIO_OUTPUT_MODE   = _optional(
+    "AUDIO_OUTPUT_MODE",
+    "device" if AUDIO_OUTPUT_DEVICE is not None else "default",
+).strip().lower()
+AUDIO_BLUETOOTH_DEVICE = _optional("AUDIO_BLUETOOTH_DEVICE", "auto").strip()
+AUDIO_BLUETOOTH_AUTO_CONNECT: bool = _optional(
+    "AUDIO_BLUETOOTH_AUTO_CONNECT", "true"
+).lower() not in ("0", "false", "no")
+AUDIO_BLUETOOTH_CONNECT_TIMEOUT = float(
+    _optional("AUDIO_BLUETOOTH_CONNECT_TIMEOUT", "12.0")
+)
+AUDIO_BLUETOOTH_DISCOVERY_TIMEOUT = float(
+    _optional("AUDIO_BLUETOOTH_DISCOVERY_TIMEOUT", "8.0")
+)
+AUDIO_BLUETOOTH_PREFER_CONNECTED: bool = _optional(
+    "AUDIO_BLUETOOTH_PREFER_CONNECTED", "true"
+).lower() not in ("0", "false", "no")
 
 # Software volume: 0.0 (mute) – 1.0 (full). ReSpeaker Lite has no hardware
 # mixer, so all output paths scale samples by this factor before writing.
