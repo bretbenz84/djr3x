@@ -83,6 +83,7 @@ class _SpeechChunk:
     """Mono float32 speech samples plus whether the droid effect should run."""
     samples: np.ndarray
     apply_droid_effect: bool = False
+    sample_rate: int = SPEECH_SAMPLE_RATE
 
 
 @dataclass
@@ -301,6 +302,8 @@ class _BluetoothAudioManager:
             )
             return None
 
+        self._set_default_sink(target)
+
         match = self._find_portaudio_output(target)
         if match is None:
             log.warning(
@@ -416,6 +419,32 @@ class _BluetoothAudioManager:
             time.sleep(0.5)
         return None
 
+    def _set_default_sink(self, device: _BluetoothDevice) -> None:
+        sinks = self._list_pactl_sinks()
+        if not sinks:
+            return
+        tokens = set(_bluetooth_match_tokens(device))
+        for sink_name in sinks:
+            sink_lower = sink_name.lower()
+            sink_norm = _normalize_token(sink_name)
+            if any(token and (token in sink_lower or token in sink_norm) for token in tokens):
+                self._run_command(["pactl", "set-default-sink", sink_name], timeout=5.0)
+                log.info(
+                    "AudioPlayer: set default PipeWire/Pulse sink to %s for %s",
+                    sink_name,
+                    device.display_name,
+                )
+                return
+
+    def _list_pactl_sinks(self) -> list[str]:
+        stdout = self._run_command(["pactl", "list", "short", "sinks"], timeout=5.0)
+        sinks: list[str] = []
+        for line in stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2 and parts[1].strip():
+                sinks.append(parts[1].strip())
+        return sinks
+
     @staticmethod
     def _run_command(args: list[str], timeout: float) -> str:
         try:
@@ -454,6 +483,7 @@ class AudioPlayer:
     def __init__(self) -> None:
         self._rms: float = 0.0           # smoothed 0.0–255.0; read by leds.py
         self._bluetooth_audio = _BluetoothAudioManager()
+        self._speech_stream_sample_rate: int = SPEECH_SAMPLE_RATE
 
         # Fired when the first audio samples of a new speech segment actually
         # reach the output device.  Used by LEDController.start_mouth() so the
@@ -586,7 +616,7 @@ class AudioPlayer:
         self.stop_music()
         self._music_stop.clear()
         self._music_thread = threading.Thread(
-            target=self._music_worker,
+            target=self._music_worker_safe,
             args=(Path(path), loop),
             daemon=True,
             name="djr3x-music",
@@ -643,7 +673,7 @@ class AudioPlayer:
         self.stop_music()
         self._music_stop.clear()
         self._music_thread = threading.Thread(
-            target=self._music_worker_array,
+            target=self._music_worker_array_safe,
             args=(data, sr),
             daemon=True,
             name="djr3x-chime",
@@ -722,28 +752,40 @@ class AudioPlayer:
                 continue
 
             # First audio chunk — prime the buffer, then open the stream.
-            self._speech_buf = item.samples
             self._speech_buf_apply_droid_effect = item.apply_droid_effect
-            self._speech_buf_pos = 0
             self._droid_effect.reset()
             self._audio_started.clear()   # arm the event; callback sets it on first samples
 
-            finished = threading.Event()
-            with _open_output_stream(
-                _player=self,
-                samplerate=SPEECH_SAMPLE_RATE,
-                channels=config.AUDIO_OUTPUT_CHANNELS,
-                dtype="int16",
-                blocksize=config.SPEECH_OUTPUT_BLOCKSIZE,
-                latency=config.SPEECH_OUTPUT_LATENCY,
-                callback=self._speech_callback,
-                finished_callback=finished.set,
-            ):
-                finished.wait()
+            try:
+                device, stream_sr, _name = _resolve_output_stream_settings(
+                    self,
+                    requested_samplerate=SPEECH_SAMPLE_RATE,
+                    channels=config.AUDIO_OUTPUT_CHANNELS,
+                    dtype="int16",
+                )
+                self._speech_stream_sample_rate = stream_sr
+                self._speech_buf = _prepare_speech_chunk_for_output(item, stream_sr)
+                self._speech_buf_pos = 0
 
-            # Stream is fully closed — zero out RMS so LEDs go dark.
-            self._rms = 0.0
-            self._speech_status_logged = False
+                finished = threading.Event()
+                with sd.OutputStream(
+                    device=device,
+                    samplerate=stream_sr,
+                    channels=config.AUDIO_OUTPUT_CHANNELS,
+                    dtype="int16",
+                    blocksize=config.SPEECH_OUTPUT_BLOCKSIZE,
+                    latency=config.SPEECH_OUTPUT_LATENCY,
+                    callback=self._speech_callback,
+                    finished_callback=finished.set,
+                ):
+                    finished.wait()
+            except Exception:
+                log.exception("AudioPlayer: speech stream failed")
+                self._speech_active.set()
+            finally:
+                # Stream is fully closed — zero out RMS so LEDs go dark.
+                self._rms = 0.0
+                self._speech_status_logged = False
 
     # ------------------------------------------------------------------
     # Internal — speech callback (sounddevice audio thread)
@@ -783,7 +825,10 @@ class AudioPlayer:
                         item.done.set()
                     stop_stream = True
                     break
-                self._speech_buf = item.samples
+                self._speech_buf = _prepare_speech_chunk_for_output(
+                    item,
+                    self._speech_stream_sample_rate,
+                )
                 self._speech_buf_apply_droid_effect = item.apply_droid_effect
                 self._speech_buf_pos = 0
 
@@ -841,6 +886,12 @@ class AudioPlayer:
         data = data.astype(np.float32)
         self._music_worker_play(data, sr, loop=False)
 
+    def _music_worker_array_safe(self, data: np.ndarray, sr: int) -> None:
+        try:
+            self._music_worker_array(data, sr)
+        except Exception:
+            log.exception("AudioPlayer: chime playback failed")
+
     def _music_worker(self, path: Path, loop: bool) -> None:
         """Background thread: opens an explicit OutputStream for music so it
         is fully independent from the speech stream and sd.play()."""
@@ -852,6 +903,12 @@ class AudioPlayer:
         data = data.astype(np.float32)
         self._music_worker_play(data, sr, loop=loop)
 
+    def _music_worker_safe(self, path: Path, loop: bool) -> None:
+        try:
+            self._music_worker(path, loop)
+        except Exception:
+            log.exception("AudioPlayer: music playback failed")
+
     def _music_worker_play(self, data: np.ndarray, sr: int, loop: bool) -> None:
         """Shared playback loop used by both _music_worker and _music_worker_array."""
         channels = data.shape[1]
@@ -859,6 +916,17 @@ class AudioPlayer:
         while not self._music_stop.is_set():
             pos = 0
             finished = threading.Event()
+            device, stream_sr, _name = _resolve_output_stream_settings(
+                self,
+                requested_samplerate=sr,
+                channels=channels,
+                dtype="float32",
+            )
+            stream_data = (
+                _resample_audio_array(data, sr, stream_sr, axis=0)
+                if stream_sr != sr
+                else data
+            )
 
             def _callback(outdata: np.ndarray, frames: int, _t, _s) -> None:
                 nonlocal pos
@@ -869,19 +937,23 @@ class AudioPlayer:
                     outdata[:] = 0.0
                     raise sd.CallbackStop()
 
-                remaining = len(data) - pos
+                remaining = len(stream_data) - pos
                 take = min(frames, remaining)
-                outdata[:take] = data[pos : pos + take] * config.AUDIO_VOLUME * self._music_volume
+                outdata[:take] = (
+                    stream_data[pos : pos + take]
+                    * config.AUDIO_VOLUME
+                    * self._music_volume
+                )
                 if take < frames:
                     outdata[take:] = 0.0
                 pos += take
 
-                if pos >= len(data):
+                if pos >= len(stream_data):
                     raise sd.CallbackStop()
 
-            with _open_output_stream(
-                _player=self,
-                samplerate=sr,
+            with sd.OutputStream(
+                device=device,
+                samplerate=stream_sr,
                 channels=channels,
                 dtype="float32",
                 blocksize=config.AUDIO_OUTPUT_BLOCKSIZE,
@@ -975,21 +1047,56 @@ def _output_devices_to_try() -> list[int | None]:
     return [device, None] if device is not None else [None]
 
 
-def _open_output_stream(**kwargs):
-    player: AudioPlayer | None = kwargs.pop("_player", None)
-    last_exc: sd.PortAudioError | None = None
+def _output_devices_from_player(player: AudioPlayer | None) -> list[int | None]:
     if player is not None:
-        devices_to_try = player._bluetooth_audio.preferred_output_devices()
-    else:
-        devices_to_try = _output_devices_to_try()
-    for device in devices_to_try:
-        try:
-            if device is None and config.AUDIO_OUTPUT_DEVICE is not None:
-                log.warning("AudioPlayer: falling back to default output device")
-            return sd.OutputStream(device=device, **kwargs)
-        except sd.PortAudioError as exc:
-            last_exc = exc
-            log.warning("AudioPlayer: output device %s failed — %s", device, exc)
+        return player._bluetooth_audio.preferred_output_devices()
+    return _output_devices_to_try()
+
+
+def _resolve_output_stream_settings(
+    player: AudioPlayer | None,
+    *,
+    requested_samplerate: int,
+    channels: int,
+    dtype: str,
+) -> tuple[int | None, int, str]:
+    last_exc: sd.PortAudioError | None = None
+    seen_devices: set[int | None] = set()
+
+    for device_choice in _output_devices_from_player(player):
+        for device in _expand_output_device_choice(device_choice):
+            if device in seen_devices:
+                continue
+            seen_devices.add(device)
+            label = _device_label(device)
+            for samplerate in _candidate_output_sample_rates(
+                device,
+                requested_samplerate=requested_samplerate,
+            ):
+                try:
+                    sd.check_output_settings(
+                        device=device,
+                        samplerate=samplerate,
+                        channels=channels,
+                        dtype=dtype,
+                    )
+                    if samplerate != requested_samplerate:
+                        log.info(
+                            "AudioPlayer: using output sample rate %d Hz on %s (requested %d Hz)",
+                            samplerate,
+                            label,
+                            requested_samplerate,
+                        )
+                    return device, samplerate, label
+                except sd.PortAudioError as exc:
+                    last_exc = exc
+            log.warning(
+                "AudioPlayer: output device %s does not accept %d ch %s at usable sample rates",
+                label,
+                channels,
+                dtype,
+            )
+
     assert last_exc is not None
     raise last_exc
 
@@ -1089,3 +1196,112 @@ def _find_best_output_device(tokens: list[str]) -> tuple[int, str] | None:
     if best is None:
         return None
     return (best[0], best[1])
+
+
+def _default_like_output_devices() -> list[int]:
+    try:
+        devices = sd.query_devices()
+    except Exception as exc:
+        log.warning("AudioPlayer: could not query default-like output devices: %s", exc)
+        return []
+
+    scored: list[tuple[int, int]] = []
+    for index, info in enumerate(devices):
+        if int(info.get("max_output_channels", 0)) <= 0:
+            continue
+        name = str(info.get("name", "")).lower()
+        score = 0
+        if "pipewire" in name:
+            score = 5
+        elif "pulse" in name:
+            score = 4
+        elif name == "default":
+            score = 3
+        elif "default" in name:
+            score = 2
+        elif "sysdefault" in name:
+            score = 1
+        if score > 0:
+            scored.append((index, score))
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return [index for index, _ in scored]
+
+
+def _expand_output_device_choice(device: int | None) -> list[int | None]:
+    if device is not None:
+        return [device]
+    expanded: list[int | None] = []
+    expanded.extend(_default_like_output_devices())
+    expanded.append(None)
+    return expanded
+
+
+def _device_label(device: int | None) -> str:
+    if device is None:
+        return "system default"
+    try:
+        info = sd.query_devices(device, kind="output")
+        return f"{device} ({info['name']})"
+    except Exception:
+        return str(device)
+
+
+def _device_default_samplerate(device: int | None) -> int | None:
+    try:
+        info = sd.query_devices(device, kind="output")
+    except Exception:
+        return None
+    default_sr = float(info.get("default_samplerate", 0) or 0)
+    if default_sr <= 0:
+        return None
+    return int(round(default_sr))
+
+
+def _candidate_output_sample_rates(
+    device: int | None,
+    *,
+    requested_samplerate: int,
+) -> list[int]:
+    rates: list[int] = [requested_samplerate]
+    default_sr = _device_default_samplerate(device)
+    if default_sr is not None and default_sr not in rates:
+        rates.append(default_sr)
+    for rate in (48000, 44100, 32000, 16000):
+        if rate not in rates:
+            rates.append(rate)
+    return rates
+
+
+def _prepare_speech_chunk_for_output(
+    chunk: _SpeechChunk,
+    target_sample_rate: int,
+) -> np.ndarray:
+    if chunk.sample_rate == target_sample_rate:
+        return chunk.samples.astype(np.float32, copy=False)
+    return _resample_audio_array(
+        chunk.samples.astype(np.float32, copy=False),
+        chunk.sample_rate,
+        target_sample_rate,
+        axis=0,
+    )
+
+
+def _resample_audio_array(
+    data: np.ndarray,
+    src_sr: int,
+    dst_sr: int,
+    *,
+    axis: int = 0,
+) -> np.ndarray:
+    if src_sr == dst_sr:
+        return data.astype(np.float32, copy=False)
+    try:
+        from math import gcd
+        from scipy.signal import resample_poly
+    except ImportError as exc:
+        raise RuntimeError(
+            "Audio resampling requires scipy; install scipy to use Bluetooth/variable-rate output"
+        ) from exc
+    g = gcd(src_sr, dst_sr)
+    up, down = dst_sr // g, src_sr // g
+    return resample_poly(data, up, down, axis=axis).astype(np.float32)
