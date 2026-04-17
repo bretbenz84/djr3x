@@ -190,6 +190,12 @@ _SHORT_META_PATTERNS: tuple[re.Pattern[str], ...] = (
         re.IGNORECASE,
     ),
 )
+_STAGE_DIRECTION_BODY = r"[A-Za-z][A-Za-z ,;:'-]{0,159}"
+_LEADING_STAGE_DIRECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(rf"^\(({_STAGE_DIRECTION_BODY})\)\s*"),
+    re.compile(rf"^\[({_STAGE_DIRECTION_BODY})\]\s*"),
+    re.compile(rf"^\*({_STAGE_DIRECTION_BODY})\*\s*"),
+)
 _SHORT_ALL_CAPS_HEADER_RE = re.compile(r"^[A-Z][A-Z0-9 \-]{4,}$")
 _SHORT_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 _SHORT_META_TERMS = (
@@ -398,6 +404,8 @@ class ChatGPTClient:
 
         accumulated: list[str] = []
         first_token_logged = False
+        leading_buffer = ""
+        leading_released = False
         try:
             effective_system = self._effective_system_message()
 
@@ -429,7 +437,30 @@ class ChatGPTClient:
                         log.info("First ChatGPT token received%s", elapsed)
                         first_token_logged = True
                     accumulated.append(token)
-                    yield token
+                    if leading_released:
+                        yield token
+                        continue
+
+                    leading_buffer += token
+                    cleaned_prefix, prefix_changed, pending = self._strip_leading_spoken_prefix(
+                        leading_buffer, final=False
+                    )
+                    if pending or not cleaned_prefix:
+                        continue
+                    if prefix_changed:
+                        log.info("LLM stream: stripped leading stage direction/meta prefix")
+                    leading_released = True
+                    leading_buffer = ""
+                    yield cleaned_prefix
+
+            if not leading_released and leading_buffer:
+                cleaned_prefix, prefix_changed, _ = self._strip_leading_spoken_prefix(
+                    leading_buffer, final=True
+                )
+                if prefix_changed:
+                    log.info("LLM stream: stripped buffered stage direction/meta prefix")
+                if cleaned_prefix:
+                    yield cleaned_prefix
 
         except RateLimitError:
             log.warning("OpenAI rate limit hit — dropping user message from history")
@@ -569,6 +600,63 @@ class ChatGPTClient:
         return raw_text, False
 
     @staticmethod
+    def _has_incomplete_stage_direction_prefix(text: str) -> bool:
+        """Return True when a stream prefix looks like a partial stage direction."""
+        if not text:
+            return False
+
+        for opener, closer in (("(", ")"), ("[", "]"), ("*", "*")):
+            if not text.startswith(opener):
+                continue
+            remainder = text[len(opener):]
+            if closer in remainder or "\n" in remainder or len(remainder) > 160:
+                return False
+            if not remainder:
+                return True
+            return bool(re.fullmatch(r"[A-Za-z ,;:'-]{0,159}", remainder))
+        return False
+
+    @staticmethod
+    def _strip_leading_spoken_prefix(
+        text: str, *, final: bool = True
+    ) -> tuple[str, bool, bool]:
+        """Remove leading labels and stage directions from spoken text."""
+        working = text
+        changed = False
+
+        while True:
+            stripped = working.lstrip()
+            if stripped != working:
+                working = stripped
+                changed = True
+
+            meta_removed = False
+            for pattern in _SHORT_META_PATTERNS[2:]:
+                candidate = pattern.sub("", working, count=1)
+                if candidate != working:
+                    working = candidate
+                    changed = True
+                    meta_removed = True
+                    break
+            if meta_removed:
+                continue
+
+            stage_removed = False
+            for pattern in _LEADING_STAGE_DIRECTION_PATTERNS:
+                match = pattern.match(working)
+                if match:
+                    working = working[match.end():]
+                    changed = True
+                    stage_removed = True
+                    break
+            if stage_removed:
+                continue
+
+            if not final and ChatGPTClient._has_incomplete_stage_direction_prefix(working):
+                return "", changed, True
+            return working, changed, False
+
+    @staticmethod
     def _clean_short_response_text(text: str) -> tuple[str, bool]:
         """Strip common labels, headers, and multiline/meta boilerplate."""
         original = text
@@ -576,8 +664,10 @@ class ChatGPTClient:
         if not text:
             return "", False
 
-        for pattern in _SHORT_META_PATTERNS:
+        for pattern in _SHORT_META_PATTERNS[:2]:
             text = pattern.sub("", text).strip()
+
+        text, changed, _ = ChatGPTClient._strip_leading_spoken_prefix(text)
 
         kept_lines: list[str] = []
         for raw_line in text.splitlines():
@@ -596,7 +686,12 @@ class ChatGPTClient:
         text = kept_lines[0] if kept_lines else ""
         text = re.split(r"\s*(?:---+|===+|\|\|\|)\s*", text, maxsplit=1)[0].strip()
         for pattern in _SHORT_META_PATTERNS[2:]:
-            text = pattern.sub("", text).strip()
+            updated = pattern.sub("", text).strip()
+            if updated != text:
+                changed = True
+            text = updated
+        text, prefix_changed, _ = ChatGPTClient._strip_leading_spoken_prefix(text)
+        changed = changed or prefix_changed
         text = re.sub(r"^[\"'`]+|[\"'`]+$", "", text).strip()
         text = re.sub(r"\s+", " ", text).strip()
 
@@ -604,7 +699,7 @@ class ChatGPTClient:
         if sentence_match:
             text = sentence_match.group(1).strip()
 
-        return text, text != original.strip()
+        return text, changed or text != original.strip()
 
     @staticmethod
     def _clean_chat_reply_text(text: str) -> tuple[str, bool]:
@@ -612,7 +707,7 @@ class ChatGPTClient:
         original = text.strip()
         cleaned, changed = ChatGPTClient._clean_short_response_text(original)
         if not cleaned:
-            return original, False
+            return "", changed
 
         sentence_matches = re.findall(r"[^.!?]+[.!?]", cleaned)
         if sentence_matches:
@@ -620,7 +715,7 @@ class ChatGPTClient:
 
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         if not cleaned:
-            return original, False
+            return "", changed
         return cleaned, changed or cleaned != original
 
     @staticmethod
