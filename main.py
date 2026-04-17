@@ -184,24 +184,25 @@ def main() -> None:
     # 1. Construct state machine (probes serial ports, opens hardware)
     sm = StateMachine()
 
-    # 2. Banner — hardware status known immediately after __init__
-    _print_banner(sm.hardware_status())
-
-    # 3. Signal handlers — after sm exists so the closure is valid
+    # 2. Signal handlers — after sm exists so the closure is valid
     _register_signals(sm)
 
-    # 4. light_speed.mp3 and servo startup animation run concurrently; both
+    # 3. light_speed.mp3 and servo startup animation run concurrently; both
     #    complete before continuing.  Must run before sm.start() so the servo
     #    idle thread is not fighting the animation's arm movements.
     sm.play_startup_animation()
 
-    # 5. Spoken intro through speech path — mouth LEDs and servo speak animation
+    # 4. Spoken intro through speech path — mouth LEDs and servo speak animation
     #    are active.  Must run before sm.start() so background threads don't
     #    compete for hardware.  Skipped gracefully if file is missing.
     sm.play_startup_intro()
 
-    # 6. Warmup models and start all background threads
+    # 5. Warmup models and start all background threads
     sm.start()
+
+    # 6. Banner — print after startup warmup so camera/vision/TTS status is
+    #    accurate rather than a pre-warmup snapshot.
+    _print_banner(sm.hardware_status())
 
     # 7. Startup chime — after sm.start() so the AudioPlayer OutputStream is
     #    running, before sm.run() so it plays before entering IDLE/wake-word
