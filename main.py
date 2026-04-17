@@ -105,6 +105,11 @@ def _print_banner(status: dict) -> None:
     transcriber_backend = "mlx-whisper (local)" if config.USE_LOCAL_TRANSCRIPTION else "Whisper API"
     llm_backend         = f"Ollama {config.LOCAL_LLM_MODEL} (local)" if config.USE_LOCAL_LLM else f"GPT-4o-mini"
 
+    tts_backend = {
+        "elevenlabs": "ElevenLabs",
+        "piper": "Piper",
+    }.get(config.TTS_PROVIDER, config.TTS_PROVIDER)
+
     lines = [
         "",
         sep,
@@ -118,7 +123,7 @@ def _print_banner(status: dict) -> None:
         f"  Wake word          {_hw(status['wake_word'])}   {wake_detail}",
         f"  Transcription      {_hw(status['transcriber'])}   {transcriber_backend}",
         f"  LLM                {'READY    '}   {llm_backend}",
-        f"  TTS                {'READY    '}   ElevenLabs",
+        f"  TTS                {'READY    '}   {tts_backend}",
         f"  Camera             {_hw(status['camera'])}",
         f"  Face recognition   {_hw(status['face_recognition'])}",
         f"  Music library      {'READY    ' if music else 'EMPTY    '}   {music_detail}",

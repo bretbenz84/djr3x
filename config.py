@@ -65,14 +65,25 @@ def _optional_device_source(key: str) -> int | str | None:
     return int(stripped) if stripped.isdigit() else stripped
 
 # ---------------------------------------------------------------------------
-# API Keys
+# API Keys / TTS provider selection
 # ---------------------------------------------------------------------------
 
 OPENAI_API_KEY      = _require("OPENAI_API_KEY")
-ELEVENLABS_API_KEY  = _require("ELEVENLABS_API_KEY")
-ELEVENLABS_VOICE_ID = _require("ELEVENLABS_VOICE_ID")
 OPENAI_TIMEOUT_SECONDS = float(_optional("OPENAI_TIMEOUT_SECONDS", "30"))
 ELEVENLABS_TIMEOUT_SECONDS = float(_optional("ELEVENLABS_TIMEOUT_SECONDS", "60"))
+
+TTS_PROVIDER = _optional("TTS_PROVIDER", "elevenlabs").strip().lower()
+if TTS_PROVIDER not in {"elevenlabs", "piper"}:
+    raise EnvironmentError(
+        "TTS_PROVIDER must be either 'elevenlabs' or 'piper' in .env"
+    )
+
+ELEVENLABS_API_KEY  = (
+    _require("ELEVENLABS_API_KEY") if TTS_PROVIDER == "elevenlabs" else _optional("ELEVENLABS_API_KEY")
+)
+ELEVENLABS_VOICE_ID = (
+    _require("ELEVENLABS_VOICE_ID") if TTS_PROVIDER == "elevenlabs" else _optional("ELEVENLABS_VOICE_ID")
+)
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -481,12 +492,25 @@ WHISPER_HALLUCINATION_EXACT: set[str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Speech — synthesis (ElevenLabs)
+# Speech — synthesis
 # ---------------------------------------------------------------------------
 
 ELEVENLABS_MODEL_ID   = "eleven_turbo_v2"   # lowest-latency streaming model
 ELEVENLABS_STABILITY  = 0.45
 ELEVENLABS_SIMILARITY = 0.80
+
+PIPER_MODEL_PATH = Path(
+    _optional("PIPER_MODEL_PATH", str(MODELS_DIR / "rexvoice.onnx"))
+)
+PIPER_CONFIG_PATH = Path(
+    _optional("PIPER_CONFIG_PATH", f"{PIPER_MODEL_PATH}.json")
+)
+PIPER_USE_CUDA: bool = _optional("PIPER_USE_CUDA", "false").lower() in ("1", "true", "yes")
+PIPER_SPEAKER_ID = _optional_int("PIPER_SPEAKER_ID")
+PIPER_SENTENCE_SILENCE = float(_optional("PIPER_SENTENCE_SILENCE", "0.0"))
+PIPER_LENGTH_SCALE = float(_optional("PIPER_LENGTH_SCALE", "1.0"))
+PIPER_NOISE_SCALE = float(_optional("PIPER_NOISE_SCALE", "0.667"))
+PIPER_NOISE_W = float(_optional("PIPER_NOISE_W", "0.8"))
 
 # ---------------------------------------------------------------------------
 # Command parser

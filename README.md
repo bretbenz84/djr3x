@@ -258,9 +258,16 @@ arduino-cli upload --fqbn arduino:avr:nano:cpu=atmega328 --port /dev/ttyUSB0 ard
 # OpenAI
 OPENAI_API_KEY=your_key_here
 
-# ElevenLabs
+# TTS
+TTS_PROVIDER=elevenlabs      # elevenlabs | piper
+
+# ElevenLabs (required when TTS_PROVIDER=elevenlabs)
 ELEVENLABS_API_KEY=your_key_here
 ELEVENLABS_VOICE_ID=your_voice_id_here
+
+# Piper (required when TTS_PROVIDER=piper)
+PIPER_MODEL_PATH=assets/models/rexvoice.onnx
+PIPER_CONFIG_PATH=assets/models/rexvoice.onnx.json
 
 # Audio devices
 AUDIO_INPUT_DEVICE=3        # Pi: ReSpeaker=3 | Mac: MacBook mic=1

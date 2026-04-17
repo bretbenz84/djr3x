@@ -521,7 +521,12 @@ class AudioPlayer:
     # Speech — streaming TTS interface (called by synthesizer.py)
     # ------------------------------------------------------------------
 
-    def feed_speech_chunk(self, pcm_bytes: bytes) -> None:
+    def feed_speech_chunk(
+        self,
+        pcm_bytes: bytes,
+        *,
+        sample_rate: int = SPEECH_SAMPLE_RATE,
+    ) -> None:
         """Push one raw PCM int16 chunk from the ElevenLabs stream into the
         playback queue. The chunk is played in order with any queued chunks."""
         if not pcm_bytes:
@@ -530,6 +535,7 @@ class AudioPlayer:
             _SpeechChunk(
                 samples=_pcm16_bytes_to_float32(pcm_bytes),
                 apply_droid_effect=config.ENABLE_DROID_EFFECT,
+                sample_rate=sample_rate,
             )
         )
 
@@ -553,7 +559,7 @@ class AudioPlayer:
         speech stream (mouth RMS tracking is active). Blocks until the file
         has finished playing or stop_speech() is called."""
         path = Path(path)
-        data, sr = _load_audio_file(path, target_sr=SPEECH_SAMPLE_RATE)
+        data, sr = _load_audio_file(path, target_sr=None)
         # Mix stereo (or higher) down to mono for the speech stream.
         if data.ndim == 2:
             data = data.mean(axis=1)
@@ -568,12 +574,13 @@ class AudioPlayer:
                 _SpeechChunk(
                     samples=samples[i : i + _FILE_CHUNK_FRAMES],
                     apply_droid_effect=apply_droid_effect,
+                    sample_rate=sr,
                 )
             )
         self._speech_queue.put(_EndMarker(done=done))
 
         # block until the callback processes the end marker, or timeout
-        play_duration = len(samples) / SPEECH_SAMPLE_RATE
+        play_duration = len(samples) / sr
         done.wait(timeout=play_duration + 3.0)
 
     # ------------------------------------------------------------------
@@ -757,13 +764,16 @@ class AudioPlayer:
             self._audio_started.clear()   # arm the event; callback sets it on first samples
 
             try:
+                requested_sample_rate = item.sample_rate or SPEECH_SAMPLE_RATE
                 device, stream_sr, _name = _resolve_output_stream_settings(
                     self,
-                    requested_samplerate=SPEECH_SAMPLE_RATE,
+                    requested_samplerate=requested_sample_rate,
                     channels=config.AUDIO_OUTPUT_CHANNELS,
                     dtype="int16",
                 )
                 self._speech_stream_sample_rate = stream_sr
+                if self._droid_effect._sample_rate != stream_sr:
+                    self._droid_effect = _DroidVoiceEffect(stream_sr)
                 self._speech_buf = _prepare_speech_chunk_for_output(item, stream_sr)
                 self._speech_buf_pos = 0
 
