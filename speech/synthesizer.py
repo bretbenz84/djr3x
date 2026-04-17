@@ -283,8 +283,10 @@ class _XttsSynthesizer:
         self._model = Xtts.init_from_config(self._config)
         self._model.load_checkpoint(
             self._config,
+            checkpoint_dir=str(config.XTTS_MODEL_DIR),
             checkpoint_path=str(config.XTTS_CHECKPOINT_PATH),
             vocab_path=str(config.XTTS_VOCAB_PATH),
+            speaker_file_path=str(config.XTTS_MODEL_DIR / "speakers_xtts.pth"),
             use_deepspeed=False,
         )
         self._model.to(self._device)
