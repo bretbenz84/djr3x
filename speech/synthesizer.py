@@ -253,7 +253,8 @@ class _XttsSynthesizer:
             raise RuntimeError("TTS_PROVIDER=xtts is supported only on macOS Apple Silicon")
         if torch is None or XttsConfig is None or Xtts is None:
             raise RuntimeError(
-                "TTS_PROVIDER=xtts requires the 'TTS' package and torch on Apple Silicon"
+                "TTS_PROVIDER=xtts requires torch, torchaudio, and the 'TTS' package on Apple Silicon. "
+                "Install with: pip install -r requirements-macos-apple-silicon.txt"
             )
         for label, path in (
             ("XTTS config", config.XTTS_CONFIG_PATH),

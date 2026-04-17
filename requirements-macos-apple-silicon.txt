@@ -4,6 +4,9 @@
 # setuptools, and wheel. If dlib has trouble finding libpng, install
 # Homebrew's `libpng` first and export:
 #   PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig
+#
+# This wrapper also installs the Apple Silicon-only XTTS runtime declared in
+# `requirements.txt` (`torch`, `torchaudio`, and `TTS`) when needed.
 
 dlib==20.0.1
 -r requirements.txt

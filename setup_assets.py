@@ -5,6 +5,7 @@ Downloads required model files that are too large for git.
 Run this once after cloning the repo.
 """
 import os
+import importlib.util
 import platform
 import sys
 import urllib.request
@@ -17,6 +18,7 @@ XTTS_DIR = MODELS_DIR / "djrex_xtts"
 XTTS_DATASET_URL = "https://huggingface.co/buckets/bretbenz/djr3x/resolve/dataset.zip?download=true"
 XTTS_DATASET_PATH = XTTS_DIR / "dataset.zip"
 XTTS_MIN_SIZE_MB = 1.0
+DOTENV_PATH = Path(__file__).parent / ".env"
 
 REQUIRED_MODELS = [
     {
@@ -86,6 +88,22 @@ def _is_macos_apple_silicon() -> bool:
     return platform.system() == "Darwin" and platform.machine() == "arm64"
 
 
+def _selected_tts_provider() -> str:
+    if not DOTENV_PATH.exists():
+        return ""
+    try:
+        for raw_line in DOTENV_PATH.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() == "TTS_PROVIDER":
+                return value.strip().strip("\"'").lower()
+    except OSError:
+        return ""
+    return ""
+
+
 def setup_xtts_dataset() -> bool:
     """Download the optional XTTS dataset zip for Apple Silicon setups."""
     if not _is_macos_apple_silicon():
@@ -113,6 +131,34 @@ def setup_xtts_dataset() -> bool:
         except FileNotFoundError:
             pass
         return False
+
+
+def check_xtts_runtime() -> bool:
+    """Verify Apple Silicon XTTS Python dependencies when XTTS is selected."""
+    if not _is_macos_apple_silicon():
+        return True
+
+    provider = _selected_tts_provider()
+    if provider != "xtts":
+        print("\nSkipping XTTS Python package check (TTS_PROVIDER is not xtts).")
+        return True
+
+    required_modules = ("torch", "torchaudio", "TTS")
+    missing = [
+        module_name
+        for module_name in required_modules
+        if importlib.util.find_spec(module_name) is None
+    ]
+
+    print("\nChecking XTTS Python dependencies (Apple Silicon)")
+    print("-" * 40)
+    if not missing:
+        print("  OK: torch, torchaudio, and TTS are installed")
+        return True
+
+    print(f"  MISSING: {', '.join(missing)}")
+    print("  Install with: pip install -r requirements-macos-apple-silicon.txt")
+    return False
 
 
 def report_xtts_status():
@@ -172,6 +218,7 @@ if __name__ == "__main__":
     print("\nChecking model files...")
     ok = setup_models()
     ok = setup_xtts_dataset() and ok
+    ok = check_xtts_runtime() and ok
     report_xtts_status()
     print("\n" + ("=" * 40))
     if ok:
