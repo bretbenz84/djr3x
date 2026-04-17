@@ -514,13 +514,13 @@ PIPER_NOISE_W = float(_optional("PIPER_NOISE_W", "0.8"))
 
 XTTS_MODEL_DIR = Path(
     _optional("XTTS_MODEL_DIR", str(MODELS_DIR / "djrex_xtts"))
-)
+).expanduser()
 XTTS_CONFIG_PATH = Path(
     _optional("XTTS_CONFIG_PATH", str(XTTS_MODEL_DIR / "config.json"))
-)
+).expanduser()
 XTTS_CHECKPOINT_PATH = Path(
     _optional("XTTS_CHECKPOINT_PATH", str(XTTS_MODEL_DIR / "model.pth"))
-)
+).expanduser()
 _default_xtts_vocab = XTTS_MODEL_DIR / "vocab.json"
 if not _default_xtts_vocab.exists():
     _default_xtts_vocab_alt = XTTS_MODEL_DIR / "vocab.json_"
@@ -528,10 +528,10 @@ if not _default_xtts_vocab.exists():
         _default_xtts_vocab = _default_xtts_vocab_alt
 XTTS_VOCAB_PATH = Path(
     _optional("XTTS_VOCAB_PATH", str(_default_xtts_vocab))
-)
+).expanduser()
 XTTS_SPEAKER_WAV = Path(
     _optional("XTTS_SPEAKER_WAV", str(PROJECT_ROOT / "reference.wav"))
-)
+).expanduser()
 XTTS_LANGUAGE = _optional("XTTS_LANGUAGE", "en").strip() or "en"
 XTTS_SPEED = float(_optional("XTTS_SPEED", "1.0"))
 XTTS_TEMPERATURE = float(_optional("XTTS_TEMPERATURE", "0.75"))
