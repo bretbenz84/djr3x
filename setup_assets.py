@@ -5,6 +5,7 @@ Downloads required model files that are too large for git.
 Run this once after cloning the repo.
 """
 import os
+import platform
 import sys
 import urllib.request
 import bz2
@@ -12,6 +13,10 @@ import shutil
 from pathlib import Path
 
 MODELS_DIR = Path(__file__).parent / "assets" / "models"
+XTTS_DIR = MODELS_DIR / "djrex_xtts"
+XTTS_DATASET_URL = "https://huggingface.co/buckets/bretbenz/djr3x/resolve/dataset.zip?download=true"
+XTTS_DATASET_PATH = XTTS_DIR / "dataset.zip"
+XTTS_MIN_SIZE_MB = 1.0
 
 REQUIRED_MODELS = [
     {
@@ -77,21 +82,54 @@ def setup_models():
     return all_ok
 
 
+def _is_macos_apple_silicon() -> bool:
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
+
+
+def setup_xtts_dataset() -> bool:
+    """Download the optional XTTS dataset zip for Apple Silicon setups."""
+    if not _is_macos_apple_silicon():
+        print("\nSkipping XTTS dataset download (macOS Apple Silicon only).")
+        return True
+
+    XTTS_DIR.mkdir(parents=True, exist_ok=True)
+    size_mb = XTTS_DATASET_PATH.stat().st_size / 1024 / 1024 if XTTS_DATASET_PATH.exists() else 0
+    if XTTS_DATASET_PATH.exists() and size_mb >= XTTS_MIN_SIZE_MB:
+        print(f"\n  OK: {XTTS_DATASET_PATH.name} ({size_mb:.1f} MB)")
+        return True
+
+    print("\nDownloading: XTTS dataset.zip (Apple Silicon only)")
+    tmp_path = XTTS_DATASET_PATH.with_suffix(".zip.part")
+    try:
+        download_file(XTTS_DATASET_URL, tmp_path)
+        tmp_path.replace(XTTS_DATASET_PATH)
+        size_mb = XTTS_DATASET_PATH.stat().st_size / 1024 / 1024
+        print(f"  Done: {XTTS_DATASET_PATH.name} ({size_mb:.1f} MB)")
+        return True
+    except Exception as e:
+        print(f"  FAILED: {e}")
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        return False
+
+
 def report_xtts_status():
     """Report whether the optional Apple Silicon XTTS assets are present."""
-    xtts_dir = MODELS_DIR / "djrex_xtts"
     vocab_candidates = [
-        xtts_dir / "vocab.json",
-        xtts_dir / "vocab.json_",
+        XTTS_DIR / "vocab.json",
+        XTTS_DIR / "vocab.json_",
     ]
     vocab_path = next((p for p in vocab_candidates if p.exists()), vocab_candidates[0])
 
     print("\nOptional XTTS voice (Apple Silicon only)")
     print("-" * 40)
     checks = [
-        ("XTTS config", xtts_dir / "config.json"),
-        ("XTTS checkpoint", xtts_dir / "model.pth"),
+        ("XTTS config", XTTS_DIR / "config.json"),
+        ("XTTS checkpoint", XTTS_DIR / "model.pth"),
         ("XTTS vocab", vocab_path),
+        ("XTTS dataset zip", XTTS_DATASET_PATH),
         ("XTTS speaker reference", Path(__file__).parent / "reference.wav"),
     ]
     for label, path in checks:
@@ -133,6 +171,7 @@ if __name__ == "__main__":
     fix_face_recognition_models()
     print("\nChecking model files...")
     ok = setup_models()
+    ok = setup_xtts_dataset() and ok
     report_xtts_status()
     print("\n" + ("=" * 40))
     if ok:

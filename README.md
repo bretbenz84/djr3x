@@ -208,7 +208,7 @@ pip install -r requirements-macos-apple-silicon.txt
 python3 setup_assets.py
 ```
 
-`setup_assets.py` downloads required vision model files (~120MB), patches `face_recognition_models` automatically if that optional package is installed, and reports whether the optional Apple Silicon XTTS voice files are present locally.
+`setup_assets.py` downloads required vision model files (~120MB), patches `face_recognition_models` automatically if that optional package is installed, downloads `assets/models/djrex_xtts/dataset.zip` from Hugging Face on macOS Apple Silicon, and reports whether the optional XTTS voice files are present locally.
 
 ### Raspberry Pi — additional dependencies
 ```bash
@@ -423,7 +423,7 @@ journalctl -u djr3x -f
 - Prefer `CAMERA_DEVICE=/dev/camera_main` (or another udev symlink) over a changing camera index
 
 ### macOS (Apple Silicon)
-- Run `python3 setup_assets.py` after pip install — it also patches `face_recognition_models` if you installed that optional package
+- Run `python3 setup_assets.py` after pip install — it patches `face_recognition_models` if needed and downloads `assets/models/djrex_xtts/dataset.zip` from Hugging Face for XTTS
 - Set `AUDIO_INPUT_DEVICE=1` (MacBook Air Microphone) and leave `AUDIO_OUTPUT_DEVICE=` blank
 - Serial ports left blank — Rex runs in software-only mode without hardware
 - Ollama must be running before starting Rex: `ollama serve`
