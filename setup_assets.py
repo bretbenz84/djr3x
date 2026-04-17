@@ -153,8 +153,15 @@ def check_xtts_runtime() -> bool:
     print("\nChecking XTTS Python dependencies (Apple Silicon)")
     print("-" * 40)
     if not missing:
-        print("  OK: torch, torchaudio, and TTS are installed")
-        return True
+        try:
+            exec("from TTS.tts.configs.xtts_config import XttsConfig", {})
+            exec("from TTS.tts.models.xtts import Xtts", {})
+            print("  OK: torch, torchaudio, TTS, and XTTS imports are working")
+            return True
+        except Exception as exc:
+            print(f"  BROKEN: XTTS import failed: {type(exc).__name__}: {exc}")
+            print("  Try: pip install -r requirements-macos-apple-silicon.txt")
+            return False
 
     print(f"  MISSING: {', '.join(missing)}")
     print("  Install with: pip install -r requirements-macos-apple-silicon.txt")

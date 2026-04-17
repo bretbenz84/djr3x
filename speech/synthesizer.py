@@ -54,6 +54,13 @@ try:
 except ImportError:  # pragma: no cover - optional backend dependency
     XttsConfig = None
     Xtts = None
+    _XTTS_IMPORT_ERROR = "ImportError while loading XTTS modules"
+except Exception as exc:  # pragma: no cover - optional backend dependency
+    XttsConfig = None
+    Xtts = None
+    _XTTS_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
+else:
+    _XTTS_IMPORT_ERROR = ""
 
 
 class _Backend(Protocol):
@@ -253,8 +260,10 @@ class _XttsSynthesizer:
             raise RuntimeError("TTS_PROVIDER=xtts is supported only on macOS Apple Silicon")
         if torch is None or XttsConfig is None or Xtts is None:
             raise RuntimeError(
-                "TTS_PROVIDER=xtts requires torch, torchaudio, and the 'TTS' package on Apple Silicon. "
-                "Install with: pip install -r requirements-macos-apple-silicon.txt"
+                "TTS_PROVIDER=xtts requires a working Apple Silicon XTTS stack "
+                "(torch, torchaudio, TTS, and a compatible transformers version). "
+                f"Current import failure: {_XTTS_IMPORT_ERROR or 'missing XTTS modules'}. "
+                "Install/fix with: pip install -r requirements-macos-apple-silicon.txt"
             )
         for label, path in (
             ("XTTS config", config.XTTS_CONFIG_PATH),

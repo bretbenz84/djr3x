@@ -23,6 +23,7 @@ scipy==1.17.1
 sounddevice==0.5.5
 soundfile==0.13.1
 TTS==0.22.0; platform_system == "Darwin" and platform_machine == "arm64"
+transformers<5; platform_system == "Darwin" and platform_machine == "arm64"
 
 # Apple Silicon-only local transcription stack
 huggingface_hub==1.10.1; platform_system == "Darwin" and platform_machine == "arm64"
