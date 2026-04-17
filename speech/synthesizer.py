@@ -37,6 +37,11 @@ try:
 except ImportError:  # pragma: no cover - optional backend dependency
     PiperVoice = None
 
+try:
+    from piper.config import SynthesisConfig
+except ImportError:  # pragma: no cover - optional backend dependency
+    SynthesisConfig = None
+
 
 class _Backend(Protocol):
     provider_name: str
@@ -145,7 +150,7 @@ class _PiperSynthesizer:
     provider_name = "Piper"
 
     def __init__(self, player: AudioPlayer) -> None:
-        if PiperVoice is None:
+        if PiperVoice is None or SynthesisConfig is None:
             raise RuntimeError(
                 "TTS_PROVIDER=piper requires the 'piper-tts' package"
             )
@@ -173,6 +178,14 @@ class _PiperSynthesizer:
             config.PIPER_MODEL_PATH,
             self._sample_rate,
         )
+        self._syn_config = SynthesisConfig(
+            speaker_id=config.PIPER_SPEAKER_ID,
+            length_scale=config.PIPER_LENGTH_SCALE,
+            noise_scale=config.PIPER_NOISE_SCALE,
+            noise_w_scale=config.PIPER_NOISE_W,
+            normalize_audio=True,
+            volume=1.0,
+        )
 
     def speak(self, text: str) -> None:
         text = text.strip()
@@ -186,14 +199,7 @@ class _PiperSynthesizer:
             self._player.play_file(cached)
             return
 
-        chunks = self._voice.synthesize_stream_raw(
-            text,
-            speaker_id=config.PIPER_SPEAKER_ID,
-            length_scale=config.PIPER_LENGTH_SCALE,
-            noise_scale=config.PIPER_NOISE_SCALE,
-            noise_w=config.PIPER_NOISE_W,
-            sentence_silence=config.PIPER_SENTENCE_SILENCE,
-        )
+        chunks = self._synthesize_pcm_chunks(text)
         _pipe_to_player(
             self._player,
             chunks,
@@ -211,6 +217,17 @@ class _PiperSynthesizer:
         if t0 is not None:
             log.info("Piper stream fallback: synthesizing buffered reply [+%.1fs]", time.monotonic() - t0)
         self.speak(full_text)
+
+    def _synthesize_pcm_chunks(self, text: str) -> Iterator[bytes]:
+        silence_bytes = b""
+        if config.PIPER_SENTENCE_SILENCE > 0.0:
+            silence_samples = int(config.PIPER_SENTENCE_SILENCE * self._sample_rate)
+            silence_bytes = bytes(silence_samples * 2)
+
+        for audio_chunk in self._voice.synthesize(text, syn_config=self._syn_config):
+            yield audio_chunk.audio_int16_bytes
+            if silence_bytes:
+                yield silence_bytes
 
 
 def _pipe_to_player(
