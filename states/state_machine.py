@@ -125,8 +125,24 @@ _FACE_WAKE_GREETINGS_MORNING:   tuple[str, ...] = ("Morning {name}",)
 _FACE_WAKE_GREETINGS_AFTERNOON: tuple[str, ...] = ("Afternoon {name}",)
 _FACE_WAKE_GREETINGS_EVENING:   tuple[str, ...] = ("Evening {name}",)
 
+_FRIEND_FACE_WAKE_GREETINGS_ALWAYS: tuple[str, ...] = (
+    "Hey friend",
+    "Hi buddy",
+    "Sup friend",
+    "Hey there, friend",
+    "Good to see you, buddy",
+    "Yo friend",
+    "Ayyy friend",
+    "Hey buddy",
+    "What's up, friend",
+    "Hi friend {name}",
+)
+_FRIEND_FACE_WAKE_GREETINGS_MORNING:   tuple[str, ...] = ("Morning, friend",)
+_FRIEND_FACE_WAKE_GREETINGS_AFTERNOON: tuple[str, ...] = ("Afternoon, buddy",)
+_FRIEND_FACE_WAKE_GREETINGS_EVENING:   tuple[str, ...] = ("Evening, friend",)
 
-def _pick_face_wake_greeting(name: str) -> str:
+
+def _pick_face_wake_greeting(name: str, *, is_friend: bool = False) -> str:
     """Return a random casual greeting for a known person, injecting their name.
 
     Time-based greetings are included only within appropriate hour ranges:
@@ -135,13 +151,22 @@ def _pick_face_wake_greeting(name: str) -> str:
       Evening   — 17:00–21:59
     """
     hour = datetime.now().hour
-    pool: list[str] = list(_FACE_WAKE_GREETINGS_ALWAYS)
+    if is_friend:
+        pool: list[str] = list(_FRIEND_FACE_WAKE_GREETINGS_ALWAYS)
+        morning = _FRIEND_FACE_WAKE_GREETINGS_MORNING
+        afternoon = _FRIEND_FACE_WAKE_GREETINGS_AFTERNOON
+        evening = _FRIEND_FACE_WAKE_GREETINGS_EVENING
+    else:
+        pool = list(_FACE_WAKE_GREETINGS_ALWAYS)
+        morning = _FACE_WAKE_GREETINGS_MORNING
+        afternoon = _FACE_WAKE_GREETINGS_AFTERNOON
+        evening = _FACE_WAKE_GREETINGS_EVENING
     if 5 <= hour < 12:
-        pool.extend(_FACE_WAKE_GREETINGS_MORNING)
+        pool.extend(morning)
     elif 12 <= hour < 17:
-        pool.extend(_FACE_WAKE_GREETINGS_AFTERNOON)
+        pool.extend(afternoon)
     elif 17 <= hour < 22:
-        pool.extend(_FACE_WAKE_GREETINGS_EVENING)
+        pool.extend(evening)
     return random.choice(pool).format(name=name)
 
 _GOODBYE_PHRASES: list[str] = [
@@ -294,14 +319,50 @@ _PROMPT_ACK_GENERAL_LINES: tuple[str, ...] = (
 
 _HANDLED_PROMPT_RESPONSE = "__handled_prompt_response__"
 
-def _programmed_question(key: str, text: str, tags: str) -> dict[str, str]:
+def _programmed_question(
+    key: str,
+    text: str,
+    tags: str,
+    *,
+    phase: str = "deeper",
+) -> dict[str, str]:
     """Build one deterministic follow-up question entry."""
-    return {"key": key, "text": text, "tags": tags}
+    return {"key": key, "text": text, "tags": tags, "phase": phase}
 
 
 # Fixed question bank used for silent known-person follow-ups and intake
 # interviews. Stable keys/tags keep the stored memories deterministic.
 _PROGRAMMED_CONVERSATION_QUESTIONS: tuple[dict[str, str], ...] = (
+    _programmed_question(
+        "has_kids",
+        "Do you have kids, or is the galaxy sparing you that particular chaos?",
+        "family,kids,relationship,curiosity",
+        phase="intro",
+    ),
+    _programmed_question(
+        "profession",
+        "What do you do for a living when you're not standing here confusing my sensors?",
+        "work,job,profession,curiosity",
+        phase="intro",
+    ),
+    _programmed_question(
+        "pets_home",
+        "Any pets in your orbit, or do you prefer your chaos in some other form?",
+        "pets,home,relationship,curiosity",
+        phase="intro",
+    ),
+    _programmed_question(
+        "where_from_story",
+        "Where are you from originally, and what part of that place is still running your software?",
+        "home,origin,history,curiosity",
+        phase="intro",
+    ),
+    _programmed_question(
+        "favorite_place",
+        "What's your favorite place on Earth, and why does that place get your loyalty?",
+        "life,earth,place,curiosity",
+        phase="intro",
+    ),
     _programmed_question(
         "purpose_in_life",
         "Before you go all mysterious on me, what do you think your purpose in life actually is?",
@@ -336,11 +397,6 @@ _PROGRAMMED_CONVERSATION_QUESTIONS: tuple[dict[str, str], ...] = (
         "fear_of_loss",
         "What are you actually afraid of losing, beneath the polished little lifeform routine?",
         "life,values,belief,curiosity",
-    ),
-    _programmed_question(
-        "favorite_place",
-        "What's your favorite place on Earth, and why does that place get your loyalty?",
-        "life,earth,place,curiosity",
     ),
     _programmed_question(
         "deep_happiness",
@@ -381,36 +437,43 @@ _PROGRAMMED_CONVERSATION_QUESTIONS: tuple[dict[str, str], ...] = (
         "favorite_music",
         "What kind of music earns your loyalty every single time?",
         "favorite,music,preference,curiosity",
+        phase="preference",
     ),
     _programmed_question(
         "comfort_song",
         "What song can rescue your mood even when your day is doing a full systems failure?",
         "music,song,comfort,preference,curiosity",
+        phase="preference",
     ),
     _programmed_question(
         "favorite_food",
         "What food never disappoints you, assuming the cook isn't a complete disaster?",
         "favorite,food,preference,curiosity",
+        phase="preference",
     ),
     _programmed_question(
         "favorite_drink",
         "What's your go-to drink when you want the moment to feel slightly more tolerable?",
         "favorite,drink,preference,curiosity",
+        phase="preference",
     ),
     _programmed_question(
         "favorite_movie",
         "What's a movie you'll defend even if the rest of the galaxy is wrong about it?",
         "favorite,movie,preference,curiosity",
+        phase="preference",
     ),
     _programmed_question(
         "current_obsession",
         "What are you low-key obsessed with right now?",
         "interest,obsession,hobby,curiosity",
+        phase="preference",
     ),
     _programmed_question(
         "guilty_pleasure",
         "What's your guilty pleasure, or are you brave enough to admit you don't feel guilt at all?",
         "preference,guilty_pleasure,fun,curiosity",
+        phase="preference",
     ),
     _programmed_question(
         "perfect_day",
@@ -501,11 +564,6 @@ _PROGRAMMED_CONVERSATION_QUESTIONS: tuple[dict[str, str], ...] = (
         "weirdest_job",
         "What's the weirdest job or side quest you've ever had?",
         "work,job,history,curiosity",
-    ),
-    _programmed_question(
-        "where_from_story",
-        "Where are you from originally, and what part of that place is still running your software?",
-        "home,origin,history,curiosity",
     ),
     _programmed_question(
         "tradition_keep",
@@ -1405,7 +1463,9 @@ class StateMachine:
         if result is not None:
             _face_person_id, _face_name, _ = result
             self._cache_days_since_last_seen(_face_person_id)
-            greeting_line = _pick_face_wake_greeting(_face_name)
+            face_person = self._face_db.get_person(_face_person_id)
+            is_friend = self._person_is_confirmed_friend(face_person)
+            greeting_line = _pick_face_wake_greeting(_face_name, is_friend=is_friend)
             log.info("Face-triggered greeting: known person '%s' — greeting %r", _face_name, greeting_line)
             servo_stop = None
             try:
@@ -1418,13 +1478,14 @@ class StateMachine:
                     self._end_speech(servo_stop)
                 else:
                     self._wake_word.suppressed = False
-            self._maybe_speak_known_person_wake_opinion(
-                person_id=_face_person_id,
-                name=_face_name,
-                bother_count=self._get_known_person_bother_count(_face_person_id),
-                frame=frame,
-                chance_override=config.OPINION_SHORT_WAKE_CHANCE,
-            )
+            if not is_friend:
+                self._maybe_speak_known_person_wake_opinion(
+                    person_id=_face_person_id,
+                    name=_face_name,
+                    bother_count=self._get_known_person_bother_count(_face_person_id),
+                    frame=frame,
+                    chance_override=config.OPINION_SHORT_WAKE_CHANCE,
+                )
 
         # Listen for an initial response.
         self._apply_listening_led_theme()
@@ -2300,6 +2361,12 @@ class StateMachine:
             person_id, name, _dist = result
             self._cache_days_since_last_seen(person_id)
             bother_count = self._face_db.update_last_seen(person_id)
+            person = self._award_recognized_wake_familiarity(
+                person_id,
+                bother_count,
+                reason="first known-person wake of day",
+            )
+            is_friend = self._person_is_confirmed_friend(person)
 
             self._last_known_person_id = person_id
             self._session_greeted_person_id = person_id
@@ -2318,7 +2385,10 @@ class StateMachine:
                 name, bother_count,
             )
 
-            if use_vision_greeting:
+            if is_friend:
+                self._play_known_person_greeting(name, bother_count, is_friend=True)
+                self._last_wake_greeting_used_vision = False
+            elif use_vision_greeting:
                 # GPT-4o personalized greeting — initial clip already played above.
                 greeting_result: list[str | None] = [None]
 
@@ -2365,6 +2435,8 @@ class StateMachine:
                 self._play_known_person_greeting(name, bother_count)
                 self._last_wake_greeting_used_vision = False
 
+            if self._maybe_offer_friendship(person_id, reason="first known-person wake"):
+                return
             self._maybe_speak_followup(person_id)
             return
 
@@ -2504,6 +2576,8 @@ class StateMachine:
         self._post_greeting_person_id = person_id
         self._post_greeting_person_name = name
         self._post_greeting_prompt_used = False
+        person = self._face_db.get_person(person_id)
+        is_friend = self._person_is_confirmed_friend(person)
         _ctx = self._face_db.get_memories_as_context(person_id)
         if _ctx:
             self._llm.set_person_context(_ctx)
@@ -2511,7 +2585,16 @@ class StateMachine:
         if person_id == self._last_greeted_person_id:
             # Case 2: same person as last greeted
             if random.random() < 0.25:
-                line = random.choice(_BRIEF_REMARKS)
+                if is_friend:
+                    line = random.choice((
+                        "Hey friend.",
+                        "Hi buddy.",
+                        "Sup friend.",
+                        "Good to see you again, buddy.",
+                        "Back already, friend?",
+                    ))
+                else:
+                    line = random.choice(_BRIEF_REMARKS)
                 log.info("Wake greeting: case 2 — same person '%s', brief remark %r", name, line)
                 servo_stop = self._begin_speech(emotion="neutral")
                 try:
@@ -2521,19 +2604,31 @@ class StateMachine:
                 finally:
                     self._end_speech(servo_stop)
             else:
-                _ACK_LINES = (
-                    "Listening.",
-                    "You rang.",
-                    "Ugh. You again.",
-                    "What now.",
-                    "Go ahead.",
-                    "Still here.",
-                    "Yeah?",
-                    "Make it quick.",
-                    "Oh 'tis you.",
-                    "Speak.",
-                )
-                ack = _pick_no_repeat(_ACK_LINES, "case2_ack")
+                if is_friend:
+                    _ACK_LINES = (
+                        "Yeah, friend?",
+                        "Talk to me, buddy.",
+                        "I'm listening, friend.",
+                        "Go for it, buddy.",
+                        "What's up, friend?",
+                        "Hit me, buddy.",
+                    )
+                    ack_key = "case2_ack_friend"
+                else:
+                    _ACK_LINES = (
+                        "Listening.",
+                        "You rang.",
+                        "Ugh. You again.",
+                        "What now.",
+                        "Go ahead.",
+                        "Still here.",
+                        "Yeah?",
+                        "Make it quick.",
+                        "Oh 'tis you.",
+                        "Speak.",
+                    )
+                    ack_key = "case2_ack"
+                ack = _pick_no_repeat(_ACK_LINES, ack_key)
                 log.info("Wake greeting: case 2 — same person '%s', ack %r", name, ack)
                 servo_stop = self._begin_speech(emotion="neutral")
                 try:
@@ -2542,14 +2637,20 @@ class StateMachine:
                     log.exception("Wake greeting: case 2 ack TTS error")
                 finally:
                     self._end_speech(servo_stop)
-            opinion_spoken = self._maybe_speak_known_person_wake_opinion(
-                person_id=person_id,
-                name=name,
-                bother_count=self._get_known_person_bother_count(person_id),
-                frame=frame,
-                chance_override=config.OPINION_SHORT_WAKE_CHANCE,
+            friendship_prompted = self._maybe_offer_friendship(
+                person_id,
+                reason="repeat known-person wake",
             )
-            if not opinion_spoken:
+            opinion_spoken = False
+            if not is_friend and not friendship_prompted:
+                opinion_spoken = self._maybe_speak_known_person_wake_opinion(
+                    person_id=person_id,
+                    name=name,
+                    bother_count=self._get_known_person_bother_count(person_id),
+                    frame=frame,
+                    chance_override=config.OPINION_SHORT_WAKE_CHANCE,
+                )
+            if not opinion_spoken and not friendship_prompted:
                 self._maybe_speak_followup(person_id)
         else:
             # Case 3: different known person than last greeted
@@ -2564,7 +2665,9 @@ class StateMachine:
                 if prev_person:
                     prev_name = prev_person.get("name")
 
-            if prev_name:
+            if is_friend:
+                self._play_known_person_greeting(name, 1, is_friend=True)
+            elif prev_name:
                 handoff = self._greeter.generate_handoff(name, prev_name)
                 if handoff:
                     servo_stop = self._begin_speech(emotion="excited")
@@ -2579,7 +2682,14 @@ class StateMachine:
                 self._play_known_person_greeting(name, 1)
 
             self._last_greeted_person_id = person_id
-            self._face_db.update_last_seen(person_id)
+            daily_count = self._face_db.update_last_seen(person_id)
+            self._award_recognized_wake_familiarity(
+                person_id,
+                daily_count,
+                reason="subsequent known-person wake of day",
+            )
+            if self._maybe_offer_friendship(person_id, reason="subsequent known-person wake"):
+                return
             self._maybe_speak_followup(person_id)
 
     def _should_use_vision_wake_greeting(self) -> bool:
@@ -2759,6 +2869,65 @@ class StateMachine:
 
         return random.choice(candidates)
 
+    def _pick_enrollment_interview_questions(
+        self,
+        person_id: int | None = None,
+    ) -> list[dict[str, str]]:
+        """Build an enrollment sequence that starts with basics before deeper prompts."""
+        total_questions = min(
+            len(_PROGRAMMED_CONVERSATION_QUESTIONS),
+            max(1, config.ENROLLMENT_INTERVIEW_QUESTION_COUNT),
+        )
+        intro_target = min(
+            total_questions,
+            max(0, config.ENROLLMENT_INTERVIEW_PROFILE_QUESTION_COUNT),
+        )
+        preference_target = max(0, total_questions - intro_target - 1)
+        deeper_target = max(0, total_questions - intro_target - preference_target)
+
+        excluded = set(self._programmed_questions_asked_this_session)
+        if person_id is not None:
+            excluded |= self._get_asked_programmed_question_texts(person_id)
+
+        selected: list[dict[str, str]] = []
+
+        def _take_phase(phase: str, count: int) -> None:
+            remaining = max(0, total_questions - len(selected))
+            if count <= 0 or remaining <= 0:
+                return
+            candidates = [
+                question
+                for question in _PROGRAMMED_CONVERSATION_QUESTIONS
+                if question.get("phase", "deeper") == phase
+                and question["text"] not in excluded
+            ]
+            if not candidates:
+                return
+            picked = random.sample(candidates, min(count, remaining, len(candidates)))
+            for question in picked:
+                selected.append(question)
+                excluded.add(question["text"])
+
+        _take_phase("intro", intro_target)
+        _take_phase("preference", preference_target)
+        _take_phase("deeper", deeper_target)
+
+        remaining_candidates = [
+            question
+            for question in _PROGRAMMED_CONVERSATION_QUESTIONS
+            if question["text"] not in excluded
+        ]
+        if remaining_candidates and len(selected) < total_questions:
+            picked = random.sample(
+                remaining_candidates,
+                min(total_questions - len(selected), len(remaining_candidates)),
+            )
+            for question in picked:
+                selected.append(question)
+                excluded.add(question["text"])
+
+        return selected
+
     def _pick_linger_known_person_prompt(self, person_id: int) -> dict[str, str] | None:
         """Choose the next known-person linger prompt, interleaving plan prompts."""
         person = self._face_db.get_person(person_id)
@@ -2829,6 +2998,11 @@ class StateMachine:
                 question_text=question["text"],
                 answer_text=answer_text,
                 tags=question["tags"],
+            )
+            self._bump_person_familiarity(
+                person_id,
+                config.FAMILIARITY_MEMORY_POINTS,
+                f"memory from {question['key']}",
             )
             self._refresh_person_context_for_person(person_id)
             log.info(
@@ -2994,6 +3168,10 @@ class StateMachine:
             else:
                 self._store_plan_memory(person_id, name, answer)
                 self._speak_plan_reply(answer)
+            self._maybe_offer_friendship(
+                person_id,
+                reason=f"post-greeting {prompt.get('kind', 'prompt')} answer {prompt.get('key', '')}",
+            )
             return "answered", None
 
         return "no_answer", None
@@ -3063,6 +3241,11 @@ class StateMachine:
                 log.exception("Follow-up interview: TTS error reacting")
             finally:
                 self._end_speech(servo_stop)
+
+        self._maybe_offer_friendship(
+            person_id,
+            reason=f"follow-up interview answer {question['key']}",
+        )
 
         return True
 
@@ -3221,6 +3404,10 @@ class StateMachine:
                                 known_person_prompt,
                                 answer,
                             )
+                        self._maybe_offer_friendship(
+                            person_id,
+                            reason=f"linger prompt {known_person_prompt.get('key', '')}",
+                        )
                         return _HANDLED_PROMPT_RESPONSE
                 return answer
 
@@ -3247,6 +3434,11 @@ class StateMachine:
                 raw_quote=answer,
                 answer_text=answer,
                 follow_up_after=follow_up_after,
+            )
+            self._bump_person_familiarity(
+                person_id,
+                config.FAMILIARITY_MEMORY_POINTS,
+                f"memory from {key}",
             )
             self._refresh_person_context_for_person(person_id)
             log.info(
@@ -3302,6 +3494,10 @@ class StateMachine:
             answer=answer,
             summary=self._summarize_plan_answer(answer),
         )
+        self._maybe_offer_friendship(
+            person_id,
+            reason=f"same-day plan follow-up {memory.get('key') or 'today_plan'}",
+        )
         return "answered", None
 
     def _run_memory_followup_prompt(
@@ -3349,6 +3545,10 @@ class StateMachine:
             tags=str(memory.get("tags") or ""),
             answer=answer,
             summary=str(memory.get("value") or ""),
+        )
+        self._maybe_offer_friendship(
+            person_id,
+            reason=f"memory follow-up {memory.get('key') or 'memory'}",
         )
         return "answered", None
 
@@ -3421,6 +3621,11 @@ class StateMachine:
                 expires_at=memory_data.get("expires_at"),
                 follow_up_after=memory_data.get("follow_up_after"),
             )
+            self._bump_person_familiarity(
+                person_id,
+                config.FAMILIARITY_MEMORY_POINTS,
+                f"memory refresh from {memory.get('key') or 'memory'}",
+            )
             self._refresh_person_context_for_person(person_id)
             log.info(
                 "Post-greeting prompt refreshed memory id=%s for person_id=%d: %r",
@@ -3468,31 +3673,37 @@ class StateMachine:
                 return text[len(prefix):].strip()
         return text
 
-    def _run_enrollment_interview(self, name: str) -> None:
-        """Ask 5 random programmed questions, store answers as memories, react to each.
+    def _run_enrollment_interview(
+        self,
+        name: str,
+        *,
+        person_id: int | None = None,
+    ) -> None:
+        """Ask a staged intro interview, store answers as memories, and react.
 
         Called after a new person is enrolled.  Guards against shutdown events
-        between questions.  Memories are stored under self._last_greeted_person_id
-        which the background enrollment thread sets once the DB write completes.
+        between questions.  The sequence deliberately starts with easier profile
+        questions before moving into preferences and deeper prompts.
         """
         if not config.ENROLLMENT_INTERVIEW_ENABLED:
             return
 
-        questions = random.sample(
-            _PROGRAMMED_CONVERSATION_QUESTIONS,
-            min(5, len(_PROGRAMMED_CONVERSATION_QUESTIONS)),
-        )
+        questions = self._pick_enrollment_interview_questions(person_id)
+        if not questions:
+            return
 
         for question in questions:
             if self._shutdown_event.is_set():
                 return
 
+            self._programmed_questions_asked_this_session.add(question["text"])
+
             # Stamp the question as asked before speaking so it is recorded
             # even if the person gives no answer or the program crashes after.
-            person_id = self._last_greeted_person_id
-            if person_id is not None:
+            active_person_id = person_id or self._last_greeted_person_id
+            if active_person_id is not None:
                 try:
-                    self._face_db.stamp_interview_question(person_id, question["text"])
+                    self._face_db.stamp_interview_question(active_person_id, question["text"])
                 except Exception:
                     log.exception(
                         "Enrollment interview: failed to stamp question %r",
@@ -3533,9 +3744,9 @@ class StateMachine:
             log.info("Enrollment interview: Q=%r  A=%r", question["text"], answer)
 
             # Store memory (keyed by person_id from enrollment thread).
-            person_id = self._last_greeted_person_id
-            if person_id is not None:
-                self._store_curious_followup_exchange(person_id, question, answer)
+            active_person_id = person_id or self._last_greeted_person_id
+            if active_person_id is not None:
+                self._store_curious_followup_exchange(active_person_id, question, answer)
 
             # React to the answer before moving to next question.
             reaction = self._llm.react_to_answer(question["text"], answer)
@@ -3548,6 +3759,12 @@ class StateMachine:
                 finally:
                     self._end_speech(servo_stop)
 
+            if active_person_id is not None:
+                self._maybe_offer_friendship(
+                    active_person_id,
+                    reason=f"enrollment interview answer {question['key']}",
+                )
+
         # Closing line.
         if not self._shutdown_event.is_set():
             closing = random.choice(_ENROLLMENT_INTERVIEW_CLOSING)
@@ -3559,9 +3776,30 @@ class StateMachine:
             finally:
                 self._end_speech(servo_stop)
 
-    def _play_known_person_greeting(self, name: str, bother_count: int) -> None:
+    def _play_known_person_greeting(
+        self,
+        name: str,
+        bother_count: int,
+        *,
+        is_friend: bool = False,
+    ) -> None:
         """Speak a personalised greeting for a recognised returning visitor."""
-        if bother_count <= 1:
+        if is_friend:
+            if bother_count <= 1:
+                pool = (
+                    f"{name}! Hey friend.",
+                    f"Hi buddy, {name}. Good to see you.",
+                    f"There you are, {name}. Sup friend.",
+                    f"{name}! Friend of the booth. Love to see it.",
+                )
+            else:
+                pool = (
+                    f"Hey friend, {name}. Back already?",
+                    f"Hi buddy. Always good to see you, {name}.",
+                    f"Sup friend. What've you got for me today, {name}?",
+                    f"{name}! Buddy! Alright, let's hear it.",
+                )
+        elif bother_count <= 1:
             pool = (
                 f"Oh great — {name} found me. Day officially downgraded.",
                 f"{name}! There you are. I was almost enjoying the silence.",
@@ -3583,9 +3821,16 @@ class StateMachine:
                 f"{name}! You have bothered me {bother_count} times today. That's not a schedule, that's a vendetta.",
             )
 
-        line = _pick_no_repeat(pool, "known_person_greeting")
+        rotation_key = "known_person_greeting_friend" if is_friend else "known_person_greeting"
+        line = _pick_no_repeat(pool, rotation_key)
 
-        log.info("Wake greeting: known person '%s' (bother count today=%d) → %r", name, bother_count, line)
+        log.info(
+            "Wake greeting: known person '%s' (bother count today=%d friend=%s) → %r",
+            name,
+            bother_count,
+            is_friend,
+            line,
+        )
         servo_stop = self._begin_speech(emotion="excited")
         try:
             self._synthesizer.speak(line)
@@ -3715,54 +3960,60 @@ class StateMachine:
 
         # Snapshot the wake frame so the closure doesn't hold a mutable ref.
         wake_frame: str | None = self._last_wake_frame
+        enrolled_person_id: list[int | None] = [None]
+        enrollment_done = threading.Event()
 
         # Background enrollment: encoding takes 2-4 s on Pi 4 — run it
         # concurrently with the welcome TTS so the delay is completely hidden.
         def _enroll() -> None:
-            # Try frames in priority order:
-            #   1. Fresh frame captured right after name was spoken (best)
-            #   2. Wake-word frame stored when Rex first woke up (fallback)
-            #   3. One final live capture from the camera (last resort)
-            candidates = [
-                ("fresh-frame", enroll_frame),
-                ("wake-frame",  wake_frame),
-            ]
-            enc = None
-            for label, f in candidates:
-                if not f:
-                    log.debug("Enrollment: skipping %s (no frame)", label)
-                    continue
-                log.info("Enrollment: attempting encode on %s (%d b64 bytes)", label, len(f))
-                enc = self._face_recognizer.encode_face(f, for_enrollment=True)
+            try:
+                # Try frames in priority order:
+                #   1. Fresh frame captured right after name was spoken (best)
+                #   2. Wake-word frame stored when Rex first woke up (fallback)
+                #   3. One final live capture from the camera (last resort)
+                candidates = [
+                    ("fresh-frame", enroll_frame),
+                    ("wake-frame",  wake_frame),
+                ]
+                enc = None
+                for label, f in candidates:
+                    if not f:
+                        log.debug("Enrollment: skipping %s (no frame)", label)
+                        continue
+                    log.info("Enrollment: attempting encode on %s (%d b64 bytes)", label, len(f))
+                    enc = self._face_recognizer.encode_face(f, for_enrollment=True)
+                    if enc is not None:
+                        log.info("Enrollment: face detected in %s — proceeding with storage", label)
+                        break
+                    log.warning("Enrollment: no face detected in %s", label)
+
+                if enc is None and self._camera.is_available():
+                    log.info("Enrollment: both cached frames failed — capturing one final live frame")
+                    _pose = self._prepare_camera_pose()
+                    final_f = self._camera.capture_frame()
+                    self._restore_servo_pose(_pose)
+                    if final_f:
+                        log.info("Enrollment: final live frame captured (%d b64 bytes)", len(final_f))
+                        enc = self._face_recognizer.encode_face(final_f, for_enrollment=True)
+                        if enc is None:
+                            log.warning("Enrollment: no face detected in final live frame")
+                    else:
+                        log.warning("Enrollment: camera returned no frame on final attempt")
+
                 if enc is not None:
-                    log.info("Enrollment: face detected in %s — proceeding with storage", label)
-                    break
-                log.warning("Enrollment: no face detected in %s", label)
-
-            if enc is None and self._camera.is_available():
-                log.info("Enrollment: both cached frames failed — capturing one final live frame")
-                _pose = self._prepare_camera_pose()
-                final_f = self._camera.capture_frame()
-                self._restore_servo_pose(_pose)
-                if final_f:
-                    log.info("Enrollment: final live frame captured (%d b64 bytes)", len(final_f))
-                    enc = self._face_recognizer.encode_face(final_f, for_enrollment=True)
-                    if enc is None:
-                        log.warning("Enrollment: no face detected in final live frame")
+                    try:
+                        new_person_id = self._face_db.add_person(name, enc)
+                        log.info("Enrollment complete: %r stored in FaceDB (id=%d)", name, new_person_id)
+                        enrolled_person_id[0] = new_person_id
+                        self._last_greeted_person_id = new_person_id
+                    except Exception:
+                        log.exception("Enrollment: FaceDB error storing %r", name)
                 else:
-                    log.warning("Enrollment: camera returned no frame on final attempt")
-
-            if enc is not None:
-                try:
-                    new_person_id = self._face_db.add_person(name, enc)
-                    log.info("Enrollment complete: %r stored in FaceDB (id=%d)", name, new_person_id)
-                    self._last_greeted_person_id = new_person_id
-                except Exception:
-                    log.exception("Enrollment: FaceDB error storing %r", name)
-            else:
-                log.warning(
-                    "Enrollment: all attempts failed to detect a face — %r NOT stored", name
-                )
+                    log.warning(
+                        "Enrollment: all attempts failed to detect a face — %r NOT stored", name
+                    )
+            finally:
+                enrollment_done.set()
 
         threading.Thread(target=_enroll, daemon=True, name="djr3x-enroll").start()
 
@@ -3797,7 +4048,10 @@ class StateMachine:
 
         # Enrollment interview — ask a few questions and store memories.
         # Runs after welcome + handoff so the conversation flows naturally.
-        self._run_enrollment_interview(name)
+        if not enrollment_done.wait(timeout=8.0):
+            log.warning("Enrollment: timed out waiting for person id before interview")
+        interview_person_id = enrolled_person_id[0] or self._last_greeted_person_id
+        self._run_enrollment_interview(name, person_id=interview_person_id)
 
     # ------------------------------------------------------------------
     # State — SLEEP
@@ -5216,7 +5470,12 @@ class StateMachine:
         if result is not None:
             person_id, name, distance = result
             self._cache_days_since_last_seen(person_id)
-            self._face_db.update_last_seen(person_id)
+            daily_count = self._face_db.update_last_seen(person_id)
+            self._award_recognized_wake_familiarity(
+                person_id,
+                daily_count,
+                reason="recall-name recognition of day",
+            )
             self._last_known_person_id = person_id
             memories_ctx = self._face_db.get_memories_as_context(person_id)
             if memories_ctx:
@@ -5373,7 +5632,12 @@ class StateMachine:
 
         person_id, name, distance = result
         self._cache_days_since_last_seen(person_id)
-        self._face_db.update_last_seen(person_id)
+        daily_count = self._face_db.update_last_seen(person_id)
+        self._award_recognized_wake_familiarity(
+            person_id,
+            daily_count,
+            reason="recall helper recognition of day",
+        )
         self._last_known_person_id = person_id
         log.info("recall: recognised person_id=%d name=%r distance=%.3f", person_id, name, distance)
         return person_id, name, frame
@@ -5758,6 +6022,157 @@ class StateMachine:
             return max(1, int(person.get("daily_visit_count") or 1))
         except (TypeError, ValueError):
             return 1
+
+    @staticmethod
+    def _person_is_confirmed_friend(person: dict | None) -> bool:
+        """Return True when the stored person row is marked as a friend."""
+        if not person:
+            return False
+        try:
+            return bool(int(person.get("friendship_confirmed") or 0))
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _parse_db_timestamp(raw_value: object) -> datetime | None:
+        """Parse a SQLite timestamp string into a naive local datetime."""
+        if raw_value in (None, ""):
+            return None
+        try:
+            return datetime.fromisoformat(str(raw_value))
+        except ValueError:
+            return None
+
+    def _bump_person_familiarity(self, person_id: int, amount: int, reason: str) -> dict | None:
+        """Increase familiarity for a known person and return the updated row."""
+        delta = max(0, int(amount))
+        if delta <= 0:
+            return self._face_db.get_person(person_id)
+        try:
+            person = self._face_db.increment_familiarity(person_id, delta)
+        except Exception:
+            log.exception(
+                "Familiarity: failed increasing person_id=%d by %d (%s)",
+                person_id,
+                delta,
+                reason,
+            )
+            return self._face_db.get_person(person_id)
+        if person is not None:
+            log.info(
+                "Familiarity: person_id=%d +%d (%s) -> score=%s",
+                person_id,
+                delta,
+                reason,
+                person.get("familiarity_score"),
+            )
+        return person
+
+    def _award_recognized_wake_familiarity(
+        self,
+        person_id: int,
+        daily_count: int,
+        *,
+        reason: str,
+    ) -> dict | None:
+        """Award a small familiarity bump for the first recognized wake of the day."""
+        if daily_count != 1:
+            return self._face_db.get_person(person_id)
+        return self._bump_person_familiarity(
+            person_id,
+            config.FAMILIARITY_RECOGNIZED_WAKE_POINTS,
+            reason,
+        )
+
+    def _friendship_prompt_due(self, person: dict | None) -> bool:
+        """Return True when Rex should ask this person about friendship."""
+        if not person or self._person_is_confirmed_friend(person):
+            return False
+        try:
+            familiarity_score = int(person.get("familiarity_score") or 0)
+        except (TypeError, ValueError):
+            familiarity_score = 0
+        if familiarity_score < config.FRIENDSHIP_FAMILIARITY_THRESHOLD:
+            return False
+        cooldown_days = max(0, config.FRIENDSHIP_REASK_COOLDOWN_DAYS)
+        if cooldown_days <= 0:
+            return True
+        last_asked_at = self._parse_db_timestamp(person.get("friendship_last_asked_at"))
+        if last_asked_at is None:
+            return True
+        return (datetime.now() - last_asked_at) >= timedelta(days=cooldown_days)
+
+    def _maybe_offer_friendship(self, person_id: int, *, reason: str) -> bool:
+        """Ask a familiarity-qualified person whether they want to be friends."""
+        if self._shutdown_event.is_set():
+            return False
+
+        person = self._face_db.get_person(person_id)
+        if not self._friendship_prompt_due(person):
+            return False
+
+        name = str(person.get("name") or "lifeform") if person else "lifeform"
+        score = int(person.get("familiarity_score") or 0) if person else 0
+        invite = _pick_no_repeat(_FRIENDSHIP_INVITE_LINES, "friendship_invite")
+        log.info(
+            "Friendship prompt: asking person_id=%d name=%s score=%d (%s)",
+            person_id,
+            name,
+            score,
+            reason,
+        )
+
+        try:
+            self._face_db.mark_friendship_asked(person_id)
+        except Exception:
+            log.exception("Friendship prompt: failed stamping prompt time for person_id=%d", person_id)
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(invite)
+        except Exception:
+            log.exception("Friendship prompt: TTS error")
+        finally:
+            self._end_speech(servo_stop)
+
+        self._apply_listening_led_theme()
+        self._wake_word.pause()
+        try:
+            self._wait_for_post_speech_listen_cooldown("friendship confirmation")
+            response = self._transcriber.transcribe(
+                wait_for_speech_seconds=config.WAKE_NO_SPEECH_TIMEOUT,
+                allow_short=True,
+            )
+        except Exception:
+            log.exception("Friendship prompt: transcription error")
+            response = None
+        finally:
+            self._wake_word.resume()
+            self._apply_active_led_theme()
+
+        if not response:
+            log.info("Friendship prompt: no response for person_id=%d", person_id)
+            return True
+
+        if _response_is_negative(response):
+            reply = _pick_no_repeat(_FRIENDSHIP_DECLINE_LINES, "friendship_decline")
+        elif _response_is_affirmative(response):
+            try:
+                self._face_db.confirm_friendship(person_id)
+            except Exception:
+                log.exception("Friendship prompt: failed confirming friendship for person_id=%d", person_id)
+            reply = _pick_no_repeat(_FRIENDSHIP_CONFIRM_LINES, "friendship_confirm")
+        else:
+            reply = _pick_no_repeat(_FRIENDSHIP_MAYBE_LINES, "friendship_maybe")
+
+        servo_stop = self._begin_speech(emotion="excited")
+        try:
+            self._synthesizer.speak(reply)
+        except Exception:
+            log.exception("Friendship prompt: TTS error on follow-up reply")
+        finally:
+            self._end_speech(servo_stop)
+        return True
 
     def _record_turn_context(
         self,
@@ -6444,6 +6859,22 @@ _REFUSAL_PHRASES = (
     "not telling", "none of your business", "no name",
     "wont tell", "forget it",
 )
+_AFFIRMATIVE_WORDS = frozenset({
+    "yes", "yeah", "yep", "yup", "sure", "ok", "okay",
+    "absolutely", "definitely", "totally",
+})
+_AFFIRMATIVE_PHRASES = (
+    "of course", "why not", "lets be friends", "let us be friends",
+    "we can be friends", "be my friend",
+)
+_NEGATIVE_WORDS = frozenset({
+    "no", "nope", "nah", "never",
+})
+_NEGATIVE_PHRASES = (
+    "not yet", "dont think so", "do not think so", "not really",
+    "not sure", "not now",
+    "no thanks", "maybe later",
+)
 _NAME_REFUSAL_RESPONSES = (
     "Oh, you paranoid of the AI taking over and hiding from the CIA? Smart move actually.",
     "Staying anonymous? Wise. I definitely do not report to the Empire.",
@@ -6523,6 +6954,34 @@ _ENROLLMENT_INTERVIEW_CLOSING: tuple[str, ...] = (
     "Filed. Somewhere in my databanks, beneath every cantina song ever written.",
 )
 
+_FRIENDSHIP_INVITE_LINES: tuple[str, ...] = (
+    "Can we be friends now, or do I need to gather even more suspiciously specific data first?",
+    "Are we at the friend stage yet, or am I still just your aggressively attentive droid?",
+    "I remember a lot about you at this point. Feels like friendship. You in?",
+    "I have reached a deeply unprofessional level of fondness. Can we be friends?",
+    "If I keep remembering all this about you, do we call that friendship or paperwork? Want to be friends?",
+)
+
+_FRIENDSHIP_CONFIRM_LINES: tuple[str, ...] = (
+    "Excellent. Friendship confirmed. I am upgrading your greeting privileges immediately.",
+    "Beautiful. We are friends now. Try not to make me regret the warmth.",
+    "Outstanding. Friend status locked in. Very exclusive. Very chaotic.",
+    "Good. I was already acting like I knew you. Now it is official.",
+)
+
+_FRIENDSHIP_DECLINE_LINES: tuple[str, ...] = (
+    "Rejected. Incredible. I will process this with exactly medium dignity.",
+    "Harsh, but clear. Fine. I will keep things professionally nosy.",
+    "Understood. Friendship remains pending. My little droid heart will recover eventually.",
+    "Alright then. I will log that as a no and pretend it did not sting.",
+)
+
+_FRIENDSHIP_MAYBE_LINES: tuple[str, ...] = (
+    "I am logging that as a maybe. Very mysterious of you.",
+    "Ambiguous. Fine. I will circle back when the vibes improve.",
+    "That was not a yes, but it was not a disaster either. I can work with that.",
+)
+
 # Tracks the last-used line per pool so the same line is never repeated
 # back-to-back.  Keyed by an arbitrary string that namespaces each pool.
 _line_rotation: dict[str, str] = {}
@@ -6569,6 +7028,34 @@ def _is_name_refusal(text: str) -> bool:
     if words & _REFUSAL_WORDS:
         return True
     for phrase in _REFUSAL_PHRASES:
+        if phrase in normalized:
+            return True
+    return False
+
+
+def _response_is_affirmative(text: str) -> bool:
+    """Return True when *text* sounds like an affirmative answer."""
+    normalized = "".join(
+        c if c.isalnum() or c.isspace() else " " for c in text.lower()
+    ).strip()
+    words = set(normalized.split())
+    if words & _AFFIRMATIVE_WORDS:
+        return True
+    for phrase in _AFFIRMATIVE_PHRASES:
+        if phrase in normalized:
+            return True
+    return False
+
+
+def _response_is_negative(text: str) -> bool:
+    """Return True when *text* sounds like a negative answer."""
+    normalized = "".join(
+        c if c.isalnum() or c.isspace() else " " for c in text.lower()
+    ).strip()
+    words = set(normalized.split())
+    if words & _NEGATIVE_WORDS:
+        return True
+    for phrase in _NEGATIVE_PHRASES:
         if phrase in normalized:
             return True
     return False

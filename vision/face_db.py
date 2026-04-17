@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS people (
     visit_count INTEGER DEFAULT 1,
     daily_visit_date TEXT,
     daily_visit_count INTEGER DEFAULT 0,
+    familiarity_score INTEGER DEFAULT 0,
+    friendship_confirmed INTEGER DEFAULT 0,
+    friendship_last_asked_at TIMESTAMP,
     notes       TEXT
 );
 """
@@ -140,6 +143,23 @@ class FaceDB:
                 self._conn.execute(
                     "ALTER TABLE people ADD COLUMN daily_visit_count INTEGER DEFAULT 0"
                 )
+            if "familiarity_score" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE people ADD COLUMN familiarity_score INTEGER DEFAULT 0"
+                )
+            if "friendship_confirmed" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE people ADD COLUMN friendship_confirmed INTEGER DEFAULT 0"
+                )
+            if "friendship_last_asked_at" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE people ADD COLUMN friendship_last_asked_at TIMESTAMP"
+                )
+            self._conn.execute(
+                """UPDATE people
+                   SET familiarity_score = COALESCE(familiarity_score, 0),
+                       friendship_confirmed = COALESCE(friendship_confirmed, 0)"""
+            )
 
     def _ensure_memories_columns(self) -> None:
         """Backfill newer memories-table columns when upgrading an existing DB."""
@@ -319,10 +339,12 @@ class FaceDB:
         log.debug("FaceDB: added encoding for person id=%d", person_id)
 
     def get_person(self, person_id: int) -> Optional[dict]:
-        """Return a dict with name, visit_count, first_seen, last_seen, or None."""
+        """Return a dict with the stored person fields, or None."""
         row = self._conn.execute(
-            """SELECT name, visit_count, first_seen, last_seen,
-                      daily_visit_date, daily_visit_count
+            """SELECT id, name, visit_count, first_seen, last_seen,
+                      daily_visit_date, daily_visit_count,
+                      familiarity_score, friendship_confirmed,
+                      friendship_last_asked_at
                FROM people
                WHERE id = ?""",
             (person_id,),
@@ -335,11 +357,60 @@ class FaceDB:
         """Return all known people ordered by name."""
         rows = self._conn.execute(
             """SELECT id, name, visit_count, first_seen, last_seen,
-                      daily_visit_date, daily_visit_count
+                      daily_visit_date, daily_visit_count,
+                      familiarity_score, friendship_confirmed,
+                      friendship_last_asked_at
                FROM people
                ORDER BY name"""
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def increment_familiarity(self, person_id: int, amount: int = 1) -> Optional[dict]:
+        """Increase a person's familiarity score and return the updated row."""
+        delta = max(0, int(amount))
+        if delta <= 0:
+            return self.get_person(person_id)
+        with self._conn:
+            self._conn.execute(
+                """UPDATE people
+                   SET familiarity_score = COALESCE(familiarity_score, 0) + ?
+                   WHERE id = ?""",
+                (delta, person_id),
+            )
+        person = self.get_person(person_id)
+        if person is not None:
+            log.debug(
+                "FaceDB: familiarity increased for person id=%d by %d (score=%s)",
+                person_id,
+                delta,
+                person.get("familiarity_score"),
+            )
+        return person
+
+    def mark_friendship_asked(self, person_id: int) -> None:
+        """Record that Rex asked this person about friendship."""
+        with self._conn:
+            self._conn.execute(
+                """UPDATE people
+                   SET friendship_last_asked_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (person_id,),
+            )
+        log.debug("FaceDB: marked friendship prompt asked for person id=%d", person_id)
+
+    def confirm_friendship(self, person_id: int) -> Optional[dict]:
+        """Mark a person as a confirmed friend and return the updated row."""
+        with self._conn:
+            self._conn.execute(
+                """UPDATE people
+                   SET friendship_confirmed = 1,
+                       friendship_last_asked_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (person_id,),
+            )
+        person = self.get_person(person_id)
+        log.info("FaceDB: friendship confirmed for person id=%d", person_id)
+        return person
 
     def find_person_by_name(self, spoken_name: str) -> Optional[tuple[int, str, float]]:
         """Return the closest stored person for a spoken/display name.

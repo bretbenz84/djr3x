@@ -700,6 +700,28 @@ HEAD_SEARCH_TILT_SPEED: int = int(_optional("HEAD_SEARCH_TILT_SPEED", "8"))
 ENROLLMENT_INTERVIEW_ENABLED: bool = _optional(
     "ENROLLMENT_INTERVIEW_ENABLED", "true"
 ).lower() not in ("0", "false", "no")
+ENROLLMENT_INTERVIEW_QUESTION_COUNT: int = int(
+    _optional("ENROLLMENT_INTERVIEW_QUESTION_COUNT", "5")
+)
+ENROLLMENT_INTERVIEW_PROFILE_QUESTION_COUNT: int = int(
+    _optional("ENROLLMENT_INTERVIEW_PROFILE_QUESTION_COUNT", "3")
+)
+
+# Relationship memory — familiarity grows as Rex learns about a person and sees
+# them over time. Once the threshold is crossed, Rex can ask whether they are
+# officially friends.
+FAMILIARITY_MEMORY_POINTS: int = int(
+    _optional("FAMILIARITY_MEMORY_POINTS", "1")
+)
+FAMILIARITY_RECOGNIZED_WAKE_POINTS: int = int(
+    _optional("FAMILIARITY_RECOGNIZED_WAKE_POINTS", "1")
+)
+FRIENDSHIP_FAMILIARITY_THRESHOLD: int = int(
+    _optional("FRIENDSHIP_FAMILIARITY_THRESHOLD", "10")
+)
+FRIENDSHIP_REASK_COOLDOWN_DAYS: int = int(
+    _optional("FRIENDSHIP_REASK_COOLDOWN_DAYS", "7")
+)
 
 # ---------------------------------------------------------------------------
 # LLM — recall_name roast prompt

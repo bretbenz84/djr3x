@@ -13,3 +13,4 @@ assets/models/*.dat
 assets/music/
 assets/face_debug/
 .VSCodeCounter/
+assets/models/djrex_xtts/model.pth
