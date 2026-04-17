@@ -11,9 +11,9 @@
 # Shared runtime dependencies
 elevenlabs==2.41.0
 holidays==0.94
-numpy==2.4.4
+numpy==1.26.4
 openai==2.30.0
-opencv-python==4.13.0.92
+opencv-python==4.10.0.84
 openwakeword==0.4.0
 piper-tts==1.4.2
 pyserial==3.5
