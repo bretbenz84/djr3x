@@ -76,6 +76,29 @@ def setup_models():
 
     return all_ok
 
+
+def report_xtts_status():
+    """Report whether the optional Apple Silicon XTTS assets are present."""
+    xtts_dir = MODELS_DIR / "djrex_xtts"
+    vocab_candidates = [
+        xtts_dir / "vocab.json",
+        xtts_dir / "vocab.json_",
+    ]
+    vocab_path = next((p for p in vocab_candidates if p.exists()), vocab_candidates[0])
+
+    print("\nOptional XTTS voice (Apple Silicon only)")
+    print("-" * 40)
+    checks = [
+        ("XTTS config", xtts_dir / "config.json"),
+        ("XTTS checkpoint", xtts_dir / "model.pth"),
+        ("XTTS vocab", vocab_path),
+        ("XTTS speaker reference", Path(__file__).parent / "reference.wav"),
+    ]
+    for label, path in checks:
+        exists = path.exists()
+        print(f"  {'OK' if exists else 'MISSING'}: {label}: {path}")
+    print("  Note: XTTS runs only on macOS Apple Silicon and is selected with TTS_PROVIDER=xtts")
+
 def fix_face_recognition_models():
     """Fix pkg_resources issue if face_recognition_models is installed."""
     import site
@@ -110,6 +133,7 @@ if __name__ == "__main__":
     fix_face_recognition_models()
     print("\nChecking model files...")
     ok = setup_models()
+    report_xtts_status()
     print("\n" + ("=" * 40))
     if ok:
         print("Setup complete! All assets ready.")

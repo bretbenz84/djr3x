@@ -108,6 +108,7 @@ def _print_banner(status: dict) -> None:
     tts_backend = {
         "elevenlabs": "ElevenLabs",
         "piper": "Piper",
+        "xtts": "XTTS",
     }.get(config.TTS_PROVIDER, config.TTS_PROVIDER)
 
     lines = [

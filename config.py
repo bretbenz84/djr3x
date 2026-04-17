@@ -73,9 +73,9 @@ OPENAI_TIMEOUT_SECONDS = float(_optional("OPENAI_TIMEOUT_SECONDS", "30"))
 ELEVENLABS_TIMEOUT_SECONDS = float(_optional("ELEVENLABS_TIMEOUT_SECONDS", "60"))
 
 TTS_PROVIDER = _optional("TTS_PROVIDER", "elevenlabs").strip().lower()
-if TTS_PROVIDER not in {"elevenlabs", "piper"}:
+if TTS_PROVIDER not in {"elevenlabs", "piper", "xtts"}:
     raise EnvironmentError(
-        "TTS_PROVIDER must be either 'elevenlabs' or 'piper' in .env"
+        "TTS_PROVIDER must be one of 'elevenlabs', 'piper', or 'xtts' in .env"
     )
 
 ELEVENLABS_API_KEY  = (
@@ -309,13 +309,13 @@ AUDIO_BLUETOOTH_PREFER_CONNECTED: bool = _optional(
 # mixer, so all output paths scale samples by this factor before writing.
 AUDIO_VOLUME: float = max(0.0, min(1.0, float(_optional("AUDIO_VOLUME", "0.5"))))
 
-# TTS gain boost applied to ElevenLabs PCM chunks in synthesizer.py before
+# TTS gain boost applied to generated PCM chunks in synthesizer.py before
 # queuing for playback.  Multiplies int16 samples and clips to [-32768, 32767].
 # Values above 1.0 boost volume; 1.0 = no change.
 SYNTHESIZER_VOLUME_GAIN: float = float(_optional("SYNTHESIZER_VOLUME_GAIN", "2.0"))
 
 # Speech-only playback effect that adds the DJ-R3X radio/droid character.
-# Applied in audio/player.py to live ElevenLabs PCM and cached .wav responses
+# Applied in audio/player.py to live/generated PCM and cached .wav responses
 # before they are converted back to int16 for output. Music and .mp3 clips are
 # intentionally left untouched.
 ENABLE_DROID_EFFECT: bool = _optional("ENABLE_DROID_EFFECT", "true").lower() not in ("0", "false", "no")
@@ -511,6 +511,35 @@ PIPER_SENTENCE_SILENCE = float(_optional("PIPER_SENTENCE_SILENCE", "0.0"))
 PIPER_LENGTH_SCALE = float(_optional("PIPER_LENGTH_SCALE", "1.0"))
 PIPER_NOISE_SCALE = float(_optional("PIPER_NOISE_SCALE", "0.667"))
 PIPER_NOISE_W = float(_optional("PIPER_NOISE_W", "0.8"))
+
+XTTS_MODEL_DIR = Path(
+    _optional("XTTS_MODEL_DIR", str(MODELS_DIR / "djrex_xtts"))
+)
+XTTS_CONFIG_PATH = Path(
+    _optional("XTTS_CONFIG_PATH", str(XTTS_MODEL_DIR / "config.json"))
+)
+XTTS_CHECKPOINT_PATH = Path(
+    _optional("XTTS_CHECKPOINT_PATH", str(XTTS_MODEL_DIR / "model.pth"))
+)
+_default_xtts_vocab = XTTS_MODEL_DIR / "vocab.json"
+if not _default_xtts_vocab.exists():
+    _default_xtts_vocab_alt = XTTS_MODEL_DIR / "vocab.json_"
+    if _default_xtts_vocab_alt.exists():
+        _default_xtts_vocab = _default_xtts_vocab_alt
+XTTS_VOCAB_PATH = Path(
+    _optional("XTTS_VOCAB_PATH", str(_default_xtts_vocab))
+)
+XTTS_SPEAKER_WAV = Path(
+    _optional("XTTS_SPEAKER_WAV", str(PROJECT_ROOT / "reference.wav"))
+)
+XTTS_LANGUAGE = _optional("XTTS_LANGUAGE", "en").strip() or "en"
+XTTS_SPEED = float(_optional("XTTS_SPEED", "1.0"))
+XTTS_TEMPERATURE = float(_optional("XTTS_TEMPERATURE", "0.75"))
+XTTS_LENGTH_PENALTY = float(_optional("XTTS_LENGTH_PENALTY", "1.0"))
+XTTS_REPETITION_PENALTY = float(_optional("XTTS_REPETITION_PENALTY", "5.0"))
+XTTS_TOP_K = int(_optional("XTTS_TOP_K", "50"))
+XTTS_TOP_P = float(_optional("XTTS_TOP_P", "0.85"))
+XTTS_ENABLE_TEXT_SPLITTING: bool = _optional("XTTS_ENABLE_TEXT_SPLITTING", "false").lower() in ("1", "true", "yes")
 
 # ---------------------------------------------------------------------------
 # Command parser

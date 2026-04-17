@@ -4,7 +4,7 @@ An interactive animatronic controller for a DJ-R3X (Rex) build, running on Raspb
 Rex responds to voice commands, engages in AI-powered conversation, reacts to music,
 uses computer vision to greet and roast people, and remembers who you are.
 
-Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Silicon builds run transcription and LLM locally. Text to Speech is handled by ElevenLabs on both platforms.
+Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Silicon builds run transcription and LLM locally. Text to Speech can be switched between ElevenLabs, Piper, and a local XTTS voice in `.env` (XTTS is Apple Silicon only).
 
 ## Hardware
 
@@ -42,7 +42,7 @@ Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Sili
 | Transcription | OpenAI Whisper API | Local mlx-whisper (whisper-small-mlx) |
 | LLM | OpenAI GPT-4o-mini | Local Ollama llama3.2 |
 | Vision queries | OpenAI GPT-4o | OpenAI GPT-4o (always cloud) |
-| TTS | ElevenLabs streaming | ElevenLabs streaming |
+| TTS | ElevenLabs or Piper | ElevenLabs, Piper, or local XTTS |
 
 ### Audio Pipeline
 - Wake word detected by OpenWakeWord (4 models: `Dee-Jay_Rex`, `Hey_DJ_Rex`, `Hey_rex`, `Yo_robot`)
@@ -54,7 +54,7 @@ Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Sili
 - Semantic exclusion: "my name" never matches "your name" regardless of fuzzy score
 - Multiple response variations per command (5 variations, anti-repeat shuffle)
 - If matched: execute local command or speak canned response
-- If no match: stream to ChatGPT/Ollama → ElevenLabs → speakers
+- If no match: stream to ChatGPT/Ollama → selected TTS backend → speakers
 - Mouth PCB emotion pulse driven by speech audio RMS level in real time
 
 ### Wake Greeting Pipeline
@@ -114,7 +114,7 @@ Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Sili
 5. IDLE — wake word listening begins
 
 ### Shutdown Sequence
-1. Shutdown speech phrase (ElevenLabs)
+1. Shutdown speech phrase (selected TTS backend)
 2. `hyperdrive_down.mp3` + shutdown servo animation (concurrent)
 3. Servos settle in slumped pose
 4. Optional OS halt (controlled by `ENABLE_OS_SHUTDOWN`)
@@ -127,7 +127,7 @@ Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Sili
 | Transcription | OpenAI Whisper API (Pi) / local mlx-whisper (Mac) |
 | LLM | OpenAI GPT-4o-mini (Pi) / local Ollama llama3.2 (Mac) |
 | Vision | OpenCV + GPT-4o (always cloud) |
-| Voice synthesis | ElevenLabs streaming TTS (Rex voice clone from Star Tours audio) |
+| Voice synthesis | Selectable ElevenLabs / Piper / XTTS |
 | Face recognition | dlib ResNet + SQLite via FaceDB |
 | Servo control | Pololu compact serial protocol |
 | LED control | FastLED on Arduino Uno/Nano via serial |
@@ -160,7 +160,7 @@ djr3x/
 ├── speech/
 │   ├── wake_word.py        # OpenWakeWord detection (4 models)
 │   ├── transcriber.py      # Whisper API or local mlx-whisper transcription
-│   └── synthesizer.py      # ElevenLabs streaming TTS
+│   └── synthesizer.py      # Selectable ElevenLabs / Piper / XTTS TTS
 ├── commands/
 │   ├── parser.py           # Exact, prefix, fuzzy matching + semantic exclusions
 │   └── command_list.py     # 25+ commands, 5 variations each
@@ -208,7 +208,7 @@ pip install -r requirements-macos-apple-silicon.txt
 python3 setup_assets.py
 ```
 
-`setup_assets.py` downloads required model files (~120MB) and patches `face_recognition_models` automatically if that optional package is installed.
+`setup_assets.py` downloads required vision model files (~120MB), patches `face_recognition_models` automatically if that optional package is installed, and reports whether the optional Apple Silicon XTTS voice files are present locally.
 
 ### Raspberry Pi — additional dependencies
 ```bash
@@ -259,7 +259,7 @@ arduino-cli upload --fqbn arduino:avr:nano:cpu=atmega328 --port /dev/ttyUSB0 ard
 OPENAI_API_KEY=your_key_here
 
 # TTS
-TTS_PROVIDER=elevenlabs      # elevenlabs | piper
+TTS_PROVIDER=elevenlabs      # elevenlabs | piper | xtts
 
 # ElevenLabs (required when TTS_PROVIDER=elevenlabs)
 ELEVENLABS_API_KEY=your_key_here
@@ -268,6 +268,14 @@ ELEVENLABS_VOICE_ID=your_voice_id_here
 # Piper (required when TTS_PROVIDER=piper)
 PIPER_MODEL_PATH=assets/models/rexvoice.onnx
 PIPER_CONFIG_PATH=assets/models/rexvoice.onnx.json
+
+# XTTS (Apple Silicon only; required when TTS_PROVIDER=xtts)
+XTTS_MODEL_DIR=assets/models/djrex_xtts
+XTTS_CONFIG_PATH=assets/models/djrex_xtts/config.json
+XTTS_CHECKPOINT_PATH=assets/models/djrex_xtts/model.pth
+XTTS_VOCAB_PATH=assets/models/djrex_xtts/vocab.json_
+XTTS_SPEAKER_WAV=reference.wav
+XTTS_LANGUAGE=en
 
 # Audio devices
 AUDIO_INPUT_DEVICE=3        # Pi: ReSpeaker=3 | Mac: MacBook mic=1
@@ -374,7 +382,7 @@ journalctl -u djr3x -f
 - [x] ChatGPT streaming responses with Rex roaster personality
 - [x] Local Ollama llama3.2 on macOS Apple Silicon
 - [x] Platform detection — automatic backend selection Pi vs Mac
-- [x] ElevenLabs voice synthesis with volume gain
+- [x] Selectable ElevenLabs / Piper / XTTS voice synthesis with volume gain
 - [x] Computer vision — intent based photo capture with GPT-4o
 - [x] Camera pose preparation before image capture
 - [x] Personalized wake greeting — GPT-4o roasts based on appearance
@@ -404,7 +412,7 @@ journalctl -u djr3x -f
 - [ ] udev rules for fixed USB device names on Pi
 - [ ] Dance mode (beat-synced servo sequences)
 - [ ] Mecanum wheel base (future)
-- [ ] Local TTS voice cloning (revisit when MLX TTS matures)
+- [x] Local TTS via Piper and Apple Silicon XTTS toggle
 
 ## Platform Notes
 

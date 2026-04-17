@@ -6,6 +6,7 @@ backend is chosen from `config.TTS_PROVIDER` at startup:
 
   - `elevenlabs`: existing streaming/cached cloud TTS
   - `piper`: local ONNX model loaded once and held open for the process
+  - `xtts`: local Coqui XTTS checkpoint loaded once on Apple Silicon
 """
 
 from __future__ import annotations
@@ -42,6 +43,18 @@ try:
 except ImportError:  # pragma: no cover - optional backend dependency
     SynthesisConfig = None
 
+try:
+    import torch
+except ImportError:  # pragma: no cover - optional backend dependency
+    torch = None
+
+try:
+    from TTS.tts.configs.xtts_config import XttsConfig
+    from TTS.tts.models.xtts import Xtts
+except ImportError:  # pragma: no cover - optional backend dependency
+    XttsConfig = None
+    Xtts = None
+
 
 class _Backend(Protocol):
     provider_name: str
@@ -57,6 +70,8 @@ class Synthesizer:
         self._player = player
         if config.TTS_PROVIDER == "piper":
             self._backend: _Backend = _PiperSynthesizer(player)
+        elif config.TTS_PROVIDER == "xtts":
+            self._backend = _XttsSynthesizer(player)
         else:
             self._backend = _ElevenLabsSynthesizer(player)
 
@@ -230,6 +245,127 @@ class _PiperSynthesizer:
                 yield silence_bytes
 
 
+class _XttsSynthesizer:
+    provider_name = "XTTS"
+
+    def __init__(self, player: AudioPlayer) -> None:
+        if config.PLATFORM != "macos_silicon":
+            raise RuntimeError("TTS_PROVIDER=xtts is supported only on macOS Apple Silicon")
+        if torch is None or XttsConfig is None or Xtts is None:
+            raise RuntimeError(
+                "TTS_PROVIDER=xtts requires the 'TTS' package and torch on Apple Silicon"
+            )
+        for label, path in (
+            ("XTTS config", config.XTTS_CONFIG_PATH),
+            ("XTTS checkpoint", config.XTTS_CHECKPOINT_PATH),
+            ("XTTS vocab", config.XTTS_VOCAB_PATH),
+            ("XTTS speaker reference", config.XTTS_SPEAKER_WAV),
+        ):
+            if not path.exists():
+                raise FileNotFoundError(f"{label} not found: {path}")
+
+        self._player = player
+        config.AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._device = self._select_device()
+
+        self._config = XttsConfig()
+        self._config.load_json(str(config.XTTS_CONFIG_PATH))
+        self._model = Xtts.init_from_config(self._config)
+        self._model.load_checkpoint(
+            self._config,
+            checkpoint_path=str(config.XTTS_CHECKPOINT_PATH),
+            vocab_path=str(config.XTTS_VOCAB_PATH),
+            use_deepspeed=False,
+        )
+        self._model.to(self._device)
+        self._model.eval()
+        self._sample_rate = int(
+            getattr(self._config.audio, "output_sample_rate", 24000)
+        )
+        log.info(
+            "Loaded XTTS model from %s on %s (%d Hz)",
+            config.XTTS_CHECKPOINT_PATH,
+            self._device,
+            self._sample_rate,
+        )
+        self._gpt_cond_latent, self._speaker_embedding = (
+            self._model.get_conditioning_latents(
+                audio_path=[str(config.XTTS_SPEAKER_WAV)]
+            )
+        )
+
+    def speak(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+
+        log.info("Speaking via XTTS: %s", text)
+        cached = _resolve_cache_path(text)
+        if cached is not None:
+            log.debug("TTS cache hit: %s", cached.name)
+            self._player.play_file(cached)
+            return
+
+        out = self._model.inference(
+            text,
+            config.XTTS_LANGUAGE,
+            self._gpt_cond_latent,
+            self._speaker_embedding,
+            temperature=config.XTTS_TEMPERATURE,
+            length_penalty=config.XTTS_LENGTH_PENALTY,
+            repetition_penalty=config.XTTS_REPETITION_PENALTY,
+            top_k=config.XTTS_TOP_K,
+            top_p=config.XTTS_TOP_P,
+            speed=config.XTTS_SPEED,
+            enable_text_splitting=config.XTTS_ENABLE_TEXT_SPLITTING,
+        )
+        pcm_bytes = _float_audio_to_pcm16_bytes(out["wav"])
+        _pipe_to_player(
+            self._player,
+            iter((pcm_bytes,)),
+            cache_path=_cache_path(text),
+            sample_rate=self._sample_rate,
+        )
+
+    def speak_stream(self, text_iter: Iterator[str], t0: float | None = None) -> None:
+        text = "".join(text_iter).strip()
+        if not text:
+            return
+
+        log.info("Speaking via XTTS stream: %.60s…", text)
+        try:
+            chunks = self._model.inference_stream(
+                text,
+                config.XTTS_LANGUAGE,
+                self._gpt_cond_latent,
+                self._speaker_embedding,
+                temperature=config.XTTS_TEMPERATURE,
+                length_penalty=config.XTTS_LENGTH_PENALTY,
+                repetition_penalty=config.XTTS_REPETITION_PENALTY,
+                top_k=config.XTTS_TOP_K,
+                top_p=config.XTTS_TOP_P,
+                speed=config.XTTS_SPEED,
+                enable_text_splitting=config.XTTS_ENABLE_TEXT_SPLITTING,
+            )
+            _pipe_to_player(
+                self._player,
+                (_float_audio_to_pcm16_bytes(chunk) for chunk in chunks),
+                cache_path=None,
+                sample_rate=self._sample_rate,
+                t0=t0,
+            )
+        except Exception:
+            log.exception("XTTS realtime TTS error")
+            self._player.stop_speech()
+            raise
+
+    @staticmethod
+    def _select_device() -> str:
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+
 def _pipe_to_player(
     player: AudioPlayer,
     audio_chunks: Iterator[bytes],
@@ -275,6 +411,15 @@ def _apply_gain(chunk: bytes) -> bytes:
         32767.0,
     ).astype(np.int16)
     return boosted.tobytes()
+
+
+def _float_audio_to_pcm16_bytes(audio: object) -> bytes:
+    if torch is not None and isinstance(audio, torch.Tensor):
+        samples = audio.detach().float().cpu().numpy().reshape(-1)
+    else:
+        samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+    samples = np.clip(samples, -1.0, 1.0)
+    return (samples * 32767.0).astype(np.int16).tobytes()
 
 
 def _cache_path(text: str) -> Path:
