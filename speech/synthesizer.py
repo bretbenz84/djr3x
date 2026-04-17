@@ -277,6 +277,11 @@ class _XttsSynthesizer:
         self._player = player
         config.AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         self._device = self._select_device()
+        if self._device == "cpu":
+            log.warning(
+                "XTTS: MPS is unavailable, so speech synthesis is running on CPU. "
+                "This will be much slower than the Gradio/MPS setup."
+            )
 
         self._config = XttsConfig()
         self._config.load_json(str(config.XTTS_CONFIG_PATH))
@@ -300,9 +305,25 @@ class _XttsSynthesizer:
             self._device,
             self._sample_rate,
         )
+        self._conditioning_kwargs = {
+            "max_ref_length": int(getattr(self._config, "max_ref_len", 30)),
+            "gpt_cond_len": int(getattr(self._config, "gpt_cond_len", 6)),
+            "gpt_cond_chunk_len": int(getattr(self._config, "gpt_cond_chunk_len", 6)),
+            "sound_norm_refs": bool(getattr(self._config, "sound_norm_refs", False)),
+            "load_sr": int(getattr(self._config.model_args, "input_sample_rate", 22050)),
+        }
+        log.info(
+            "XTTS speaker conditioning: wav=%s max_ref=%ss gpt_cond=%ss chunk=%ss load_sr=%s",
+            config.XTTS_SPEAKER_WAV,
+            self._conditioning_kwargs["max_ref_length"],
+            self._conditioning_kwargs["gpt_cond_len"],
+            self._conditioning_kwargs["gpt_cond_chunk_len"],
+            self._conditioning_kwargs["load_sr"],
+        )
         self._gpt_cond_latent, self._speaker_embedding = (
             self._model.get_conditioning_latents(
-                audio_path=[str(config.XTTS_SPEAKER_WAV)]
+                audio_path=[str(config.XTTS_SPEAKER_WAV)],
+                **self._conditioning_kwargs,
             )
         )
 
