@@ -26,7 +26,7 @@ TTS==0.22.0; platform_system == "Darwin" and platform_machine == "arm64"
 transformers==4.36.2; platform_system == "Darwin" and platform_machine == "arm64"
 
 # Apple Silicon-only local transcription stack
-huggingface_hub==1.10.1; platform_system == "Darwin" and platform_machine == "arm64"
+huggingface_hub==0.36.0; platform_system == "Darwin" and platform_machine == "arm64"
 mlx==0.31.1; platform_system == "Darwin" and platform_machine == "arm64"
 mlx-metal==0.31.1; platform_system == "Darwin" and platform_machine == "arm64"
 mlx-whisper==0.4.3; platform_system == "Darwin" and platform_machine == "arm64"
