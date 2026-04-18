@@ -43,7 +43,22 @@ def _open_capture(source: int | str) -> cv2.VideoCapture:
         if cap.isOpened():
             return cap
         cap.release()
+    if config.PLATFORM == "macos_silicon":
+        cap = cv2.VideoCapture(source, cv2.CAP_AVFOUNDATION)
+        if cap.isOpened():
+            return cap
+        cap.release()
     return cv2.VideoCapture(source)
+
+
+def _candidate_sources(source: int | str) -> list[tuple[int | str, str]]:
+    """Return sources to try, supporting auto-detection on macOS."""
+    if source == "auto":
+        # AVFoundation camera ordering can change across reboots and when
+        # Continuity Camera / USB webcams appear, so probe a few indices and
+        # keep the first device that actually delivers frames.
+        return [(idx, f"auto[{idx}]") for idx in range(6)]
+    return [(source, str(source))]
 
 
 class Camera:
@@ -76,54 +91,47 @@ class Camera:
         Safe to call once at startup.  Sets is_available() based on whether
         the device opened successfully.
         """
-        source = config.CAMERA_DEVICE
-        source_label = config.CAMERA_DEVICE_LABEL
+        configured_source = config.CAMERA_DEVICE
+        configured_label = config.CAMERA_DEVICE_LABEL
         for attempt in range(1, self._OPEN_RETRIES + 1):
-            cap = _open_capture(source)
+            for source, source_label in _candidate_sources(configured_source):
+                cap = _open_capture(source)
 
-            if not cap.isOpened():
-                cap.release()
-                log.warning(
-                    "Camera: source %s could not be opened (attempt %d/%d)%s",
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_FRAME_WIDTH)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_FRAME_HEIGHT)
+
+                # Give the sensor a moment to initialise before reading the test frame.
+                time.sleep(self._WARMUP_DELAY)
+
+                ok, _ = cap.read()
+                if not ok:
+                    cap.release()
+                    continue
+
+                self._cap = cap
+                self._available = True
+                log.info(
+                    "Camera: source %s ready (%dx%d) after %d attempt(s)",
                     source_label,
+                    int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                    int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
                     attempt,
-                    self._OPEN_RETRIES,
-                    " — retrying" if attempt < self._OPEN_RETRIES else " — vision disabled",
                 )
-                if attempt < self._OPEN_RETRIES:
-                    time.sleep(self._OPEN_RETRY_DELAY)
-                continue
+                return
 
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_FRAME_WIDTH)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_FRAME_HEIGHT)
-
-            # Give the sensor a moment to initialise before reading the test frame.
-            time.sleep(self._WARMUP_DELAY)
-
-            ok, _ = cap.read()
-            if not ok:
-                cap.release()
-                log.warning(
-                    "Camera: source %s opened but returned no frame (attempt %d/%d)%s",
-                    source_label,
-                    attempt,
-                    self._OPEN_RETRIES,
-                    " — retrying" if attempt < self._OPEN_RETRIES else " — vision disabled",
-                )
-                if attempt < self._OPEN_RETRIES:
-                    time.sleep(self._OPEN_RETRY_DELAY)
-                continue
-
-            self._cap = cap
-            self._available = True
-            log.info(
-                "Camera: source %s ready (%dx%d) after %d attempt(s)",
-                source_label,
-                int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            log.warning(
+                "Camera: source %s could not be opened (attempt %d/%d)%s",
+                configured_label,
                 attempt,
+                self._OPEN_RETRIES,
+                " — retrying" if attempt < self._OPEN_RETRIES else " — vision disabled",
             )
-            return
+            if attempt < self._OPEN_RETRIES:
+                time.sleep(self._OPEN_RETRY_DELAY)
 
     # ------------------------------------------------------------------
     # Lifecycle

@@ -298,6 +298,7 @@ NANO_CHEST_PORT=/dev/ttyUSB0
 # Camera
 CAMERA_DEVICE=/dev/camera_main   # preferred on Pi; accepts /dev path or numeric string
 # CAMERA_DEVICE_INDEX=0          # legacy fallback if CAMERA_DEVICE is blank
+# On macOS, leaving both blank now auto-detects the first working camera.
 
 # Feature flags
 ENABLE_OS_SHUTDOWN=false
@@ -353,6 +354,20 @@ CAMERA_DEVICE=/dev/camera_main
 
 `CAMERA_DEVICE` accepts either a `/dev/...` path or a numeric string like `0`.
 If it is blank, Rex falls back to the legacy `CAMERA_DEVICE_INDEX` setting.
+
+### Camera Device On macOS
+
+On Apple Silicon Macs, if both `CAMERA_DEVICE` and `CAMERA_DEVICE_INDEX` are
+left blank, Rex now uses `CAMERA_DEVICE=auto` behavior and probes a few
+AVFoundation camera indices until it finds one that actually returns frames.
+
+If you want to pin a specific device anyway, either of these still works:
+
+```env
+CAMERA_DEVICE=1
+# or
+CAMERA_DEVICE_INDEX=1
+```
 
 ## Running
 
@@ -429,4 +444,4 @@ journalctl -u djr3x -f
 - Ollama must be running before starting Rex: `ollama serve`
 - `requirements.txt` installs the MLX stack automatically on Apple Silicon
 - On macOS, install `libpng` and export `PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig` before building `dlib`
-- Camera index 0 = built-in FaceTime camera (or USB webcam if FaceTime is unavailable)
+- If camera ordering changes on macOS, leave `CAMERA_DEVICE` and `CAMERA_DEVICE_INDEX` blank to auto-detect the first working camera

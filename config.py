@@ -622,11 +622,14 @@ CHATTY_CURIOSITY_SETTLE_SECS: float = float(_optional("CHATTY_CURIOSITY_SETTLE_S
 # Vision — webcam capture
 # ---------------------------------------------------------------------------
 
-CAMERA_DEVICE_INDEX  = int(_optional("CAMERA_DEVICE_INDEX", "0"))
+CAMERA_DEVICE_INDEX_OVERRIDE = _optional_int("CAMERA_DEVICE_INDEX")
 _camera_device_override = _optional_device_source("CAMERA_DEVICE")
-CAMERA_DEVICE: int | str = (
-    _camera_device_override if _camera_device_override is not None else CAMERA_DEVICE_INDEX
-)
+if _camera_device_override is not None:
+    CAMERA_DEVICE: int | str = _camera_device_override
+elif CAMERA_DEVICE_INDEX_OVERRIDE is not None:
+    CAMERA_DEVICE = CAMERA_DEVICE_INDEX_OVERRIDE
+else:
+    CAMERA_DEVICE = "auto" if PLATFORM == "macos_silicon" else 0
 CAMERA_DEVICE_LABEL = str(CAMERA_DEVICE)
 CAMERA_FRAME_WIDTH   = int(_optional("CAMERA_FRAME_WIDTH", "1920"))
 CAMERA_FRAME_HEIGHT  = int(_optional("CAMERA_FRAME_HEIGHT", "1080"))
