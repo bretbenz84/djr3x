@@ -16,3 +16,6 @@ assets/face_debug/
 assets/models/djrex_xtts/model.pth
 assets/models/djrex_xtts/dataset.zip
 dataset/
+.claude/
+.VSCodeCounter
+voicetest.wav

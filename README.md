@@ -6,6 +6,10 @@ uses computer vision to greet and roast people, and remembers who you are.
 
 Raspberry Pi 4 builds send transcription, images, and text to OpenAI. Apple Silicon builds run transcription and LLM locally. Text to Speech can be switched between ElevenLabs, Piper, and a local XTTS voice in `.env` (XTTS is Apple Silicon only).
 
+It is not recommended to run local TTS such as piper from a Pi 4 as it slows things down. A Pi 5 can do it better, but ElevenLabs produces the best voice at a moddest cost of ~$22 a month.
+
+If you want a droid that does not use external paid services such as ChatGPT, Elevenlabs, you should run this on an apple silicon M1 or better, which can do local transcription, local LLM, and local text to speech. Otherwise if you want to use cheaper hardware, be prepared to pay for an external API to do these functions.
+
 ## Hardware
 
 | Component | Description |
