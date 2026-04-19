@@ -843,6 +843,10 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
 
     def start(self) -> None:
         """Warmup all subsystems. Call once before run()."""
+        log.info("StateMachine: warming up transcription before startup filler …")
+        self._transcriber.warmup()   # no-op for Whisper; kept for interface consistency
+        self._transcriber.calibrate_noise_floor()
+
         filler_line = random.choice([
             "Uh... hang on... startup routines are still rattling around in here...",
             "Um... almost ready... just waking up the rest of my circuits...",
@@ -878,9 +882,6 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
             log.info("StateMachine: startup filler audio did not begin before warmup")
 
         log.info("StateMachine: warming up subsystems …")
-
-        self._transcriber.warmup()   # no-op for Whisper; kept for interface consistency
-        self._transcriber.calibrate_noise_floor()
         self._llm.warmup()           # pre-loads Ollama model into GPU memory (no-op for cloud)
 
         def _finish_startup() -> None:
@@ -1369,7 +1370,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
                           If they answer, transition to ACTIVE (empty sentinel = skip
                           greeting, listen fresh).  If no answer, idle chime + IDLE.
           Unknown face  → ask name and enroll via _learn_new_person(), then idle
-                          chime + IDLE.
+                          chime + IDLE. If recognition misses but the tracker saw
+                          a face during capture, treat it as an unknown-face
+                          fallback and still ask for their name.
           No face / no recognition → idle chime + IDLE.
         """
         if self._face_triggered_greeting_on_cooldown("Face-triggered greeting"):
@@ -1381,11 +1384,12 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         # Capture frame — needed for both recognition and enrollment.
         frame: str | None = None
         if self._camera.is_available():
-            _pose = self._prepare_camera_pose()
+            _pose, _tracker_paused = self._prepare_camera_pose()
             frame = self._camera.capture_frame()
-            self._restore_servo_pose(_pose)
+            self._restore_servo_pose(_pose, _tracker_paused)
             if frame:
                 self._last_wake_frame = frame
+        tracker_face_visible = self._tracker_saw_face_recently(within_seconds=2.5)
 
         # Start face recognition in background so it runs during the clip.
         face_result: list = [("no_face", None)]
@@ -1482,6 +1486,7 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
 
         # --- No speech — route by face recognition result ---
         self._apply_active_led_theme()
+        treat_no_face_as_unknown = status == "no_face" and tracker_face_visible
 
         if result is not None:
             # Known person — ask about their plans just like after a normal wake.
@@ -1511,9 +1516,14 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
                 self._transition_to(State.ACTIVE)
                 return
 
-        elif status in ("no_match", "db_empty"):
+        elif status in ("no_match", "db_empty") or treat_no_face_as_unknown:
             # Unknown face — ask their name and enroll them.
-            log.info("Face-triggered greeting: no speech, unknown face — running enrollment")
+            if treat_no_face_as_unknown:
+                log.info(
+                    "Face-triggered greeting: no speech, recognizer missed face but tracker saw one recently — running enrollment fallback"
+                )
+            else:
+                log.info("Face-triggered greeting: no speech, unknown face — running enrollment")
             self._learn_new_person(frame)
             # _learn_new_person may set _shutdown_event (e.g. user says "shutdown").
             if self._shutdown_event.is_set():
@@ -1899,9 +1909,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
             if cmd is not None and cmd.action == "vision":
                 # Vision command — capture a fresh frame right now and send to LLM.
                 log.info("Vision command: %r%s", cmd.phrases[0], _elapsed)
-                _pose = self._prepare_camera_pose()
+                _pose, _tracker_paused = self._prepare_camera_pose()
                 frame = self._camera.capture_frame()
-                self._restore_servo_pose(_pose)
+                self._restore_servo_pose(_pose, _tracker_paused)
                 if frame:
                     log.debug("Camera: fresh frame captured for vision command (%d bytes b64)",
                               len(frame))
@@ -1917,9 +1927,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
                 # allowing fuzzy command matching or plain LLM fallback.
                 if vision_intent(text):
                     log.info("Vision intent detected — capturing frame%s", _elapsed)
-                    _pose = self._prepare_camera_pose()
+                    _pose, _tracker_paused = self._prepare_camera_pose()
                     frame = self._camera.capture_frame()
-                    self._restore_servo_pose(_pose)
+                    self._restore_servo_pose(_pose, _tracker_paused)
                     if frame:
                         log.debug("Camera: fresh frame captured for vision intent (%d bytes b64)",
                                   len(frame))
@@ -2247,9 +2257,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         # Capture frame first — used for both first and subsequent wakes.
         frame: str | None = None
         if self._camera.is_available():
-            _pose = self._prepare_camera_pose()
+            _pose, _tracker_paused = self._prepare_camera_pose()
             frame = self._camera.capture_frame()
-            self._restore_servo_pose(_pose)
+            self._restore_servo_pose(_pose, _tracker_paused)
             if frame:
                 self._last_wake_frame = frame
 
@@ -2272,7 +2282,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         """Case 1: first wake since boot — full face recognition + personalized greeting.
 
         Known person  → GPT-4o roast by name + appearance + visit count.
-        Unknown face  → GPT-4o appearance roast + enrollment flow.
+        Unknown face  → GPT-4o appearance roast + enrollment flow. If
+        recognition misses but the tracker saw a face during capture, treat it
+        as an unknown-face fallback.
         No face / no recognition → nothing (Hi There clip was already played).
         """
         if not (frame and self._face_recognizer.is_available()):
@@ -2280,6 +2292,7 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
 
         use_vision_greeting = self._should_use_vision_wake_greeting()
         log.info("Wake greeting: first wake vision greeting=%s", use_vision_greeting)
+        tracker_face_visible = self._tracker_saw_face_recently(within_seconds=2.5)
 
         _RECOGNITION_FILLER_LINES = (
             "Uh... hang on... hang on... I'm looking...",
@@ -2320,6 +2333,7 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         face_thread.join()
         self._wait_for_initial_wake_clip(initial_clip_done)
         status, result = face_result[0]
+        treat_no_face_as_unknown = status == "no_face" and tracker_face_visible
 
         if result is not None or status in ("no_match", "db_empty"):
             self._play_face_lock_line("Wake greeting: first wake")
@@ -2409,8 +2423,13 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
             return
 
         # ---- Unknown face ------------------------------------------------
-        if status in ("no_match", "db_empty"):
-            log.info("Wake greeting: first wake — unknown face, running appearance roast + enrollment")
+        if status in ("no_match", "db_empty") or treat_no_face_as_unknown:
+            if treat_no_face_as_unknown:
+                log.info(
+                    "Wake greeting: first wake — recognizer missed face but tracker saw one recently, running unknown-face fallback"
+                )
+            else:
+                log.info("Wake greeting: first wake — unknown face, running appearance roast + enrollment")
 
             _CANNED_TTS = (
                 "Oh great, you're here. The cantina just got significantly louder and marginally more interesting.",
@@ -2485,7 +2504,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         Runs face recognition silently (no filler phrases). Routes to:
           Case 2 — same person: 25% chance of brief remark, otherwise silent.
           Case 3 — different known person: GPT handoff comment.
-          Case 4 — unknown person: stranger snark + enrollment.
+          Case 4 — unknown person: stranger snark + enrollment. If recognition
+          misses but the tracker saw a face during capture, use the same
+          fallback.
           Case 5 — no face / no recognition: fully silent.
         """
         if not (frame and self._face_recognizer.is_available()):
@@ -2511,19 +2532,22 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         )
 
         # Silent recognition — no filler, no scanning commentary.
+        tracker_face_visible = self._tracker_saw_face_recently(within_seconds=2.5)
         status, result = self._face_recognizer.identify_with_status(
             frame, tolerance=config.FACE_RECOGNITION_TOLERANCE
         )
+        treat_no_face_as_unknown = status == "no_face" and tracker_face_visible
 
         if result is not None or status in ("no_match", "db_empty"):
             self._play_face_lock_line("Wake greeting: subsequent wake")
 
         if result is None:
-            if status in ("no_match", "db_empty"):
+            if status in ("no_match", "db_empty") or treat_no_face_as_unknown:
                 # Case 4: unknown person or empty DB — snark + enrollment
                 log.info(
-                    "Wake greeting: case 4 — unknown face/status=%s, running stranger snark + enrollment",
+                    "Wake greeting: case 4 — unknown face/status=%s tracker_face_visible=%s, running stranger snark + enrollment",
                     status,
+                    tracker_face_visible,
                 )
                 line = random.choice(_STRANGER_LINES)
                 servo_stop = self._begin_speech(emotion="excited")
@@ -3819,6 +3843,13 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         finally:
             self._end_speech(servo_stop)
 
+    def _tracker_saw_face_recently(self, within_seconds: float = 2.0) -> bool:
+        """Return True when the head tracker saw a face within the recent window."""
+        return bool(
+            self._head_tracker is not None
+            and self._head_tracker.face_recently_seen(within_seconds=within_seconds)
+        )
+
     def _learn_new_person(self, frame: str) -> None:
         """After greeting an unknown face, ask for their name and enroll them.
 
@@ -3918,9 +3949,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         # available immediately (no camera access inside the thread).
         enroll_frame: str | None = None
         if self._camera.is_available():
-            _pose = self._prepare_camera_pose()
+            _pose, _tracker_paused = self._prepare_camera_pose()
             enroll_frame = self._camera.capture_frame()
-            self._restore_servo_pose(_pose)
+            self._restore_servo_pose(_pose, _tracker_paused)
             if enroll_frame:
                 log.info("Enrollment: captured fresh frame (%d b64 bytes)", len(enroll_frame))
             else:
@@ -3957,9 +3988,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
 
                 if enc is None and self._camera.is_available():
                     log.info("Enrollment: both cached frames failed — capturing one final live frame")
-                    _pose = self._prepare_camera_pose()
+                    _pose, _tracker_paused = self._prepare_camera_pose()
                     final_f = self._camera.capture_frame()
-                    self._restore_servo_pose(_pose)
+                    self._restore_servo_pose(_pose, _tracker_paused)
                     if final_f:
                         log.info("Enrollment: final live frame captured (%d b64 bytes)", len(final_f))
                         enc = self._face_recognizer.encode_face(final_f, for_enrollment=True)
@@ -4690,9 +4721,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         else:
             # Unknown visitor path — capture a fresh frame and try to identify.
             if self._camera.is_available():
-                _pose = self._prepare_camera_pose()
+                _pose, _tracker_paused = self._prepare_camera_pose()
                 frame = self._camera.capture_frame()
-                self._restore_servo_pose(_pose)
+                self._restore_servo_pose(_pose, _tracker_paused)
             else:
                 frame = None
             if not frame:
@@ -5152,29 +5183,35 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
     # Camera pose helpers
     # ------------------------------------------------------------------
 
-    def _prepare_camera_pose(self) -> dict[int, int] | None:
-        """Open visor for a camera capture and wait for face to centre.
+    def _prepare_camera_pose(self) -> tuple[dict[int, int] | None, bool]:
+        """Open visor, align to the face, freeze motion, and settle before capture.
 
-        The head tracker continuously points neck (ch 0) and headtilt (ch 2) at
-        the face, so this method only opens the visor (ch 3) and then waits for
-        the tracker to confirm the face is centred before the caller grabs a
-        frame.
+        Capture order:
+          1. Open the visor so the camera view is unobstructed.
+          2. Wait for the head tracker to centre on the current face.
+          3. Pause tracker motion so the head stays still.
+          4. Wait an extra settle window before the caller grabs a frame.
 
-        Returns None — no servo restore is needed because the head tracker owns
-        neck/headtilt and the visor is left open for the next interaction.
-        Returns None also when servos are unavailable.
+        Returns ``(restore, tracker_paused)`` so the caller can resume the head
+        tracker after the capture completes. ``restore`` is currently always
+        None because the tracker owns neck/headtilt and the visor remains open.
         """
         if self._servos is None:
-            return None
+            return None, False
 
         self._servos.set_channel_speed(config.SERVO_VISOR, config.SERVO_DEFAULT_SPEED)
         self._servos.set_position(config.SERVO_VISOR, config.CAMERA_POSE_VISOR)
         time.sleep(config.CAMERA_POSE_SETTLE_SECS)
 
+        tracker_paused = False
         if self._head_tracker is not None:
             self._head_tracker.wait_for_center(timeout=2.0)
+            self._head_tracker.pause("camera capture settle")
+            tracker_paused = True
 
-        return None
+        time.sleep(config.CAMERA_CAPTURE_SETTLE_SECS)
+
+        return None, tracker_paused
 
     def _prepare_i_spy_camera_pose(self) -> dict[int, int] | None:
         """Turn dramatically left/right before an I Spy capture."""
@@ -5200,16 +5237,26 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         time.sleep(config.I_SPY_POSE_SETTLE_SECS)
         return restore
 
-    def _restore_servo_pose(self, restore: dict[int, int] | None) -> None:
+    def _restore_servo_pose(
+        self,
+        restore: dict[int, int] | None,
+        tracker_paused: bool = False,
+    ) -> None:
         """Return capture-pose servos to positions saved by _prepare_camera_pose().
 
         Safe to call even when servos are unavailable or restore is None
         (e.g. when _prepare_camera_pose() returned None because servos were off).
         """
         if self._servos is None or not restore:
+            if self._head_tracker is not None and tracker_paused:
+                self._head_tracker.resume("camera capture complete")
             return
-        for channel, position in restore.items():
-            self._servos.set_position(channel, position)
+        try:
+            for channel, position in restore.items():
+                self._servos.set_position(channel, position)
+        finally:
+            if self._head_tracker is not None and tracker_paused:
+                self._head_tracker.resume("camera capture complete")
 
     # ------------------------------------------------------------------
     # Recall-name helper
@@ -5255,9 +5302,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         # background so it runs concurrently with the filler TTS rather than
         # adding to the silence after it.
         if self._camera.is_available():
-            _pose = self._prepare_camera_pose()
+            _pose, _tracker_paused = self._prepare_camera_pose()
             frame = self._camera.capture_frame()
-            self._restore_servo_pose(_pose)
+            self._restore_servo_pose(_pose, _tracker_paused)
         else:
             frame = None
 
@@ -5356,9 +5403,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
 
         # Enroll — try a fresh frame first, fall back to the frame captured earlier.
         if self._camera.is_available():
-            _pose = self._prepare_camera_pose()
+            _pose, _tracker_paused = self._prepare_camera_pose()
             enroll_frame = self._camera.capture_frame()
-            self._restore_servo_pose(_pose)
+            self._restore_servo_pose(_pose, _tracker_paused)
         else:
             enroll_frame = None
         enc = None
@@ -5416,9 +5463,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
             return None, None, None
 
         if self._camera.is_available():
-            _pose = self._prepare_camera_pose()
+            _pose, _tracker_paused = self._prepare_camera_pose()
             frame = self._camera.capture_frame()
-            self._restore_servo_pose(_pose)
+            self._restore_servo_pose(_pose, _tracker_paused)
         else:
             frame = None
 

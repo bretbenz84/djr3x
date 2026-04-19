@@ -651,6 +651,7 @@ CAMERA_POSE_TILT:  int = int(_optional("CAMERA_POSE_TILT",  str(SERVO_CHANNELS[2
 
 # How long (seconds) to wait after moving to the camera pose before capturing.
 CAMERA_POSE_SETTLE_SECS: float = float(_optional("CAMERA_POSE_SETTLE_SECS", "1.8"))
+CAMERA_CAPTURE_SETTLE_SECS: float = float(_optional("CAMERA_CAPTURE_SETTLE_SECS", "2.0"))
 
 # I Spy camera pose — more dramatic sideways glance before a capture.
 I_SPY_POSE_NECK_LEFT: int = int(_optional("I_SPY_POSE_NECK_LEFT", str(SERVO_CHANNELS[0]["min"] + 700)))
