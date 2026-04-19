@@ -249,7 +249,6 @@ class _BluetoothAudioManager:
         self._cached_output_index: int | None = None
         self._cached_output_name: str = ""
         self._cached_target_mac: str = ""
-        self._cached_at: float = 0.0
 
         if self._enabled:
             log.info(
@@ -279,7 +278,7 @@ class _BluetoothAudioManager:
 
     def _resolve_output_device(self) -> int | None:
         cached = self._cached_output_index
-        if cached is not None and (time.monotonic() - self._cached_at) <= 5.0:
+        if cached is not None:
             if self._device_index_exists(cached):
                 return cached
             self._clear_cache()
@@ -316,7 +315,6 @@ class _BluetoothAudioManager:
         self._cached_output_index = index
         self._cached_output_name = name
         self._cached_target_mac = target.mac
-        self._cached_at = time.monotonic()
         log.info(
             "AudioPlayer: using Bluetooth output device %d (%s) for %s",
             index,
@@ -329,7 +327,6 @@ class _BluetoothAudioManager:
         self._cached_output_index = None
         self._cached_output_name = ""
         self._cached_target_mac = ""
-        self._cached_at = 0.0
 
     def _device_index_exists(self, index: int) -> bool:
         try:
@@ -484,6 +481,8 @@ class AudioPlayer:
         self._rms: float = 0.0           # smoothed 0.0–255.0; read by leds.py
         self._bluetooth_audio = _BluetoothAudioManager()
         self._speech_stream_sample_rate: int = SPEECH_SAMPLE_RATE
+        self._bluetooth_keepalive_stop = threading.Event()
+        self._bluetooth_keepalive_thread: threading.Thread | None = None
 
         # Fired when the first audio samples of a new speech segment actually
         # reach the output device.  Used by LEDController.start_mouth() so the
@@ -516,6 +515,14 @@ class AudioPlayer:
         self._music_thread: threading.Thread | None = None
         self._music_stop = threading.Event()
         self._music_volume: float = 1.0   # software fade multiplier (0.0–1.0)
+
+        if self._bluetooth_audio.enabled:
+            self._bluetooth_keepalive_thread = threading.Thread(
+                target=self._bluetooth_keepalive_worker,
+                daemon=True,
+                name="djr3x-bt-keepalive",
+            )
+            self._bluetooth_keepalive_thread.start()
 
     # ------------------------------------------------------------------
     # Speech — streaming TTS interface (called by synthesizer.py)
@@ -734,6 +741,67 @@ class AudioPlayer:
         self.stop_music()
         self._speech_stop.set()
         self._speech_thread.join(timeout=2.0)
+        self._bluetooth_keepalive_stop.set()
+        if self._bluetooth_keepalive_thread is not None:
+            self._bluetooth_keepalive_thread.join(timeout=2.0)
+
+    def _bluetooth_keepalive_worker(self) -> None:
+        """Hold a silent Bluetooth output stream open for the process lifetime.
+
+        PipeWire/Bluetooth sink discovery can lag behind the initial
+        `bluetoothctl` connection, and some receivers are more stable when an
+        output stream remains attached. This worker retries until a compatible
+        Bluetooth output appears, then keeps a silent stream open until
+        shutdown.
+        """
+        retry_delay = 2.0
+        warned_waiting = False
+
+        while not self._bluetooth_keepalive_stop.is_set():
+            try:
+                with self._bluetooth_audio._lock:
+                    bt_device = self._bluetooth_audio._resolve_output_device()
+                if bt_device is None:
+                    raise sd.PortAudioError("Bluetooth output device not ready yet")
+                device, stream_sr, label = _resolve_output_stream_settings_for_devices(
+                    [bt_device],
+                    requested_samplerate=SPEECH_SAMPLE_RATE,
+                    channels=config.AUDIO_OUTPUT_CHANNELS,
+                    dtype="int16",
+                )
+                if warned_waiting:
+                    log.info("AudioPlayer: Bluetooth keepalive attached to %s", label)
+                    warned_waiting = False
+
+                def _callback(outdata: np.ndarray, _frames: int, _time, status) -> None:
+                    if status:
+                        log.warning("AudioPlayer Bluetooth keepalive status: %s", status)
+                    outdata[:] = 0
+                    if self._bluetooth_keepalive_stop.is_set():
+                        raise sd.CallbackStop()
+
+                finished = threading.Event()
+                with sd.OutputStream(
+                    device=device,
+                    samplerate=stream_sr,
+                    channels=config.AUDIO_OUTPUT_CHANNELS,
+                    dtype="int16",
+                    blocksize=config.SPEECH_OUTPUT_BLOCKSIZE,
+                    latency=config.SPEECH_OUTPUT_LATENCY,
+                    callback=_callback,
+                    finished_callback=finished.set,
+                ):
+                    while not self._bluetooth_keepalive_stop.wait(1.0):
+                        pass
+                    finished.wait(timeout=1.0)
+            except Exception as exc:
+                if not warned_waiting:
+                    log.info(
+                        "AudioPlayer: waiting for Bluetooth output device to appear for keepalive: %s",
+                        exc,
+                    )
+                    warned_waiting = True
+                self._bluetooth_keepalive_stop.wait(retry_delay)
 
     # ------------------------------------------------------------------
     # Internal — speech worker thread
@@ -1070,10 +1138,25 @@ def _resolve_output_stream_settings(
     channels: int,
     dtype: str,
 ) -> tuple[int | None, int, str]:
+    return _resolve_output_stream_settings_for_devices(
+        _output_devices_from_player(player),
+        requested_samplerate=requested_samplerate,
+        channels=channels,
+        dtype=dtype,
+    )
+
+
+def _resolve_output_stream_settings_for_devices(
+    devices_to_try: list[int | None],
+    *,
+    requested_samplerate: int,
+    channels: int,
+    dtype: str,
+) -> tuple[int | None, int, str]:
     last_exc: sd.PortAudioError | None = None
     seen_devices: set[int | None] = set()
 
-    for device_choice in _output_devices_from_player(player):
+    for device_choice in devices_to_try:
         for device in _expand_output_device_choice(device_choice):
             if device in seen_devices:
                 continue
