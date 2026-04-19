@@ -1,8 +1,22 @@
-# Raspberry Pi install wrapper.
+# Raspberry Pi runtime dependencies for DJ-R3X.
 #
-# The base requirements are shared, but Pi benefits from piwheels for faster
-# binary installs of packages like dlib.
+# Keep this file self-contained so `pip install -r requirements-raspberry-pi.txt`
+# installs every package needed on the Pi without relying on a second file.
+# We still use piwheels for faster binary installs of packages like dlib.
 
 --extra-index-url https://www.piwheels.org/simple
+
+elevenlabs==2.41.0
+holidays==0.94
+numpy==1.26.4
+openai==2.30.0
+opencv-python==4.10.0.84
+openwakeword==0.4.0
+piper-tts==1.4.2
+pyserial==3.5
+python-dotenv==1.2.2
+requests==2.33.1
+scipy==1.17.1
+sounddevice==0.5.5
+soundfile==0.13.1
 dlib==20.0.1
--r requirements.txt
