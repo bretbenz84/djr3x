@@ -1020,6 +1020,17 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         """
         _music_path = config.STARTUP_MUSIC_PATH
         if _music_path.exists():
+            if config.AUDIO_OUTPUT_MODE == "bluetooth":
+                timeout = max(
+                    1.0,
+                    config.AUDIO_BLUETOOTH_CONNECT_TIMEOUT,
+                    config.AUDIO_BLUETOOTH_DISCOVERY_TIMEOUT,
+                )
+                log.info("Waiting up to %.1f s for Bluetooth audio before startup music …", timeout)
+                if not self._player.wait_for_bluetooth_output(timeout=timeout):
+                    log.warning(
+                        "Bluetooth audio was not ready before startup music; continuing with normal playback fallback"
+                    )
             log.info("Playing startup music (%s) …", _music_path)
             self._player.play_music(_music_path, loop=False)
         else:

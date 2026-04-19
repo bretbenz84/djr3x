@@ -483,6 +483,7 @@ class AudioPlayer:
         self._speech_stream_sample_rate: int = SPEECH_SAMPLE_RATE
         self._bluetooth_keepalive_stop = threading.Event()
         self._bluetooth_keepalive_thread: threading.Thread | None = None
+        self._bluetooth_output_ready = threading.Event()
 
         # Fired when the first audio samples of a new speech segment actually
         # reach the output device.  Used by LEDController.start_mouth() so the
@@ -741,9 +742,19 @@ class AudioPlayer:
         self.stop_music()
         self._speech_stop.set()
         self._speech_thread.join(timeout=2.0)
+        self._bluetooth_output_ready.clear()
         self._bluetooth_keepalive_stop.set()
         if self._bluetooth_keepalive_thread is not None:
             self._bluetooth_keepalive_thread.join(timeout=2.0)
+
+    def wait_for_bluetooth_output(self, timeout: float) -> bool:
+        """Wait until a Bluetooth output device is live for this process.
+
+        Returns True immediately when Bluetooth mode is disabled.
+        """
+        if not self._bluetooth_audio.enabled:
+            return True
+        return self._bluetooth_output_ready.wait(timeout=timeout)
 
     def _bluetooth_keepalive_worker(self) -> None:
         """Hold a silent Bluetooth output stream open for the process lifetime.
@@ -769,6 +780,7 @@ class AudioPlayer:
                     channels=config.AUDIO_OUTPUT_CHANNELS,
                     dtype="int16",
                 )
+                self._bluetooth_output_ready.set()
                 if warned_waiting:
                     log.info("AudioPlayer: Bluetooth keepalive attached to %s", label)
                     warned_waiting = False
@@ -795,6 +807,7 @@ class AudioPlayer:
                         pass
                     finished.wait(timeout=1.0)
             except Exception as exc:
+                self._bluetooth_output_ready.clear()
                 if not warned_waiting:
                     log.info(
                         "AudioPlayer: waiting for Bluetooth output device to appear for keepalive: %s",
@@ -844,6 +857,10 @@ class AudioPlayer:
                     self._droid_effect = _DroidVoiceEffect(stream_sr)
                 self._speech_buf = _prepare_speech_chunk_for_output(item, stream_sr)
                 self._speech_buf_pos = 0
+                preroll_frames_remaining = max(
+                    0,
+                    int(config.AUDIO_OUTPUT_PREROLL_SECONDS * stream_sr),
+                )
 
                 finished = threading.Event()
                 with sd.OutputStream(
@@ -856,6 +873,12 @@ class AudioPlayer:
                     callback=self._speech_callback,
                     finished_callback=finished.set,
                 ):
+                    if preroll_frames_remaining > 0:
+                        log.info(
+                            "AudioPlayer: applying %.0f ms speech output preroll",
+                            (preroll_frames_remaining / stream_sr) * 1000.0,
+                        )
+                    self._speech_preroll_frames_remaining = preroll_frames_remaining
                     finished.wait()
             except Exception:
                 log.exception("AudioPlayer: speech stream failed")
@@ -885,6 +908,16 @@ class AudioPlayer:
         filled = 0
         block_apply_droid_effect = False
         stop_stream = False
+
+        preroll_remaining = getattr(self, "_speech_preroll_frames_remaining", 0)
+        if preroll_remaining > 0:
+            take_silence = min(frames, preroll_remaining)
+            self._speech_preroll_frames_remaining = preroll_remaining - take_silence
+            if take_silence >= frames:
+                outdata[:] = 0
+                self._rms = 0.0
+                return
+            filled = take_silence
 
         while filled < frames:
             # refill internal chunk buffer from queue when exhausted
@@ -1005,9 +1038,14 @@ class AudioPlayer:
                 if stream_sr != sr
                 else data
             )
+            preroll_frames_remaining = max(
+                0,
+                int(config.AUDIO_OUTPUT_PREROLL_SECONDS * stream_sr),
+            )
 
             def _callback(outdata: np.ndarray, frames: int, _t, _s) -> None:
                 nonlocal pos
+                nonlocal preroll_frames_remaining
                 if _s and not self._music_status_logged:
                     log.warning("AudioPlayer music callback status: %s", _s)
                     self._music_status_logged = True
@@ -1015,15 +1053,25 @@ class AudioPlayer:
                     outdata[:] = 0.0
                     raise sd.CallbackStop()
 
+                if preroll_frames_remaining > 0:
+                    take_silence = min(frames, preroll_frames_remaining)
+                    outdata[:take_silence] = 0.0
+                    preroll_frames_remaining -= take_silence
+                    if take_silence >= frames:
+                        return
+                    out_offset = take_silence
+                else:
+                    out_offset = 0
+
                 remaining = len(stream_data) - pos
-                take = min(frames, remaining)
-                outdata[:take] = (
+                take = min(frames - out_offset, remaining)
+                outdata[out_offset : out_offset + take] = (
                     stream_data[pos : pos + take]
                     * config.AUDIO_VOLUME
                     * self._music_volume
                 )
-                if take < frames:
-                    outdata[take:] = 0.0
+                if out_offset + take < frames:
+                    outdata[out_offset + take :] = 0.0
                 pos += take
 
                 if pos >= len(stream_data):
@@ -1039,6 +1087,11 @@ class AudioPlayer:
                 callback=_callback,
                 finished_callback=finished.set,
             ):
+                if preroll_frames_remaining > 0:
+                    log.info(
+                        "AudioPlayer: applying %.0f ms music output preroll",
+                        (preroll_frames_remaining / stream_sr) * 1000.0,
+                    )
                 finished.wait()
 
             self._music_status_logged = False

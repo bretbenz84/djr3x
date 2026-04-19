@@ -304,6 +304,12 @@ AUDIO_BLUETOOTH_DISCOVERY_TIMEOUT = float(
 AUDIO_BLUETOOTH_PREFER_CONNECTED: bool = _optional(
     "AUDIO_BLUETOOTH_PREFER_CONNECTED", "true"
 ).lower() not in ("0", "false", "no")
+AUDIO_OUTPUT_PREROLL_SECONDS = float(
+    _optional(
+        "AUDIO_OUTPUT_PREROLL_SECONDS",
+        "0.12" if AUDIO_OUTPUT_MODE == "bluetooth" else "0.0",
+    )
+)
 
 # Software volume: 0.0 (mute) – 1.0 (full). ReSpeaker Lite has no hardware
 # mixer, so all output paths scale samples by this factor before writing.
