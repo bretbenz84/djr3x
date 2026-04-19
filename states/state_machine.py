@@ -700,6 +700,11 @@ class State(enum.Enum):
     SHUTDOWN = "shutdown"
 
 
+def _matches_phrase(text: str, phrases: tuple[str, ...], cutoff: float = 0.80) -> bool:
+    """Return True if *text* fuzzy-matches any entry in *phrases* at or above *cutoff*."""
+    return bool(difflib.get_close_matches(text, phrases, n=1, cutoff=cutoff))
+
+
 # ---------------------------------------------------------------------------
 # StateMachine
 # ---------------------------------------------------------------------------
