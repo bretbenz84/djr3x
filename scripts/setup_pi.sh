@@ -24,6 +24,9 @@ if [[ ${#APT_PACKAGES[@]} -eq 0 ]]; then
   exit 1
 fi
 
+UDEV_RULES_SRC="$ROOT_DIR/config/99-djr3x.rules"
+UDEV_RULES_DEST="/etc/udev/rules.d/99-djr3x.rules"
+
 echo "==> Updating apt package lists"
 sudo apt update
 
@@ -44,6 +47,17 @@ python -m pip install --upgrade pip setuptools wheel
 
 echo "==> Installing Python requirements"
 pip install -r "$PIP_REQUIREMENTS_FILE"
+
+if [[ -f "$UDEV_RULES_SRC" ]]; then
+  echo "==> Installing udev rules ($UDEV_RULES_DEST)"
+  sudo cp "$UDEV_RULES_SRC" "$UDEV_RULES_DEST"
+  sudo udevadm control --reload-rules
+  sudo udevadm trigger --subsystem-match=tty
+  sudo udevadm trigger --subsystem-match=video4linux
+  echo "    udev rules installed — /dev/maestro, /dev/arduino_uno, /dev/arduino_nano, /dev/camera_main"
+else
+  echo "WARNING: udev rules source not found at $UDEV_RULES_SRC — skipping"
+fi
 
 echo
 echo "Pi setup complete."

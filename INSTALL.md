@@ -31,7 +31,7 @@ cp .env.example .env
 ```
 
 ## Hardware
-- Raspberry Pi 4
+- Raspberry Pi 4 or 5
 - ReSpeaker Lite USB audio (or similar USB audio device)
 - Logitech C920 webcam (or similar for vision)
 - Pololu Maestro Mini for servos

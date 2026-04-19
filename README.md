@@ -16,8 +16,8 @@ Raspberry Pi 5s do not have an audio jack, so you will need an amp with bluetoot
 
 | Component | Description |
 |-----------|-------------|
-| Raspberry Pi 4 | Main controller |
-| Pololu Maestro Mini 18 | Servo controller via USB serial (/dev/ttyACM0) |
+| Raspberry Pi 4 or 5 | Main controller |
+| Pololu Maestro Mini 18 | Servo controller via USB serial (`/dev/maestro` udev symlink) |
 | Arduino Uno | Head LED controller — mouth PCB + eye LEDs (/dev/ttyACM2) |
 | Arduino Nano | Chest light panel controller (/dev/ttyUSB0) |
 | ReSpeaker Lite | USB microphone array for wake word and transcription |
@@ -296,7 +296,7 @@ WAKE_WORD_MODEL_4=assets/models/Yo_robot.onnx
 WAKE_WORD_THRESHOLD=0.60
 
 # Hardware ports (leave blank to skip gracefully)
-MAESTRO_PORT=/dev/ttyACM0
+MAESTRO_PORT=/dev/maestro
 NANO_HEAD_PORT=/dev/ttyACM2
 NANO_CHEST_PORT=/dev/ttyUSB0
 
@@ -429,7 +429,7 @@ journalctl -u djr3x -f
 ### Pending
 - [ ] Head tracking with ELP camera (face position → neck servo)
 - [ ] Conversation memory per person (per-person GPT summary in SQLite)
-- [ ] udev rules for fixed USB device names on Pi
+- [x] udev rules for fixed USB device names on Pi
 - [ ] Dance mode (beat-synced servo sequences)
 - [ ] Mecanum wheel base (future)
 - [x] Local TTS via Piper and Apple Silicon XTTS toggle
@@ -439,7 +439,7 @@ journalctl -u djr3x -f
 ### Raspberry Pi
 - Audio via PipeWire on Debian Trixie — set `AUDIO_INPUT_DEVICE=3` for ReSpeaker Lite
 - dlib installs from piwheels as a prebuilt wheel — no compilation needed
-- Serial ports: Maestro=`/dev/ttyACM0`, Head Nano=`/dev/ttyACM2`, Chest Nano=`/dev/ttyUSB0`
+- Serial ports use udev symlinks: Maestro=`/dev/maestro`, Head Nano=`/dev/arduino_uno`, Chest Nano=`/dev/arduino_nano` — installed by `setup_pi.sh`
 - Prefer `CAMERA_DEVICE=/dev/camera_main` (or another udev symlink) over a changing camera index
 
 ### macOS (Apple Silicon)
