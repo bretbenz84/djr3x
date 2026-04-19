@@ -958,7 +958,10 @@ class StateMachine:
                 self._state in (State.IDLE, State.QUIET, State.ACTIVE),
                 reason="startup",
             )
-            log.info("StateMachine: Head tracking  — CONNECTED (shared camera)")
+            if self._camera.is_available():
+                log.info("StateMachine: Head tracking  — CONNECTED (shared camera)")
+            else:
+                log.info("StateMachine: Head tracking  — DISABLED (camera unavailable)")
         elif not config.HEAD_TRACKING_ENABLED:
             log.info("StateMachine: Head tracking  — DISABLED")
         else:

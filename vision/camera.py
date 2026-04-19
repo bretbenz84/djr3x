@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import threading
 import time
 from typing import Optional
@@ -36,13 +37,32 @@ import config
 log = logging.getLogger(__name__)
 
 
+def _resolved_device_sources(source: str) -> list[tuple[str, str]]:
+    """Return `/dev` device candidates, preferring the real node over symlinks."""
+    candidates: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _add(path: str, label: str) -> None:
+        if path in seen:
+            return
+        seen.add(path)
+        candidates.append((path, label))
+
+    resolved = os.path.realpath(source)
+    if resolved.startswith("/dev/") and resolved != source:
+        _add(resolved, f"{source} -> {resolved}")
+    _add(source, source)
+    return candidates
+
+
 def _open_capture(source: int | str) -> cv2.VideoCapture:
     """Open a camera by numeric index or stable /dev path."""
     if isinstance(source, str) and source.startswith("/dev/"):
-        cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
-        if cap.isOpened():
-            return cap
-        cap.release()
+        for candidate, _label in _resolved_device_sources(source):
+            cap = cv2.VideoCapture(candidate, cv2.CAP_V4L2)
+            if cap.isOpened():
+                return cap
+            cap.release()
     if config.PLATFORM == "macos_silicon":
         cap = cv2.VideoCapture(source, cv2.CAP_AVFOUNDATION)
         if cap.isOpened():
@@ -58,6 +78,8 @@ def _candidate_sources(source: int | str) -> list[tuple[int | str, str]]:
         # Continuity Camera / USB webcams appear, so probe a few indices and
         # keep the first device that actually delivers frames.
         return [(idx, f"auto[{idx}]") for idx in range(6)]
+    if isinstance(source, str) and source.startswith("/dev/"):
+        return _resolved_device_sources(source)
     return [(source, str(source))]
 
 
