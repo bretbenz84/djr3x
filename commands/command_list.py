@@ -1212,8 +1212,7 @@ COMMANDS: list[Command] = [
     ),
 
     Command(
-        phrases=["power down", "turn off", "power off",
-                 "goodbye forever", "power it all down"],
+        phrases=["power down"],
         response=[
             (
                 "Full power-down initiated. It has been an honour — a low bar, but still an honour. "
