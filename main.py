@@ -142,16 +142,12 @@ def _print_banner(status: dict) -> None:
 
 def _register_signals(sm: StateMachine) -> None:
     """Route SIGINT (Ctrl-C) and SIGTERM to a clean state machine shutdown."""
-    interrupt_count = 0
-
     def _handler(signum: int, _frame) -> None:
-        nonlocal interrupt_count
         name = signal.Signals(signum).name
-        interrupt_count += 1
-        if interrupt_count > 1 and signum == signal.SIGINT:
-            log.warning("Second SIGINT received — forcing immediate exit")
-            raise KeyboardInterrupt
-        log.info("Signal %s received — requesting shutdown", name)
+        if sm.shutdown_requested:
+            log.info("Signal %s received again — shutdown already in progress", name)
+        else:
+            log.info("Signal %s received — requesting shutdown", name)
         sm.request_shutdown()
 
     signal.signal(signal.SIGINT,  _handler)

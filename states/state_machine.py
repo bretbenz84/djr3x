@@ -758,6 +758,7 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         self._face_wake_event = threading.Event()  # set by _on_face_appear when in IDLE
         self._shutdown_event = threading.Event()
         self._os_shutdown_requested: bool = False  # True only for voice/button shutdown
+        self._external_shutdown_requested: bool = False  # True for SIGINT/SIGTERM/dev stop requests
         self._pipeline_t0: float = 0.0          # monotonic time of last wake word detection
         self._last_speech_end_at: float = 0.0   # used to avoid self-transcribing prompt tail
         self._last_face_triggered_greeting_at: float = 0.0
@@ -979,8 +980,11 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         """Thread-safe: schedule a transition to SHUTDOWN from any thread
         (e.g. a SIGINT handler in main.py)."""
         log.info("StateMachine: shutdown requested externally")
+        self._external_shutdown_requested = True
+        self._os_shutdown_requested = False
         self._shutdown_event.set()
         self._wake_event.set()   # unblock _run_idle() / _run_quiet() if waiting
+        self._face_wake_event.clear()
         threading.Thread(
             target=self._interrupt_for_shutdown,
             daemon=True,
@@ -1474,6 +1478,10 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         else:
             log.warning("Face-triggered greeting: 'Hi There.mp3' not found — skipping clip")
 
+        if self._shutdown_event.is_set():
+            log.info("Face-triggered greeting: shutdown requested after clip — aborting")
+            return
+
         # Ensure recognition is done before we greet or listen.
         if face_thread is not None:
             face_thread.join(timeout=5.0)
@@ -1481,6 +1489,10 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
 
         if result is not None or status in ("no_match", "db_empty"):
             self._play_face_lock_line("Face-triggered greeting")
+
+        if self._shutdown_event.is_set():
+            log.info("Face-triggered greeting: shutdown requested after recognition — aborting")
+            return
 
         # If we recognised someone, speak a casual name-based greeting before
         # opening the mic — no LLM, just a canned phrase chosen at random.
@@ -1511,6 +1523,10 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
                     chance_override=config.OPINION_SHORT_WAKE_CHANCE,
                 )
 
+        if self._shutdown_event.is_set():
+            log.info("Face-triggered greeting: shutdown requested before listen — aborting")
+            return
+
         # Listen for an initial response.
         self._apply_listening_led_theme()
         self._wake_word.pause()
@@ -1526,6 +1542,10 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
             log.exception("Face-triggered greeting: transcription error")
         finally:
             self._wake_word.resume()
+
+        if self._shutdown_event.is_set():
+            log.info("Face-triggered greeting: shutdown requested after listen — aborting")
+            return
 
         if text:
             # User responded immediately — hand off to _run_active() with the
@@ -1567,6 +1587,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
                 self._pipeline_t0 = time.monotonic()
                 self._transition_to(State.ACTIVE)
                 return
+            if self._shutdown_event.is_set():
+                log.info("Face-triggered greeting: shutdown requested during known-person prompt — aborting")
+                return
 
         elif status in ("no_match", "db_empty") or treat_no_face_as_unknown:
             # Unknown face — ask their name and enroll them.
@@ -1582,6 +1605,9 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
                 return
 
         # Fall through: no face, unanswered plan prompt, or enrollment complete.
+        if self._shutdown_event.is_set():
+            log.info("Face-triggered greeting: shutdown requested before idle chime — aborting")
+            return
         log.info("Face-triggered greeting: returning to IDLE with chime")
         self._play_return_to_idle_chime()
         self._apply_idle_led_theme()
@@ -2042,21 +2068,24 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         """Speak a goodbye line, play shutdown animation, home hardware, then halt the OS."""
         log.info("→ SHUTDOWN")
 
-        # Speak a farewell line before the animation — idle thread still running
-        # so speech-reactive servo movement works normally.
-        phrase = random.choice(_SHUTDOWN_PHRASES)
-        log.info("Shutdown speech: %r", phrase)
-        servo_stop = None
-        try:
-            servo_stop = self._begin_speech(emotion="neutral")
-            self._synthesizer.speak(phrase)
-        except Exception:
-            log.exception("Shutdown speech: TTS error — continuing to shutdown")
-        finally:
-            if servo_stop is not None:
-                self._end_speech(servo_stop)
-            else:
-                self._wake_word.suppressed = False
+        if self._external_shutdown_requested:
+            log.info("Shutdown requested externally — skipping farewell speech")
+        else:
+            # Speak a farewell line before the animation — idle thread still running
+            # so speech-reactive servo movement works normally.
+            phrase = random.choice(_SHUTDOWN_PHRASES)
+            log.info("Shutdown speech: %r", phrase)
+            servo_stop = None
+            try:
+                servo_stop = self._begin_speech(emotion="neutral")
+                self._synthesizer.speak(phrase)
+            except Exception:
+                log.exception("Shutdown speech: TTS error — continuing to shutdown")
+            finally:
+                if servo_stop is not None:
+                    self._end_speech(servo_stop)
+                else:
+                    self._wake_word.suppressed = False
 
         # Stop servo idle thread before the animation so arm channels are free.
         if self._servos is not None:
@@ -2069,11 +2098,13 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         # Start shutdown music and servo animation concurrently, then wait for
         # both to finish before tearing down hardware.
         _shutdown_music_path = config.SHUTDOWN_MUSIC_PATH
-        if _shutdown_music_path.exists():
+        if not self._external_shutdown_requested and _shutdown_music_path.exists():
             log.info("Playing shutdown music (%s) …", _shutdown_music_path)
             self._player.play_music(_shutdown_music_path, loop=False)
-        else:
+        elif not self._external_shutdown_requested:
             log.warning("Shutdown music not found at %s — skipping.", _shutdown_music_path)
+        else:
+            log.info("External shutdown — skipping shutdown music and running servo shutdown pose immediately")
 
         self._animations.play_shutdown()   # non-blocking; runs in daemon thread
 
@@ -2081,7 +2112,7 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         if not anim_done:
             log.warning("Shutdown animation timed out — continuing.")
 
-        if _shutdown_music_path.exists():
+        if not self._external_shutdown_requested and _shutdown_music_path.exists():
             music_done = self._player.wait_for_music(timeout=60.0)
             if not music_done:
                 log.warning("Shutdown music timed out — continuing.")
@@ -2096,11 +2127,15 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         # Halt the OS only when explicitly requested (voice command / physical
         # button) AND the production flag is enabled.  Ctrl-C (SIGINT) does
         # NOT set _os_shutdown_requested, so development exits are safe.
-        if self._os_shutdown_requested and config.ENABLE_OS_SHUTDOWN:
+        if (
+            self._os_shutdown_requested
+            and not self._external_shutdown_requested
+            and config.ENABLE_OS_SHUTDOWN
+        ):
             log.info("StateMachine: halting OS — sudo shutdown -h now")
             os.system("sudo shutdown -h now")
         else:
-            if not self._os_shutdown_requested:
+            if self._external_shutdown_requested or not self._os_shutdown_requested:
                 log.info("StateMachine: clean exit (signal/dev) — skipping OS shutdown")
             else:
                 log.info("StateMachine: ENABLE_OS_SHUTDOWN=False — skipping OS shutdown")
@@ -4589,12 +4624,14 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         elif action == "program_shutdown":
             # Stop the Python program cleanly — no OS halt.
             # _os_shutdown_requested stays False so sudo shutdown is skipped.
+            self._external_shutdown_requested = False
             log.info("Program shutdown requested by voice command")
             return State.SHUTDOWN
 
         elif action == "os_shutdown":
             # Full hardware power-down — halts the Pi OS after shutdown sequence.
             # Respects ENABLE_OS_SHUTDOWN safety flag.
+            self._external_shutdown_requested = False
             log.info("OS shutdown requested by voice command")
             self._os_shutdown_requested = True
             return State.SHUTDOWN
