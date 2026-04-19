@@ -77,6 +77,7 @@ from vision.face_recognizer import FaceRecognizer
 
 from ._dialog_utils import (
     _extract_name,
+    _FACE_LOCK_LINES,
     _is_name_refusal,
     _NAME_REFUSAL_RESPONSES,
     _pick_no_repeat,

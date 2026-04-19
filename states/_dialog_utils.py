@@ -96,6 +96,18 @@ _UNKNOWN_FACE_LINES: tuple[str, ...] = (
     "You are not most of them. Yet. What is your name?",
 )
 
+# Short lines spoken immediately after face lock is acquired.
+_FACE_LOCK_LINES: tuple[str, ...] = (
+    "Got you.",
+    "Target acquired.",
+    "Locked on.",
+    "There you are.",
+    "I see you.",
+    "Face confirmed.",
+    "Oh, I see you.",
+    "Tracking established.",
+)
+
 # ---------------------------------------------------------------------------
 # No-repeat line picker
 # ---------------------------------------------------------------------------
