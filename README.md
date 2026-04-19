@@ -10,6 +10,8 @@ It is not recommended to run local TTS such as piper from a Pi 4 as it slows thi
 
 If you want a droid that does not use external paid services such as ChatGPT, Elevenlabs, you should run this on an apple silicon M1 or better, which can do local transcription, local LLM, and local text to speech. Otherwise if you want to use cheaper hardware, be prepared to pay for an external API to do these functions.
 
+Raspberry Pi 5s do not have an audio jack, so you will need an amp with bluetooth for that platform.
+
 ## Hardware
 
 | Component | Description |
