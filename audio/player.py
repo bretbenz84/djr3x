@@ -249,6 +249,8 @@ class _BluetoothAudioManager:
         self._cached_output_index: int | None = None
         self._cached_output_name: str = ""
         self._cached_target_mac: str = ""
+        self._default_sink_name: str = ""
+        self._default_sink_target_mac: str = ""
 
         if self._enabled:
             log.info(
@@ -270,6 +272,8 @@ class _BluetoothAudioManager:
             bt_device = self._resolve_output_device()
         if bt_device is not None:
             candidates.append(bt_device)
+        elif self._default_sink_name:
+            candidates.append(None)
         if config.AUDIO_OUTPUT_DEVICE is not None and config.AUDIO_OUTPUT_DEVICE not in candidates:
             candidates.append(config.AUDIO_OUTPUT_DEVICE)
         if None not in candidates:
@@ -299,22 +303,39 @@ class _BluetoothAudioManager:
                 "AudioPlayer: Bluetooth device %s is not connected",
                 target.display_name,
             )
+            self._default_sink_name = ""
+            self._default_sink_target_mac = ""
             return None
 
-        self._set_default_sink(target)
+        sink_name = self._set_default_sink(target)
 
-        match = self._find_portaudio_output(target)
+        match = _find_best_output_device(_bluetooth_match_tokens(target))
+        if match is None and sink_name:
+            self._default_sink_name = sink_name
+            self._default_sink_target_mac = target.mac
+            log.info(
+                "AudioPlayer: using system default output routed to %s for %s",
+                sink_name,
+                target.display_name,
+            )
+            return None
+
+        match = match or self._find_portaudio_output(target)
         if match is None:
             log.warning(
                 "AudioPlayer: Bluetooth device %s connected but no PortAudio output appeared",
                 target.display_name,
             )
+            self._default_sink_name = ""
+            self._default_sink_target_mac = ""
             return None
 
         index, name = match
         self._cached_output_index = index
         self._cached_output_name = name
         self._cached_target_mac = target.mac
+        self._default_sink_name = ""
+        self._default_sink_target_mac = ""
         log.info(
             "AudioPlayer: using Bluetooth output device %d (%s) for %s",
             index,
@@ -327,6 +348,8 @@ class _BluetoothAudioManager:
         self._cached_output_index = None
         self._cached_output_name = ""
         self._cached_target_mac = ""
+        self._default_sink_name = ""
+        self._default_sink_target_mac = ""
 
     def _device_index_exists(self, index: int) -> bool:
         try:
@@ -416,10 +439,10 @@ class _BluetoothAudioManager:
             time.sleep(0.5)
         return None
 
-    def _set_default_sink(self, device: _BluetoothDevice) -> None:
+    def _set_default_sink(self, device: _BluetoothDevice) -> str:
         sinks = self._list_pactl_sinks()
         if not sinks:
-            return
+            return ""
         tokens = set(_bluetooth_match_tokens(device))
         for sink_name in sinks:
             sink_lower = sink_name.lower()
@@ -431,7 +454,8 @@ class _BluetoothAudioManager:
                     sink_name,
                     device.display_name,
                 )
-                return
+                return sink_name
+        return ""
 
     def _list_pactl_sinks(self) -> list[str]:
         stdout = self._run_command(["pactl", "list", "short", "sinks"], timeout=5.0)
@@ -772,10 +796,12 @@ class AudioPlayer:
             try:
                 with self._bluetooth_audio._lock:
                     bt_device = self._bluetooth_audio._resolve_output_device()
-                if bt_device is None:
+                    default_sink_name = self._bluetooth_audio._default_sink_name
+                devices_to_try = [bt_device] if bt_device is not None else ([None] if default_sink_name else [])
+                if not devices_to_try:
                     raise sd.PortAudioError("Bluetooth output device not ready yet")
                 device, stream_sr, label = _resolve_output_stream_settings_for_devices(
-                    [bt_device],
+                    devices_to_try,
                     requested_samplerate=SPEECH_SAMPLE_RATE,
                     channels=config.AUDIO_OUTPUT_CHANNELS,
                     dtype="int16",
