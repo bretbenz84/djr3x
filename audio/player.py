@@ -251,6 +251,10 @@ class _BluetoothAudioManager:
         self._cached_target_mac: str = ""
         self._default_sink_name: str = ""
         self._default_sink_target_mac: str = ""
+        # Time-based short-circuit: if we successfully resolved within this
+        # window, skip re-running bluetoothctl (avoids spurious reconnects).
+        self._last_resolve_time: float = 0.0
+        self._resolve_cache_ttl: float = 15.0
 
         if self._enabled:
             log.info(
@@ -287,6 +291,14 @@ class _BluetoothAudioManager:
                 return cached
             self._clear_cache()
 
+        # Short-circuit: if we recently confirmed the default sink is set,
+        # skip the expensive bluetoothctl calls to avoid spurious reconnects.
+        if (
+            self._default_sink_name
+            and time.monotonic() - self._last_resolve_time < self._resolve_cache_ttl
+        ):
+            return None
+
         target = self._select_target_device()
         if target is None:
             log.warning("AudioPlayer: no paired Bluetooth audio sink matched %r", config.AUDIO_BLUETOOTH_DEVICE)
@@ -313,6 +325,7 @@ class _BluetoothAudioManager:
         if match is None and sink_name:
             self._default_sink_name = sink_name
             self._default_sink_target_mac = target.mac
+            self._last_resolve_time = time.monotonic()
             log.info(
                 "AudioPlayer: using system default output routed to %s for %s",
                 sink_name,
@@ -336,6 +349,7 @@ class _BluetoothAudioManager:
         self._cached_target_mac = target.mac
         self._default_sink_name = ""
         self._default_sink_target_mac = ""
+        self._last_resolve_time = time.monotonic()
         log.info(
             "AudioPlayer: using Bluetooth output device %d (%s) for %s",
             index,
@@ -350,6 +364,7 @@ class _BluetoothAudioManager:
         self._cached_target_mac = ""
         self._default_sink_name = ""
         self._default_sink_target_mac = ""
+        self._last_resolve_time = 0.0
 
     def _device_index_exists(self, index: int) -> bool:
         try:
@@ -811,21 +826,28 @@ class AudioPlayer:
                     log.info("AudioPlayer: Bluetooth keepalive attached to %s", label)
                     warned_waiting = False
 
+                _last_underflow_warn: list[float] = [0.0]
+
                 def _callback(outdata: np.ndarray, _frames: int, _time, status) -> None:
                     if status:
-                        log.warning("AudioPlayer Bluetooth keepalive status: %s", status)
+                        now = time.monotonic()
+                        if now - _last_underflow_warn[0] >= 10.0:
+                            log.warning("AudioPlayer Bluetooth keepalive status: %s", status)
+                            _last_underflow_warn[0] = now
                     outdata[:] = 0
                     if self._bluetooth_keepalive_stop.is_set():
                         raise sd.CallbackStop()
 
                 finished = threading.Event()
+                # BT A2DP has inherent latency; "high" prevents underflows in
+                # the keepalive stream without affecting audible output quality.
                 with sd.OutputStream(
                     device=device,
                     samplerate=stream_sr,
                     channels=config.AUDIO_OUTPUT_CHANNELS,
                     dtype="int16",
                     blocksize=config.SPEECH_OUTPUT_BLOCKSIZE,
-                    latency=config.SPEECH_OUTPUT_LATENCY,
+                    latency="high",
                     callback=_callback,
                     finished_callback=finished.set,
                 ):
