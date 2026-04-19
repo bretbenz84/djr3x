@@ -511,6 +511,9 @@ PIPER_SENTENCE_SILENCE = float(_optional("PIPER_SENTENCE_SILENCE", "0.0"))
 PIPER_LENGTH_SCALE = float(_optional("PIPER_LENGTH_SCALE", "1.0"))
 PIPER_NOISE_SCALE = float(_optional("PIPER_NOISE_SCALE", "0.667"))
 PIPER_NOISE_W = float(_optional("PIPER_NOISE_W", "0.8"))
+PIPER_PREBUFFER_SECONDS = float(
+    _optional("PIPER_PREBUFFER_SECONDS", "0.75" if PLATFORM == "pi" else "0.0")
+)
 
 XTTS_MODEL_DIR = Path(
     _optional("XTTS_MODEL_DIR", str(MODELS_DIR / "djrex_xtts"))

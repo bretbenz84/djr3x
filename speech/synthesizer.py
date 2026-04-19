@@ -227,6 +227,7 @@ class _PiperSynthesizer:
             chunks,
             cache_path=_cache_path(text),
             sample_rate=self._sample_rate,
+            prebuffer_seconds=config.PIPER_PREBUFFER_SECONDS,
         )
 
     def speak_stream(self, text_iter: Iterator[str], t0: float | None = None) -> None:
@@ -406,22 +407,61 @@ def _pipe_to_player(
     cache_path: Path | None,
     sample_rate: int,
     t0: float | None = None,
+    prebuffer_seconds: float = 0.0,
 ) -> None:
     accumulator: list[bytes] | None = [] if cache_path is not None else None
     first_chunk_logged = False
+    prebuffer: list[bytes] = []
+    prebuffered_bytes = 0
+    prebuffer_target_bytes = max(
+        0,
+        int(prebuffer_seconds * sample_rate * 2),
+    )
 
     try:
         for chunk in audio_chunks:
             if not chunk:
                 continue
+            chunk = _apply_gain(chunk)
+            if prebuffer_target_bytes > 0:
+                prebuffer.append(chunk)
+                prebuffered_bytes += len(chunk)
+                if accumulator is not None:
+                    accumulator.append(chunk)
+                if prebuffered_bytes < prebuffer_target_bytes:
+                    continue
+                if not first_chunk_logged:
+                    elapsed = f" [+{time.monotonic() - t0:.1f}s]" if t0 is not None else ""
+                    log.info(
+                        "Starting audio playback after %.2fs Piper prebuffer%s",
+                        prebuffered_bytes / (sample_rate * 2.0),
+                        elapsed,
+                    )
+                    first_chunk_logged = True
+                for buffered_chunk in prebuffer:
+                    player.feed_speech_chunk(buffered_chunk, sample_rate=sample_rate)
+                prebuffer.clear()
+                prebuffered_bytes = 0
+                prebuffer_target_bytes = 0
+                continue
             if not first_chunk_logged:
                 elapsed = f" [+{time.monotonic() - t0:.1f}s]" if t0 is not None else ""
                 log.info("First audio chunk playing%s", elapsed)
                 first_chunk_logged = True
-            chunk = _apply_gain(chunk)
             player.feed_speech_chunk(chunk, sample_rate=sample_rate)
             if accumulator is not None:
                 accumulator.append(chunk)
+        if prebuffer:
+            if not first_chunk_logged:
+                elapsed = f" [+{time.monotonic() - t0:.1f}s]" if t0 is not None else ""
+                log.info(
+                    "Starting audio playback with %.2fs buffered audio%s",
+                    prebuffered_bytes / (sample_rate * 2.0),
+                    elapsed,
+                )
+                first_chunk_logged = True
+            for buffered_chunk in prebuffer:
+                player.feed_speech_chunk(buffered_chunk, sample_rate=sample_rate)
     finally:
         player.end_speech()
         finished = player.wait_for_speech(timeout=30.0)
