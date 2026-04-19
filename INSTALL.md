@@ -1,10 +1,9 @@
 # DJ-R3X Installation Guide
 
 ## System Dependencies
-Install these with apt before setting up Python dependencies:
+Run the Pi bootstrap script:
 ```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y $(tr '\n' ' ' < requirements-raspberry-pi-apt.txt)
+./scripts/setup_pi.sh
 ```
 
 `pulseaudio-utils` provides `pactl`, which the Bluetooth audio path uses to
@@ -17,6 +16,7 @@ sudo reboot
 ```
 
 ## Python Dependencies
+If you prefer to run the Python steps manually after the script:
 ```bash
 cd ~/djr3x
 python3 -m venv venv
