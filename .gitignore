@@ -15,3 +15,4 @@ assets/face_debug/
 .VSCodeCounter/
 assets/models/djrex_xtts/model.pth
 assets/models/djrex_xtts/dataset.zip
+dataset/
