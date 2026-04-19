@@ -2403,15 +2403,14 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin, StateMachineId
         if face_thread.is_alive():
             self._wait_for_initial_wake_clip(initial_clip_done)
             filler = random.choice(_RECOGNITION_FILLER_LINES)
-            if face_thread.is_alive():
-                log.info("Wake greeting: first wake — face recognition filler %r", filler)
-                servo_stop = self._begin_speech(emotion="excited")
-                try:
-                    self._synthesizer.speak(filler)
-                except Exception:
-                    log.exception("Wake greeting: first wake filler TTS error")
-                finally:
-                    self._end_speech(servo_stop)
+            log.info("Wake greeting: first wake — face recognition filler %r", filler)
+            servo_stop = self._begin_speech(emotion="excited")
+            try:
+                self._synthesizer.speak(filler)
+            except Exception:
+                log.exception("Wake greeting: first wake filler TTS error")
+            finally:
+                self._end_speech(servo_stop)
 
         face_thread.join()
         self._wait_for_initial_wake_clip(initial_clip_done)
