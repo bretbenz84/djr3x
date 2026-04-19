@@ -219,12 +219,15 @@ python3 setup_assets.py
 ### Raspberry Pi — additional dependencies
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3-dev portaudio19-dev libportaudio2 libasound2-dev \
-  ffmpeg sox libsox-fmt-all git curl cmake
+sudo apt install -y $(tr '\n' ' ' < requirements-raspberry-pi-apt.txt)
 
 # Recommended Python install on Pi (uses piwheels for faster dlib installs)
 pip install -r requirements-raspberry-pi.txt
 ```
+
+For Bluetooth audio on the Pi, the important system packages are
+`pulseaudio-utils` for `pactl` and `libspa-0.2-bluetooth` for PipeWire's
+Bluetooth sink support.
 
 ### macOS (Apple Silicon) — additional dependencies
 ```bash

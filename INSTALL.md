@@ -4,21 +4,14 @@
 Install these with apt before setting up Python dependencies:
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y \
-  python3-dev \
-  python3-venv \
-  portaudio19-dev \
-  libportaudio2 \
-  libasound2-dev \
-  ffmpeg \
-  sox \
-  libsox-fmt-all \
-  git \
-  curl \
-  pipewire-alsa
+sudo apt install -y $(tr '\n' ' ' < requirements-raspberry-pi-apt.txt)
 ```
 
-Reboot after installing pipewire-alsa:
+`pulseaudio-utils` provides `pactl`, which the Bluetooth audio path uses to
+switch the PipeWire/Pulse default sink. `libspa-0.2-bluetooth` enables
+PipeWire's Bluetooth audio support.
+
+Reboot after installing the PipeWire packages:
 ```bash
 sudo reboot
 ```
