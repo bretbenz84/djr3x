@@ -23,6 +23,7 @@ Graceful degradation:
 from __future__ import annotations
 
 import base64
+import glob
 import logging
 import os
 import re
@@ -62,6 +63,17 @@ def _linux_device_candidates(source: str) -> list[tuple[int | str, str]]:
     if resolved.startswith("/dev/") and resolved != source:
         _add_path_candidate(resolved, f"{source} -> {resolved}")
     _add_path_candidate(source, source)
+
+    # Some Pi/OpenCV V4L2 builds refuse named `/dev/...` capture paths even
+    # when a udev alias points at the right camera, so fall back to probing
+    # real `/dev/videoN` nodes as numeric indices.
+    for path in sorted(glob.glob("/dev/video[0-9]*")):
+        _add_path_candidate(path, path)
+
+    # Final safety net when device nodes are not enumerable yet but V4L2
+    # indices still work.
+    for index in range(6):
+        _add(index, f"index {index}")
     return candidates
 
 
