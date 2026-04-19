@@ -142,13 +142,29 @@ def _print_banner(status: dict) -> None:
 
 def _register_signals(sm: StateMachine) -> None:
     """Route SIGINT (Ctrl-C) and SIGTERM to a clean state machine shutdown."""
+    interrupt_count = 0
+
     def _handler(signum: int, _frame) -> None:
+        nonlocal interrupt_count
         name = signal.Signals(signum).name
+        interrupt_count += 1
+        if interrupt_count > 1 and signum == signal.SIGINT:
+            log.warning("Second SIGINT received — forcing immediate exit")
+            raise KeyboardInterrupt
         log.info("Signal %s received — requesting shutdown", name)
         sm.request_shutdown()
 
     signal.signal(signal.SIGINT,  _handler)
     signal.signal(signal.SIGTERM, _handler)
+
+
+def _finish_startup_or_shutdown(sm: StateMachine, step_name: str) -> bool:
+    """Return True when startup should stop and the shutdown path should run."""
+    if not sm.shutdown_requested:
+        return False
+    log.info("Shutdown requested during %s — skipping remaining startup", step_name)
+    sm.run()
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -192,14 +208,20 @@ def main() -> None:
     #    complete before continuing.  Must run before sm.start() so the servo
     #    idle thread is not fighting the animation's arm movements.
     sm.play_startup_animation()
+    if _finish_startup_or_shutdown(sm, "startup animation"):
+        return
 
     # 4. Spoken intro through speech path — mouth LEDs and servo speak animation
     #    are active.  Must run before sm.start() so background threads don't
     #    compete for hardware.  Skipped gracefully if file is missing.
     sm.play_startup_intro()
+    if _finish_startup_or_shutdown(sm, "startup intro"):
+        return
 
     # 5. Warmup models and start all background threads
     sm.start()
+    if _finish_startup_or_shutdown(sm, "startup warmup"):
+        return
 
     # 6. Banner — print after startup warmup so camera/vision/TTS status is
     #    accurate rather than a pre-warmup snapshot.
@@ -208,6 +230,8 @@ def main() -> None:
     # 7. Startup chime — after sm.start() so the AudioPlayer OutputStream is
     #    running, before sm.run() so it plays before entering IDLE/wake-word
     sm.play_startup_chime()
+    if _finish_startup_or_shutdown(sm, "startup chime"):
+        return
 
     # 8. Run — blocks until SHUTDOWN state halts the OS or an exception escapes
     sm.run()

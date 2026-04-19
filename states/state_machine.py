@@ -940,6 +940,8 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         log.info("StateMachine: entering main loop (state=%s)", self._state.value)
         try:
             while True:
+                if self._shutdown_event.is_set() and self._state != State.SHUTDOWN:
+                    self._transition_to(State.SHUTDOWN)
                 if self._state == State.IDLE:
                     self._run_idle()
                 elif self._state == State.QUIET:
@@ -979,6 +981,33 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         log.info("StateMachine: shutdown requested externally")
         self._shutdown_event.set()
         self._wake_event.set()   # unblock _run_idle() / _run_quiet() if waiting
+        threading.Thread(
+            target=self._interrupt_for_shutdown,
+            daemon=True,
+            name="djr3x-shutdown-interrupt",
+        ).start()
+
+    @property
+    def shutdown_requested(self) -> bool:
+        """True once an external or internal shutdown has been requested."""
+        return self._shutdown_event.is_set()
+
+    def _interrupt_for_shutdown(self) -> None:
+        """Best-effort cancellation of playback/animations during shutdown."""
+        try:
+            self._player.stop_speech()
+        except Exception:
+            log.exception("StateMachine: failed stopping speech during shutdown request")
+
+        try:
+            self._player.stop_music()
+        except Exception:
+            log.exception("StateMachine: failed stopping music during shutdown request")
+
+        try:
+            self._animations.cancel()
+        except Exception:
+            log.exception("StateMachine: failed cancelling animation during shutdown request")
 
     def play_startup_animation(self) -> None:
         """Start startup music and the boot animation concurrently, then block
@@ -1015,6 +1044,10 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
         else:
             log.info("Startup animation complete.")
 
+        if self.shutdown_requested:
+            log.info("Startup animation interrupted by shutdown request")
+            return
+
         if _music_path is not None:
             music_done = self._player.wait_for_music(timeout=120.0)
             if music_done:
@@ -1024,9 +1057,17 @@ class StateMachine(StateMachineMediaMixin, StateMachineInfoMixin):
                 self._player.stop_music()
 
         # Ensure face recognition models are fully loaded before continuing.
-        face_warmup_thread.join(timeout=15.0)
+        warmup_deadline = time.monotonic() + 15.0
+        while face_warmup_thread.is_alive() and not self.shutdown_requested:
+            remaining = warmup_deadline - time.monotonic()
+            if remaining <= 0.0:
+                break
+            face_warmup_thread.join(timeout=min(0.1, remaining))
         if face_warmup_thread.is_alive():
-            log.warning("Face recognizer warmup timed out — recognition may be unavailable.")
+            if self.shutdown_requested:
+                log.info("Face recognizer warmup still running during shutdown request — skipping wait")
+            else:
+                log.warning("Face recognizer warmup timed out — recognition may be unavailable.")
         else:
             log.info("Face recognizer warmup complete.")
 
