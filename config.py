@@ -423,7 +423,7 @@ WHISPER_LANGUAGE = _optional("WHISPER_LANGUAGE", "en")
 
 # Whisper-specific recording limits (tighter than the generic caps in the
 # "recording / wake word" section above — shorter recording = lower latency).
-WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",       "15.0"))
+WHISPER_MAX_RECORD_SECONDS       = float(_optional("WHISPER_MAX_RECORD_SECONDS",        "8.0"))
 
 # Two-phase silence detection in transcriber.py:
 #

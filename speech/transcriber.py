@@ -362,22 +362,19 @@ class Transcriber:
                             # In Phase 1, always bust silence (silence counter is
                             # unused in Phase 1, but keep it clean).
                             #
-                            # In Phase 2, only clearly voiced audio should reset the
-                            # silence countdown. A short fresh run of consecutive
-                            # above-threshold chunks also counts as resumed speech so
-                            # a quiet follow-up word after a brief pause is not lost.
-                            #
-                            # Once the silence clock has already started, weak/noisy
-                            # chunks must not freeze it in place. They are still
-                            # recorded, but the countdown keeps advancing until speech
-                            # clearly returns.
+                            # In Phase 2, only clearly voiced audio (above
+                            # silence_reset_threshold) should reset the silence
+                            # countdown.  In noisy rooms the calibrated floor sits
+                            # right at speech_detect_threshold, so even steady ambient
+                            # noise keeps consecutive_speech ≥ TRANSCRIBE_MIN_SPEECH_CHUNKS.
+                            # Allowing that condition to reset silence_chunks caused the
+                            # recorder to run all the way to WHISPER_MAX_RECORD_SECONDS
+                            # every time.  We intentionally removed that branch — real
+                            # resumed speech will exceed silence_reset_threshold; noise
+                            # will not, so the countdown continues unimpeded.
                             if (
                                 not speech_started
                                 or rms >= silence_reset_threshold
-                                or (
-                                    speech_started
-                                    and consecutive_speech >= config.TRANSCRIBE_MIN_SPEECH_CHUNKS
-                                )
                             ):
                                 silence_chunks = 0
                             elif speech_started and silence_chunks > 0:
