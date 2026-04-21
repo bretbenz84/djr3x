@@ -663,6 +663,34 @@ _ANGRY_OFF_LINES: tuple[str, ...] = (
     "All right, truce accepted. Grumpy mode disengaged. Try not to earn it again.",
 )
 
+_GREETING_FILLERS: tuple[str, ...] = (
+    "Uh... uh...",
+    "One sec.",
+    "Hold on.",
+    "Processing... processing...",
+    "Just a moment.",
+    "Let me think...",
+    "Give me a beat.",
+)
+
+# Enrollment confirmation — played after a new person gives their name.
+# Use {name} as the placeholder; call .format(name=name) on the picked line.
+_ENROLLMENT_CONFIRMATION_LINES: tuple[str, ...] = (
+    "{name}! Great — now I have to remember you. I'll add you to my files.",
+    "{name}! Officially logged. Come back anytime — I'll pretend to be thrilled.",
+    "Nice to meet you, {name}! That face is now permanently in my memory banks. "
+    "You're welcome. Or I'm sorry.",
+    "Got it. I will remember you now, {name}. Probably. Don't test me on it.",
+    "{name}! Filed, catalogued, and stored. You are now officially someone I know. "
+    "Congratulations on that.",
+    "Right then, {name}. You're in the system. "
+    "Try not to do anything that makes me regret this.",
+    "{name} — logged! I'll know you next time. "
+    "Unless my motivator glitches again, in which case I apologise in advance.",
+    "Welcome to the databanks, {name}. "
+    "It's a mess in there but your face now has a spot. Very exclusive.",
+)
+
 _OPINION_TOPIC_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("appearance", ("shirt", "clothes", "clothing", "outfit", "wearing", "look", "looks", "style")),
     ("music", ("music", "song", "songs", "playlist", "track", "tracks", "album")),
