@@ -1,5 +1,8 @@
 # DJ-R3X Controller
 
+## No Longer Developed
+This project has been abandoned so I can work on a newer version here. https://github.com/bretbenz84/djr3x-v2
+
 An interactive animatronic controller for a DJ-R3X (Rex) build, running on Raspberry Pi 4 or macOS Apple Silicon.
 Rex responds to voice commands, engages in AI-powered conversation, reacts to music,
 uses computer vision to greet and roast people, and remembers who you are.
